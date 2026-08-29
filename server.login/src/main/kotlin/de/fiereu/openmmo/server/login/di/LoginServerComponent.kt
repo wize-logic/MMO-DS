@@ -5,6 +5,7 @@ import dagger.Component
 import de.fiereu.openmmo.server.login.LoginServer
 import de.fiereu.openmmo.server.login.auth.AdminAccountBootstrap
 import de.fiereu.openmmo.server.login.auth.JooqUserStore
+import de.fiereu.openmmo.server.login.auth.RememberMeTokens
 import de.fiereu.openmmo.server.login.auth.UserService
 import de.fiereu.openmmo.server.login.config.LoginServerConfig
 import de.fiereu.openmmo.server.login.db.DatabaseBootstrap
@@ -25,6 +26,8 @@ interface LoginServerComponent {
   fun adminAccountBootstrap(): AdminAccountBootstrap
 
   fun users(): UserService
+
+  fun rememberMeTokens(): RememberMeTokens
 
   /** The store itself, because rewriting old rows is a thing only the database-backed one does. */
   fun userUpgrade(): JooqUserStore

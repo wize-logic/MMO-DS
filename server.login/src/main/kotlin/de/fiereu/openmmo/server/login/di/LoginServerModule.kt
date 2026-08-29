@@ -5,12 +5,12 @@ import com.zaxxer.hikari.HikariDataSource
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
-import de.fiereu.openmmo.common.auth.RememberMeTokenIssuer
-import de.fiereu.openmmo.common.auth.RememberMeTokenVerifier
 import de.fiereu.openmmo.common.auth.SessionTokenIssuer
 import de.fiereu.openmmo.common.io.PemKeyLoader
 import de.fiereu.openmmo.common.io.pemStream
+import de.fiereu.openmmo.server.login.auth.JooqRememberMeTokens
 import de.fiereu.openmmo.server.login.auth.JooqUserStore
+import de.fiereu.openmmo.server.login.auth.RememberMeTokens
 import de.fiereu.openmmo.server.login.auth.UserService
 import de.fiereu.openmmo.server.login.config.GameServerEndpointConfig
 import de.fiereu.openmmo.server.login.config.LoginServerConfig
@@ -34,6 +34,8 @@ abstract class LoginServerModule {
 
   @Binds @Singleton abstract fun userService(impl: JooqUserStore): UserService
 
+  @Binds @Singleton abstract fun rememberMeTokens(impl: JooqRememberMeTokens): RememberMeTokens
+
   companion object {
     @Provides
     @Singleton
@@ -49,16 +51,6 @@ abstract class LoginServerModule {
     @Singleton
     fun tokenIssuer(config: LoginServerConfig): SessionTokenIssuer =
         SessionTokenIssuer(config.sessionSecret)
-
-    @Provides
-    @Singleton
-    fun rememberMeIssuer(config: LoginServerConfig): RememberMeTokenIssuer =
-        RememberMeTokenIssuer(config.sessionSecret)
-
-    @Provides
-    @Singleton
-    fun rememberMeVerifier(config: LoginServerConfig): RememberMeTokenVerifier =
-        RememberMeTokenVerifier(config.sessionSecret, config.rememberMeMaxAge)
 
     @Provides
     @Singleton

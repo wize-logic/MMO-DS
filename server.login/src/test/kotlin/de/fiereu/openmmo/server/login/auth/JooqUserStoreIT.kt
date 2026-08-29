@@ -19,6 +19,14 @@ class JooqUserStoreIT :
       val container = PostgreSQLContainer<Nothing>("postgres:18")
       lateinit var store: JooqUserStore
       lateinit var db: org.jooq.DSLContext
+      val config =
+          de.fiereu.openmmo.server.login.config.LoginServerConfig(
+              host = "127.0.0.1",
+              port = 0,
+              checksumSize = 16,
+              rootKeyResource = "login.private.pem",
+              sessionSecret = ByteArray(32) { 1 },
+          )
 
       /** What is actually in the column, which is the thing these tests are about. */
       fun storedHashOf(username: String): String =
@@ -120,6 +128,27 @@ class JooqUserStoreIT :
       test("addUser returns the generated id and getUserId finds it") {
         val id = store.addUser("Alice", "pw")
         store.getUserId("alice") shouldBe id
+      }
+
+      /** A row rather than a signature, which is what makes it revocable and unmintable. */
+      test("a remembered login is spent when it is used and can be revoked") {
+        val tokens = JooqRememberMeTokens(db, config, Dispatchers.IO)
+        val id = store.addUser("Janine", "kunoichi")
+
+        val token = tokens.issue(id)
+        tokens.consume(token) shouldBe id
+        // Spent, so a copy somebody else kept is worth nothing.
+        tokens.consume(token) shouldBe null
+
+        val kept = tokens.issue(id)
+        tokens.revokeAll(id) shouldBe 1
+        tokens.consume(kept) shouldBe null
+      }
+
+      test("a remembered login the server never issued is not accepted") {
+        val tokens = JooqRememberMeTokens(db, config, Dispatchers.IO)
+
+        tokens.consume(ByteArray(RememberMeTokens.TOKEN_BYTES) { 7 }) shouldBe null
       }
 
       test("CreateAccount inserts a user who can then authenticate") {

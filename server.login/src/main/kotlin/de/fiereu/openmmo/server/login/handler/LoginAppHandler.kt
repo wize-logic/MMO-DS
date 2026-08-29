@@ -3,8 +3,6 @@ package de.fiereu.openmmo.server.login.handler
 import de.fiereu.network.PacketEvent
 import de.fiereu.network.Side
 import de.fiereu.network.coroutines.CoroutineProtocolHandler
-import de.fiereu.openmmo.common.auth.RememberMeTokenIssuer
-import de.fiereu.openmmo.common.auth.RememberMeTokenVerifier
 import de.fiereu.openmmo.common.auth.SessionTokenIssuer
 import de.fiereu.openmmo.common.enums.LoginState
 import de.fiereu.openmmo.net.login.LoginProtocol
@@ -19,6 +17,7 @@ import de.fiereu.openmmo.net.login.packets.RequestGameServerListPacket
 import de.fiereu.openmmo.net.login.packets.SentCredentialsPacket
 import de.fiereu.openmmo.net.login.packets.TokenLogin
 import de.fiereu.openmmo.server.login.auth.LoginAttemptLimiter
+import de.fiereu.openmmo.server.login.auth.RememberMeTokens
 import de.fiereu.openmmo.server.login.auth.UserService
 import de.fiereu.openmmo.server.login.catalog.GameServerCatalog
 import de.fiereu.openmmo.server.login.session.AUTHED_USER_ID
@@ -34,8 +33,7 @@ constructor(
     private val users: UserService,
     private val catalog: GameServerCatalog,
     private val tokenIssuer: SessionTokenIssuer,
-    private val rememberMeIssuer: RememberMeTokenIssuer,
-    private val rememberMeVerifier: RememberMeTokenVerifier,
+    private val rememberMe: RememberMeTokens,
     private val attempts: LoginAttemptLimiter,
     scope: CoroutineScope,
 ) : CoroutineProtocolHandler<LoginProtocol>(LoginProtocol, Side.SERVER, scope) {
@@ -76,19 +74,18 @@ constructor(
     attempts.recordSuccess(username, address)
     event.session.attributes[AUTHED_USER_ID] = result.userId
     if (method.stayLoggedIn) {
-      sendRememberMeToken(event, result.userId, result.tokenEpoch, username)
+      sendRememberMeToken(event, result.userId, username)
     }
     event.session.send(LoginResponsePacket(result.state))
   }
 
   private suspend fun onTokenLogin(event: PacketEvent<LoginRequestPacket>, method: TokenLogin) {
     val username = event.packet.username
-    val token = rememberMeVerifier.verify(method.token)
-    val user = token?.let { users.findForToken(it.userId) }
-    if (token == null ||
-        user == null ||
-        user.tokenEpoch != token.epoch ||
-        !user.username.equals(username, ignoreCase = true)) {
+    // Spending it is the lookup, so the token that arrived is used up whatever happens next. A copy
+    // somebody else took stops working the moment the owner signs in, and the other way round.
+    val userId = rememberMe.consume(method.token)
+    val user = userId?.let { users.findForToken(it) }
+    if (user == null || !user.username.equals(username, ignoreCase = true)) {
       log.warn { "Rejected token login for $username" }
       event.session.send(LoginResponsePacket(LoginState.INVALID_SAVED_CREDENTIALS))
       return
@@ -96,7 +93,7 @@ constructor(
     log.info { "Token login for ${user.displayName}: AUTHED" }
     event.session.attributes[AUTHED_USER_ID] = user.id
     // Sliding expiry, so a player who keeps logging in never has to type a password again.
-    sendRememberMeToken(event, user.id, user.tokenEpoch, user.displayName)
+    sendRememberMeToken(event, user.id, user.displayName)
     event.session.send(LoginResponsePacket(LoginState.AUTHED))
   }
 
@@ -110,14 +107,12 @@ constructor(
         else -> remote.toString()
       }
 
-  private fun sendRememberMeToken(
+  private suspend fun sendRememberMeToken(
       event: PacketEvent<LoginRequestPacket>,
       userId: Int,
-      epoch: Int,
       displayName: String,
   ) {
-    val issued = rememberMeIssuer.issue(userId, epoch)
-    event.session.send(SentCredentialsPacket(displayName, issued.bytes))
+    event.session.send(SentCredentialsPacket(displayName, rememberMe.issue(userId)))
   }
 
   private fun onServerListRequest(event: PacketEvent<RequestGameServerListPacket>) {
