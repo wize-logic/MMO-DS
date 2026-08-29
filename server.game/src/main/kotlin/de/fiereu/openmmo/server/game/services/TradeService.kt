@@ -35,10 +35,13 @@ private const val TABLE_IDLE_MS = 180_000L
 /** The official invite packet carries a request type; 0 is a duel, so a trade offer is 1. */
 private const val REQUEST_TYPE_TRADE: Byte = 1
 
+/** The widest trade scene message the receiving client will accept. */
+private const val MAX_TRADE_COMM_BYTES = 4096
+
 /**
- * Both refusals at the open say the same thing on purpose: which of the two, a chair already
- * taken, or a party that emptied between the offer and the answer, is the other player's
- * business and not the wire's.
+ * Both refusals at the open say the same thing on purpose: which of the two, a chair already taken,
+ * or a party that emptied between the offer and the answer, is the other player's business and not
+ * the wire's.
  */
 private const val TRADE_OPEN_FAILED = "The trade could not open."
 
@@ -54,13 +57,20 @@ private data class PendingOffer(
 )
 
 /**
- * One open trade table. [selected] holds each side's chosen party monster by its id, not its
- * slot, so a party reorder between selection and settlement is caught instead of trading the
- * wrong monster.
+ * One open trade table. [selected] holds each side's chosen party monster by its id, not its slot,
+ * so a party reorder between selection and settlement is caught instead of trading the wrong
+ * monster.
  */
 private class TradeTable(val aId: Long, val bId: Long) {
   val selected = ConcurrentHashMap<Long, Long>()
   val confirmed = ConcurrentHashMap.newKeySet<Long>()
+
+  /**
+   * Held while a settlement is in flight, so exactly one runs. Both sides confirming at once is a
+   * read and then a call, and the two arrive on different threads: both settled, the store refused
+   * the second, and its refusal was what the players saw.
+   */
+  val settling = java.util.concurrent.atomic.AtomicBoolean(false)
 
   @Volatile var lastTouch: Long = System.currentTimeMillis()
 
@@ -179,6 +189,14 @@ constructor(
     val charId = event.session.attributes[PLAYER_STATE]?.characterId ?: return
     val table = tables[charId] ?: return
     val peerId = table.peerOf(charId) ?: return
+    // The client refuses a message past its own buffer, so a wider one is undeliverable anyway.
+    if (event.packet.payload.size > MAX_TRADE_COMM_BYTES) {
+      log.warn {
+        "char=$charId relayed ${event.packet.payload.size} trade bytes, past the engine's own" +
+            " $MAX_TRADE_COMM_BYTES, dropped"
+      }
+      return
+    }
     table.touch()
     sessions.getByCharacterId(peerId)?.send(event.packet)
   }
@@ -274,6 +292,9 @@ constructor(
     val table = TradeTable(aId, bId)
     tables[aId] = table
     tables[bId] = table
+    // Neither seat may move a monster between containers while the table stands.
+    seated(aId, true)
+    seated(bId, true)
     // Role 0 is the chair whose ask opened the table; the engine scene answers it as its comm
     // net id, and net id 0 is the side the official client's table treats as the exchange's server.
     aSession.send(
@@ -332,14 +353,24 @@ constructor(
   }
 
   /**
-   * Both sides confirmed the pair of monsters as they stand. Re-read both from the cache by id,
-   * a selection is only a claim until here, then swap in place on one side, then the other,
-   * and undo the first if the second refuses.
+   * Both sides confirmed the pair of monsters as they stand. Re-read both from the cache by id, a
+   * selection is only a claim until here, then swap in place on one side, then the other, and undo
+   * the first if the second refuses.
    */
   private suspend fun settle(table: TradeTable) {
+    if (!table.settling.compareAndSet(false, true)) return
+    try {
+      settleOnce(table)
+    } finally {
+      table.settling.set(false)
+    }
+  }
+
+  private suspend fun settleOnce(table: TradeTable) {
     val aMonIdPicked = table.selected[table.aId]
     val bMonIdPicked = table.selected[table.bId]
-    // The table stays open: the official client's scene walks straight back to it for the next trade, and
+    // The table stays open: the official client's scene walks straight back to it for the next
+    // trade, and
     // the relay under that walk has to stay live. Only a cancel, a disconnect or the idle
     // sweep closes a table, but the agreement is spent now, before anything can re-read it.
     table.selected.clear()
@@ -414,6 +445,13 @@ constructor(
   private fun close(table: TradeTable) {
     tables.remove(table.aId, table)
     tables.remove(table.bId, table)
+    seated(table.aId, false)
+    seated(table.bId, false)
+  }
+
+  /** Mark a seat as at a table, or no longer at one, wherever its session still is. */
+  private fun seated(charId: Long, at: Boolean) {
+    sessions.getByCharacterId(charId)?.attributes?.get(PLAYER_STATE)?.atTradeTable = at
   }
 
   /** Close any table nobody has spoken at. Both chairs are told, and both are free again. */

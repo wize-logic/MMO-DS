@@ -2,6 +2,9 @@ package de.fiereu.openmmo.net.game.packets
 
 import de.fiereu.bytecodec.*
 
+/** How many events are reserved up front. The frame is the real bound. */
+private const val MAX_RESERVED_EVENTS = 256
+
 data class InputEventSample(
     val type: Byte,
     val timestamp: Long,
@@ -23,8 +26,11 @@ private val EventsCodec: Codec<List<InputEventSample>> =
       override fun read(buf: ReadBuffer): List<InputEventSample> {
         val count = S16LE.read(buf).toInt()
         if (count == 0) return emptyList()
+        // Signed on the wire. A negative count reached ArrayList as an illegal capacity, and a
+        // positive one reserved all of it before a single event was read.
+        if (count < 0) throw MalformedPacketException("negative event count: $count")
         var previous = S64LE.read(buf)
-        val result = ArrayList<InputEventSample>(count)
+        val result = ArrayList<InputEventSample>(count.coerceAtMost(MAX_RESERVED_EVENTS))
         for (i in 0 until count) {
           val type = S8.read(buf)
           val delta = S16LE.read(buf).toInt()

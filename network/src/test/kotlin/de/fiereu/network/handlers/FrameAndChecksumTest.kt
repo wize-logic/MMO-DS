@@ -9,6 +9,7 @@ import io.kotest.matchers.shouldBe
 import io.netty.buffer.ByteBuf
 import io.netty.buffer.Unpooled
 import io.netty.channel.embedded.EmbeddedChannel
+import java.util.concurrent.TimeUnit
 
 private fun EmbeddedChannel.drainOutbound(): ByteBuf {
   val out = Unpooled.buffer()
@@ -30,6 +31,32 @@ private fun rootCause(t: Throwable): Throwable {
 
 class FrameAndChecksumTest :
     FunSpec({
+      /**
+       * The limiter answers by not reading rather than by refusing, so nothing is dropped and
+       * nobody is disconnected for being quick.
+       */
+      test("InboundRateLimiter stops reading when the burst is spent, and reads again after") {
+        var now = 0L
+        val channel = EmbeddedChannel(InboundRateLimiter(burst = 2, perSecond = 1) { now })
+
+        channel.writeInbound("one")
+        channel.config().isAutoRead shouldBe true
+
+        // The second frame empties the bucket, so the channel stops asking the socket for more.
+        channel.writeInbound("two")
+        channel.config().isAutoRead shouldBe false
+
+        // Both were still delivered. Holding the read back is not dropping the packet.
+        channel.readInbound<String>() shouldBe "one"
+        channel.readInbound<String>() shouldBe "two"
+
+        now += 1_000_000_000L
+        channel.advanceTimeBy(1, TimeUnit.SECONDS)
+        channel.runScheduledPendingTasks()
+        channel.config().isAutoRead shouldBe true
+
+        channel.finishAndReleaseAll()
+      }
       test("PacketFrameEncoder writes LE length prefix including itself") {
         val channel = EmbeddedChannel(PacketFrameEncoder())
         channel.writeOutbound(

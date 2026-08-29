@@ -132,6 +132,51 @@ class ChatServiceTest :
         }
       }
 
+      /**
+       * Two of the types are the voice this server speaks in, and the codec short-forms both with
+       * no sender field, so a line sent on one arrived looking like a real announcement.
+       */
+      test("a client cannot speak in the server's own voice") {
+        runTest {
+          val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+          val red = store.createCharacter(1, "Red", CharacterGender.MALE, Region.SINNOH).info.id
+          val blue = store.createCharacter(2, "Blue", CharacterGender.FEMALE, Region.SINNOH).info.id
+          val a = FakeSession(characterId = red)
+          val b = FakeSession(characterId = blue)
+          val registry = SessionRegistry()
+          registry.bindCharacter(a, red)
+          registry.bindCharacter(b, blue)
+          val chat = ChatService(ChatCommandService(store, setOf(HelpCommand())), registry, store)
+
+          // 16 and 17 are the server's own channels, 18 is the battle one, which is scoped by its
+          // own packet and would arrive here only to get around that.
+          for (mode in listOf<Byte>(16, 17, 18)) {
+            chat.onSend(
+                a, ChatMessageSendPacket(mode = mode, target = "free items!", message = null))
+          }
+
+          a.lines() shouldBe emptyList()
+          b.lines() shouldBe emptyList()
+        }
+      }
+
+      /** A line is copied to every session on its channel, and the codec has no ceiling. */
+      test("a line longer than the client can type is cut to what it can") {
+        runTest {
+          val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+          val red = store.createCharacter(1, "Red", CharacterGender.MALE, Region.SINNOH).info.id
+          val a = FakeSession(characterId = red)
+          val registry = SessionRegistry()
+          registry.bindCharacter(a, red)
+          val chat = ChatService(ChatCommandService(store, setOf(HelpCommand())), registry, store)
+
+          chat.onSend(
+              a, ChatMessageSendPacket(mode = 6, target = "A".repeat(30_000), message = null))
+
+          a.lines().single().message.length shouldBe 128
+        }
+      }
+
       test("a whisper to nobody online is a notice, not a broadcast") {
         runTest {
           val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)

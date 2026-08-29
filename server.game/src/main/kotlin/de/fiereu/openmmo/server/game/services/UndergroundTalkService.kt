@@ -14,6 +14,9 @@ import javax.inject.Singleton
 
 private val log = KotlinLogging.logger {}
 
+/** The widest conversation body the receiving client will accept. */
+private const val MAX_UG_TALK_BYTES = 512
+
 /** One live conversation: who pressed A, and who was faced. */
 private class Conversation(val initiatorId: Long, val responderId: Long) {
   fun peerOf(charId: Long): Long? =
@@ -140,6 +143,15 @@ constructor(
   private fun relay(charId: Long, packet: UndergroundTalkPacket) {
     val peerId = talking[charId]?.peerOf(charId) ?: return
     if (packet.payload.isEmpty()) return
+    // The client refuses a body past its own buffer whole, so a wider one is undeliverable before
+    // it leaves and relaying it only spends the peer's parser.
+    if (packet.payload.size > MAX_UG_TALK_BYTES) {
+      log.warn {
+        "char=$charId relayed ${packet.payload.size} Underground bytes, past the engine's own" +
+            " $MAX_UG_TALK_BYTES, dropped"
+      }
+      return
+    }
     sessions
         .getByCharacterId(peerId)
         ?.send(UndergroundTalkPacket(UndergroundTalkPacket.KIND_DATA, charId, packet.payload))

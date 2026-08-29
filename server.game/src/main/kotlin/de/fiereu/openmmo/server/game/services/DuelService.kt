@@ -23,7 +23,12 @@ private val log = KotlinLogging.logger {}
 /** How long a challenge stands before it lapses. */
 private const val INVITE_TTL_MS = 60_000L
 
-/** The three answers the challenger can hear. The official client's byte has no measured meaning. */
+/** The widest link battle blob the receiving client will accept. */
+private const val MAX_LINK_BLOB_BYTES = 512
+
+/**
+ * The three answers the challenger can hear. The official client's byte has no measured meaning.
+ */
 private const val OUTCOME_DECLINED: Byte = 0
 private const val OUTCOME_ACCEPTED: Byte = 1
 private const val OUTCOME_LAPSED: Byte = 2
@@ -36,8 +41,8 @@ private data class PendingInvite(
 )
 
 /**
- * One running native link battle: two clients whose engines compute the fight between them,
- * and a server that only relays.
+ * One running native link battle: two clients whose engines compute the fight between them, and a
+ * server that only relays.
  */
 private class LinkBattle(
     val id: Int,
@@ -151,9 +156,8 @@ constructor(
   }
 
   /**
-   * One blob of a running link battle. The payload is the engine's own, a BattleMessageInfo
-   * and its body, or a sync tag, and is relayed byte for byte to the peer without being
-   * read.
+   * One blob of a running link battle. The payload is the engine's own, a BattleMessageInfo and its
+   * body, or a sync tag, and is relayed byte for byte to the peer without being read.
    */
   fun onLinkData(event: PacketEvent<LinkBattleDataPacket>) {
     val session = event.session
@@ -161,6 +165,7 @@ constructor(
     val battle = running[charId] ?: return
     val packet = event.packet
     if (packet.battleId != battle.id) return
+    if (tooWide(charId, packet.payload.size)) return
     val peerId = battle.peerOf(charId) ?: return
     when (packet.kind) {
       LinkBattleDataPacket.KIND_RESULT -> {
@@ -179,6 +184,19 @@ constructor(
   }
 
   /** True while this character is inside a native link battle. */
+  /**
+   * Whether a blob is wider than the peer could hold anyway. The client refuses a body past its own
+   * buffer whole, so relaying more is the peer's bandwidth and parser spent on something dropped.
+   */
+  private fun tooWide(charId: Long, bytes: Int): Boolean {
+    if (bytes <= MAX_LINK_BLOB_BYTES) return false
+    log.warn {
+      "char=$charId relayed $bytes link battle bytes, past the engine's own" +
+          " $MAX_LINK_BLOB_BYTES, dropped"
+    }
+    return true
+  }
+
   fun inLinkBattle(charId: Long): Boolean = running.containsKey(charId)
 
   /** Open a link battle between two players who have already agreed to one. */

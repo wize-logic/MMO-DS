@@ -57,6 +57,12 @@ constructor(
         if (existing == null) {
           linkStore.create(charId, self.info.name, resolved.first, resolved.second)
         } else {
+          // Adding to a group that already exists is the captain's, the same as kicking. Without
+          // this any member could fill somebody else's group with strangers.
+          if (existing.leaderId != charId) {
+            log.info { "LinkInvite refused: char=$charId is not the captain" }
+            return
+          }
           if (existing.members.size >= LINK_CAP) {
             log.info { "LinkInvite refused: full" }
             return

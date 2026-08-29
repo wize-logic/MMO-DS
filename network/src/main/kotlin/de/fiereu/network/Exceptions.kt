@@ -25,6 +25,9 @@ open class HandshakeException(message: String, cause: Throwable? = null) :
 class StaleClientHelloException(val skewSeconds: Long) :
     HandshakeException("ClientHello timestamp drift: ${skewSeconds}s")
 
+class AlreadyGreetedException :
+    HandshakeException("a second ClientHello on a session that has already been answered")
+
 class InvalidServerSignatureException :
     HandshakeException("ServerHello signature does not match trusted root key")
 

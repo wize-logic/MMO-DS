@@ -11,6 +11,9 @@ import io.netty.channel.ChannelPromise
 
 private val log = KotlinLogging.logger {}
 
+/** Frames with no registered codec one session may send before it is closed. */
+private const val MAX_UNKNOWN_OPCODES = 16
+
 abstract class ProtocolHandler(
     val protocol: Protocol,
     val side: Side,
@@ -18,6 +21,9 @@ abstract class ProtocolHandler(
 
   protected lateinit var session: SessionContext
     private set
+
+  /** Frames this side had no codec for, counted so a peer cannot send them without end. */
+  private var unknownOpcodes = 0
 
   override fun handlerAdded(ctx: ChannelHandlerContext) {
     val attached =
@@ -54,7 +60,7 @@ abstract class ProtocolHandler(
       val opcode = (msg.readByte().toInt() and 0xFF).toUByte()
       val registration = protocol.incomingRegistration(side, opcode)
       if (registration == null) {
-        log.error { "No incoming codec for opcode 0x${opcode.toString(16)} on $side" }
+        onUnknownOpcode(opcode)
         return
       }
       val packet = decode(registration.codec, msg)
@@ -101,6 +107,21 @@ abstract class ProtocolHandler(
 
   override fun exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable) {
     onErrorInternal(ctx, cause)
+  }
+
+  /**
+   * A frame whose opcode this side has no codec for. It used to be one ERROR line and a return,
+   * which made three bytes the cheapest way to write to the log without authenticating.
+   */
+  private fun onUnknownOpcode(opcode: UByte) {
+    unknownOpcodes++
+    val where = "opcode 0x${opcode.toString(16)} on $side from ${session.remoteAddress}"
+    if (unknownOpcodes == 1) log.warn { "No incoming codec for $where" }
+    else log.debug { "No incoming codec for $where ($unknownOpcodes so far)" }
+    if (unknownOpcodes >= MAX_UNKNOWN_OPCODES) {
+      log.warn { "Closing ${session.remoteAddress}: $unknownOpcodes frames it has no codec for" }
+      session.close { "too many unknown opcodes" }
+    }
   }
 
   private fun onErrorInternal(ctx: ChannelHandlerContext, cause: Throwable) {

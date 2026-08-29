@@ -34,29 +34,36 @@ data class PlayerState(
      */
     @field:Volatile var strengthActive: Boolean = false,
     /**
-     * Where this visit's Strength boulders sit, keyed by the map's local object id. Empty
-     * means every boulder is where the map put it.
+     * Where this visit's Strength boulders sit, keyed by the map's local object id. Empty means
+     * every boulder is where the map put it.
      */
     val boulderTiles: MutableMap<Int, Pair<Int, Int>> = ConcurrentHashMap(),
     /** Trusts one source tile after scripted movement. */
     @field:Volatile var acceptNextMoveSource: Boolean = false,
     /**
-     * A script is warping and will run the destination's entry scripts itself. The arrival
-     * must not start a second copy, which [inDialog] alone cannot prevent because a stray
-     * dialog packet clears it while the script is parked on the map load.
+     * Whether this session is sitting at a trade table. While it is,
+     * [de.fiereu.openmmo.server.game.services.PokemonStorageService] refuses to move a monster
+     * between containers, because a move landing between the two halves of a settlement takes back
+     * the monster the first half just handed over.
+     */
+    @field:Volatile var atTradeTable: Boolean = false,
+    /**
+     * A script is warping and will run the destination's entry scripts itself. The arrival must not
+     * start a second copy, which [inDialog] alone cannot prevent because a stray dialog packet
+     * clears it while the script is parked on the map load.
      */
     @field:Volatile var scriptOwnsMapEntry: Boolean = false,
     /** Maps the client already holds. A warp sends deleteCache, which empties this. */
     val loadedMaps: MutableSet<Int> = ConcurrentHashMap.newKeySet(),
     /**
-     * The npc walking behind this player, or null. Session-only: the decomp's
-     * `FLAG_HAS_PARTNER` is a save flag, but a disconnect mid-walk leaves the destination
-     * map's own object to finish the scene.
+     * The npc walking behind this player, or null. Session-only: the decomp's `FLAG_HAS_PARTNER` is
+     * a save flag, but a disconnect mid-walk leaves the destination map's own object to finish the
+     * scene.
      */
     @field:Volatile var partner: PartnerFollow? = null,
     /**
-     * The surface tile this session descended into the Underground from, or null when it is
-     * not down there.
+     * The surface tile this session descended into the Underground from, or null when it is not
+     * down there.
      */
     @field:Volatile var undergroundExit: UndergroundExit? = null,
 )

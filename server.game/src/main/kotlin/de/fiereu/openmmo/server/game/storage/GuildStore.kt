@@ -73,12 +73,21 @@ class GuildStore @Inject constructor() {
     }
   }
 
+  /**
+   * Drop a member, if they are one of this guild's. The lookup is cleared only when it points here:
+   * a kick aimed at another guild's member used to leave them in that roster with no way back.
+   */
   fun removeMember(guild: Guild, entityId: Long) {
-    guild.members.removeAll { it.id == entityId }
-    guildByChar.remove(entityId)
+    if (!guild.members.removeAll { it.id == entityId }) return
+    guildByChar.remove(entityId, guild.id)
   }
 
+  /**
+   * Hand the guild to one of its own members. A name that is not a member changes nothing: the old
+   * loop demoted the Boss whether or not it found a successor.
+   */
   fun transferLeadership(guild: Guild, newLeaderId: Long) {
+    if (guild.members.none { it.id == newLeaderId }) return
     for (i in guild.members.indices) {
       val member = guild.members[i]
       guild.members[i] =

@@ -4,6 +4,7 @@ object PipelineNames {
   const val WRITE_TIMEOUT = "write-timeout"
   const val FRAME_LOGGER = "frame-logger"
   const val FRAME_DECODER = "frame-decoder"
+  const val INBOUND_RATE_LIMITER = "inbound-rate-limiter"
   const val FRAME_ENCODER = "frame-encoder"
   const val CHECKSUM_DECODER = "checksum-decoder"
   const val CHECKSUM_ENCODER = "checksum-encoder"

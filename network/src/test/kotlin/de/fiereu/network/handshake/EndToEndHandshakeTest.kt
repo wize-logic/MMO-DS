@@ -155,7 +155,9 @@ class EndToEndHandshakeTest :
         val serverApp = CollectingHandler(Side.SERVER)
         val clientApp = CollectingHandler(Side.CLIENT)
 
-        val options = PipelineOptions(checksumSize = 8, frameLogging = true)
+        // 16 is what the game server negotiates, and a compressed protocol is its shape, so this
+        // pair is the deployed stack.
+        val options = PipelineOptions(checksumSize = 16, frameLogging = true)
 
         val serverChannel =
             embedded(

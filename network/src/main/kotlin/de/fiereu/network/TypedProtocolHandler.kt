@@ -36,8 +36,12 @@ abstract class TypedProtocolHandler<P : Protocol>(
 
   open fun isRegistered(type: KClass<*>): Boolean = handlers.containsKey(type)
 
+  /**
+   * A packet the protocol registers and this side does not answer. Not an error: the game protocol
+   * declares far more opcodes than the server acts on.
+   */
   protected open fun onUnhandled(event: PacketEvent<*>) {
-    log.error { "Unhandled packet ${event.packet::class.simpleName} on $side" }
+    log.debug { "Unhandled packet ${event.packet::class.simpleName} on $side" }
   }
 
   final override fun onPacket(event: PacketEvent<*>) {

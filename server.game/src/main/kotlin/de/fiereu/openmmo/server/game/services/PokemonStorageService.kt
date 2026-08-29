@@ -22,9 +22,9 @@ private val log = KotlinLogging.logger {}
 private const val RECORDS_PER_PACKET = 255
 
 /**
- * Deposits, withdrawals and reorders, which are one gesture on the wire: a monster is picked
- * up from a slot and put down on another. A destination that is already taken swaps, which is
- * what the client's own paired source/destination arrays describe.
+ * Deposits, withdrawals and reorders, which are one gesture on the wire: a monster is picked up
+ * from a slot and put down on another. A destination that is already taken swaps, which is what the
+ * client's own paired source/destination arrays describe.
  */
 @Singleton
 class PokemonStorageService
@@ -36,16 +36,25 @@ constructor(
 
   fun onMove(event: PacketEvent<PokemonMovePacket>) {
     val session = event.session
-    val charId = session.attributes[PLAYER_STATE]?.characterId ?: return
+    val state = session.attributes[PLAYER_STATE] ?: return
+    val charId = state.characterId ?: return
     val moves = event.packet.moves
     if (moves.isEmpty()) {
-      // The client never frames an empty batch, so one here is a bug worth a line in the log, 
+      // The client never frames an empty batch, so one here is a bug worth a line in the log,
       // and it returns before the resend below, which would otherwise leave no trace at all.
       log.warn { "char=$charId sent an empty monster move batch" }
       return
     }
     if (battles.byChar(charId) != null) {
       log.warn { "char=$charId tried to move a monster while in battle" }
+      resend(session, charId)
+      return
+    }
+    // A settlement is two separate writes, and this is the one gesture that can land between them:
+    // moving the monster the first write just handed over leaves the second nothing to give back,
+    // and both players keep a copy. The trade screen owns the display on the cartridge anyway.
+    if (state.atTradeTable) {
+      log.warn { "char=$charId tried to move a monster while at a trade table" }
       resend(session, charId)
       return
     }

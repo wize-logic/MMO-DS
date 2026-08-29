@@ -1,5 +1,6 @@
 package de.fiereu.network.handshake
 
+import de.fiereu.network.AlreadyGreetedException
 import de.fiereu.network.PipelineNames
 import de.fiereu.network.PipelineOptions
 import de.fiereu.network.Protocol
@@ -31,8 +32,17 @@ internal class ServerSessionHandshakeHandler(
 
   private val ephemeralKeyPair = EcKeys.generateEphemeralKeyPair()
 
+  /** Whether this session has already been answered a hello. */
+  private var greeted = false
+
   init {
     on<ClientHelloPacket> { event ->
+      // One hello to a session. The answer is a signature over a key that does not change, so a
+      // peer that said hello again bought another one for seventeen bytes, before authenticating.
+      if (greeted) {
+        throw AlreadyGreetedException()
+      }
+      greeted = true
       val skew = abs(System.currentTimeMillis() - event.packet.timestamp)
       if (skew > options.maxHelloSkew.inWholeMilliseconds) {
         throw StaleClientHelloException(skew)

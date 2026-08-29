@@ -10,8 +10,35 @@ import de.fiereu.openmmo.server.game.session.PLAYER_STATE
 import de.fiereu.openmmo.server.game.session.PlayerState
 import de.fiereu.openmmo.server.game.session.SessionRegistry
 import de.fiereu.openmmo.server.game.storage.CharacterStore
+import io.github.oshai.kotlinlogging.KotlinLogging
 import javax.inject.Inject
 import javax.inject.Singleton
+
+private val log = KotlinLogging.logger {}
+
+/**
+ * The channels a client may send on. The mode byte used to index straight into [ChatType], and
+ * three of those are not channels a player picks. Two are the ones this server announces with, and
+ * they carry no sender, so a line sent on one looked like a real announcement. The third is the
+ * battle channel, which has its own packet and its own scoping.
+ */
+private val SENDABLE_CHANNELS =
+    setOf(
+        ChatType.NORMAL,
+        ChatType.SHOUT,
+        ChatType.WHISPER,
+        ChatType.TRADE,
+        ChatType.GLOBAL,
+        ChatType.CHANNEL,
+        ChatType.TEAM,
+        ChatType.LINK,
+    )
+
+/**
+ * The longest line this server passes on, which is the client's own ceiling. A line is copied to
+ * every session on its channel, and the codec reads a string with no ceiling of its own.
+ */
+private const val MAX_CHAT_CHARS = 128
 
 @Singleton
 class ChatService
@@ -32,8 +59,9 @@ constructor(
 
     val state = session.attributes[PLAYER_STATE] ?: return
     val me = state.characterId?.let(characters::getCharacter) ?: return
-    val type = typeForMode(packet.mode)
-    val body = if (type == ChatType.WHISPER) (packet.message ?: "").trim() else text
+    val type = typeForMode(packet.mode) ?: return
+    val body =
+        (if (type == ChatType.WHISPER) (packet.message ?: "").trim() else text).cut(me.info.id)
     if (body.isEmpty()) return
 
     val outgoing =
@@ -81,6 +109,17 @@ constructor(
     }
   }
 
-  private fun typeForMode(mode: Byte): ChatType =
-      ChatType.entries.getOrNull(mode.toInt()) ?: ChatType.NORMAL
+  /** The channel this mode names, or null when it names one no client may send on. */
+  private fun typeForMode(mode: Byte): ChatType? {
+    val type = ChatType.entries.getOrNull(mode.toInt()) ?: return ChatType.NORMAL
+    if (type in SENDABLE_CHANNELS) return type
+    log.warn { "A client asked to speak on $type, which is not a channel it may send on" }
+    return null
+  }
+
+  private fun String.cut(charId: Long): String {
+    if (length <= MAX_CHAT_CHARS) return this
+    log.warn { "char=$charId sent a $length character line, cut to $MAX_CHAT_CHARS" }
+    return take(MAX_CHAT_CHARS)
+  }
 }

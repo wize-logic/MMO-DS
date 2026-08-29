@@ -6,6 +6,7 @@ import de.fiereu.network.handlers.ChecksumFrameDecoder
 import de.fiereu.network.handlers.ChecksumFrameEncoder
 import de.fiereu.network.handlers.CipherDecoder
 import de.fiereu.network.handlers.CipherEncoder
+import de.fiereu.network.handlers.InboundRateLimiter
 import de.fiereu.network.handlers.PacketFrameDecoder
 import de.fiereu.network.handlers.PacketFrameEncoder
 import de.fiereu.network.handshake.ClientSessionHandshakeHandler
@@ -65,6 +66,14 @@ fun installPipeline(
     pipeline.addLast(PipelineNames.FRAME_LOGGER, LoggingHandler(LogLevel.TRACE))
   }
   pipeline.addLast(PipelineNames.FRAME_DECODER, PacketFrameDecoder(options.maxFrameLength))
+  // Behind the frame decoder, so it counts packets rather than TCP segments, and in front of
+  // everything that decodes or allocates for a peer.
+  if (options.inboundBurst > 0 && options.inboundPerSecond > 0) {
+    pipeline.addLast(
+        PipelineNames.INBOUND_RATE_LIMITER,
+        InboundRateLimiter(options.inboundBurst, options.inboundPerSecond),
+    )
+  }
   pipeline.addLast(PipelineNames.FRAME_ENCODER, PacketFrameEncoder())
   pipeline.addLast(PipelineNames.CHECKSUM_DECODER, ChecksumFrameDecoder(NoOpChecksum))
   pipeline.addLast(PipelineNames.CHECKSUM_ENCODER, ChecksumFrameEncoder(NoOpChecksum))

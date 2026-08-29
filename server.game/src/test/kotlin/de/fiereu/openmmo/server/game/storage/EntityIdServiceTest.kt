@@ -23,4 +23,14 @@ class EntityIdServiceTest :
         val ids = (1..200).map { service.newMonsterId() }
         ids.toSet().size shouldBe ids.size
       }
+
+      /**
+       * The server builds one of these, but a test builds one per monster, and the counter that
+       * separates two ids made in the same millisecond is eight bits wide. Held per instance it
+       * started at an independent random offset, so two services collided about once in 256.
+       */
+      test("two services in one process never hand out the same id") {
+        val ids = (1..200).map { EntityIdService().newMonsterId() }
+        ids.toSet().size shouldBe ids.size
+      }
     })

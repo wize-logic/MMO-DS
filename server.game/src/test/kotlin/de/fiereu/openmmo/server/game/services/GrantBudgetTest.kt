@@ -52,6 +52,25 @@ class GrantBudgetTest :
        * Spending, consuming and releasing are the player giving something up. Counting those would
        * mean a player who shops enough can no longer shop.
        */
+      /** A shiny is rare enough that a minute says nothing about it and an hour says everything. */
+      test("a shiny is counted over its own hour, not the minute the rest use") {
+        var now = 0L
+        val budget =
+            GrantBudget(GrantBudget.Limits(shinyGranted = 2, shinyWindow = Duration.ofHours(1))) {
+              now
+            }
+
+        budget.allow(1, GrantBudget.Kind.SHINY, 1) shouldBe true
+        budget.allow(1, GrantBudget.Kind.SHINY, 1) shouldBe true
+
+        // A minute later every other kind has a fresh allowance and this one still does not.
+        now += Duration.ofMinutes(1).toNanos()
+        budget.allow(1, GrantBudget.Kind.SHINY, 1) shouldBe false
+
+        now += Duration.ofHours(1).toNanos()
+        budget.allow(1, GrantBudget.Kind.SHINY, 1) shouldBe true
+      }
+
       test("giving something up is not a grant and costs no allowance") {
         var now = 0L
         val budget = budget({ now })

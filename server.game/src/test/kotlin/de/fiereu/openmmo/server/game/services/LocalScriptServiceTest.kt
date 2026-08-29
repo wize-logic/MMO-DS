@@ -1,6 +1,7 @@
 package de.fiereu.openmmo.server.game.services
 
 import de.fiereu.network.PacketEvent
+import de.fiereu.openmmo.common.ContestConditions
 import de.fiereu.openmmo.common.enums.CharacterGender
 import de.fiereu.openmmo.common.enums.Direction
 import de.fiereu.openmmo.common.enums.IVs
@@ -30,6 +31,7 @@ import de.fiereu.openmmo.net.game.packets.ScriptWarpArrivedPacket
 import de.fiereu.openmmo.pokemon.LearnsetRegistry
 import de.fiereu.openmmo.pokemon.SpeciesRegistry
 import de.fiereu.openmmo.server.game.battle.BattleRng
+import de.fiereu.openmmo.server.game.battle.ExpCurves
 import de.fiereu.openmmo.server.game.battle.StatCalculator
 import de.fiereu.openmmo.server.game.battle.WildMonFactory
 import de.fiereu.openmmo.server.game.session.CLIENT_RUNS_SCRIPTS
@@ -58,12 +60,18 @@ class LocalScriptServiceTest :
           moneyGained: Int = 1_000_000,
           itemsGained: Int = 2_000,
           monstersGranted: Int = 20,
+          levelsGained: Int = 30,
+          contestPointsGained: Int = 1_000,
+          ribbonsWon: Int = 4,
       ) =
           GrantBudget(
               GrantBudget.Limits(
                   moneyGained = moneyGained,
                   itemsGained = itemsGained,
                   monstersGranted = monstersGranted,
+                  levelsGained = levelsGained,
+                  contestPointsGained = contestPointsGained,
+                  ribbonsWon = ribbonsWon,
               ),
           ) {
             0L
@@ -148,8 +156,8 @@ class LocalScriptServiceTest :
       }
 
       /**
-       * The two id spaces share one store and must not read each other. The ported Kotlin
-       * corpus writes `sinnoh/FLAG_NAME`; the engine's VM writes numbers.
+       * The two id spaces share one store and must not read each other. The ported Kotlin corpus
+       * writes `sinnoh/FLAG_NAME`; the engine's VM writes numbers.
        */
       test("the seat ignores the named GBA-derived keys beside it") {
         runTest {
@@ -220,9 +228,9 @@ class LocalScriptServiceTest :
       }
 
       /**
-       * The answer decides whether this session's value reports are listened to at all, so it
-       * is asked once and cannot be taken back, otherwise it is a switch a client flips on
-       * for the length of a claim and off again afterwards.
+       * The answer decides whether this session's value reports are listened to at all, so it is
+       * asked once and cannot be taken back, otherwise it is a switch a client flips on for the
+       * length of a claim and off again afterwards.
        */
       test("the first answer stands and a later one is refused") {
         runTest {
@@ -239,9 +247,9 @@ class LocalScriptServiceTest :
       }
 
       /**
-       * The reports that carry value cannot be verified, the scene that made them ran on the
-       * client and this server was told afterwards. What can be done is to bound them, and to
-       * refuse the ones that describe something no scene and no fight could have produced.
+       * The reports that carry value cannot be verified, the scene that made them ran on the client
+       * and this server was told afterwards. What can be done is to bound them, and to refuse the
+       * ones that describe something no scene and no fight could have produced.
        */
       context("a report that carries value") {
         fun playing(store: CharacterStore, id: Long) =
@@ -335,9 +343,9 @@ class LocalScriptServiceTest :
         }
 
         /**
-         * The report is a delta applied to the balance the store holds, never a total worked
-         * out from one read a moment before. A stale total lands on top of whatever was spent
-         * in between and pays it back.
+         * The report is a delta applied to the balance the store holds, never a total worked out
+         * from one read a moment before. A stale total lands on top of whatever was spent in
+         * between and pays it back.
          */
         test("a purchase that overlaps an earning is not paid back by it") {
           runTest {
@@ -390,9 +398,9 @@ class LocalScriptServiceTest :
         }
 
         /**
-         * A fight moves a monster's level, experience and hit points, and it moves them one
-         * way. A report that takes any of them backwards, or forwards further than a fight
-         * can, is a client writing a party rather than recording one.
+         * A fight moves a monster's level, experience and hit points, and it moves them one way. A
+         * report that takes any of them backwards, or forwards further than a fight can, is a
+         * client writing a party rather than recording one.
          */
         test("a battle outcome may only move a monster the way a fight moves it") {
           runTest {
@@ -431,6 +439,142 @@ class LocalScriptServiceTest :
             // A fight's worth of growth: recorded.
             report(level = 22, xp = seated.xp + 500, hp = 3)
             store.getCharacter(id)!!.pokemon.single().level shouldBe 22
+          }
+        }
+
+        /**
+         * Level and experience are the same fact told twice, and only the level was bounded. A row
+         * could stand still and put two billion behind it, which the next server-run battle reads
+         * back out as level 100.
+         */
+        test("experience past what the reported level can hold is cut down to it") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            val svc = service(store, MapManager())
+            val factory =
+                WildMonFactory(
+                    SpeciesRegistry(), MoveRegistry(), LearnsetRegistry(), EntityIdService())
+            val seated = store.addPokemon(id, factory.create(387, 20, BattleRng(seed = 1))!!)!!
+
+            svc.onBattleOutcome(
+                PacketEvent(
+                    BattleOutcomePacket(
+                        listOf(
+                            BattleOutcomeMon(
+                                seated.id,
+                                level = 20,
+                                xp = Int.MAX_VALUE,
+                                hp = 1,
+                                moves = List(4) { BattleOutcomeMove(0, 0) }))),
+                    session,
+                ))
+
+            val rate = SpeciesRegistry().get(387)!!.growthRate
+            val after = store.getCharacter(id)!!.pokemon.single()
+            after.xp shouldBe ExpCurves.totalXpFor(rate, 21) - 1
+            after.level shouldBe 20
+          }
+        }
+
+        /** Ten levels a report was the whole bound, and reports were free. */
+        test("levels stop being taken once the allowance for the window is gone") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            val svc = service(store, MapManager(), budget(levelsGained = 5))
+            val factory =
+                WildMonFactory(
+                    SpeciesRegistry(), MoveRegistry(), LearnsetRegistry(), EntityIdService())
+            val seated = store.addPokemon(id, factory.create(387, 20, BattleRng(seed = 1))!!)!!
+            val rate = SpeciesRegistry().get(387)!!.growthRate
+
+            fun report(level: Int) =
+                svc.onBattleOutcome(
+                    PacketEvent(
+                        BattleOutcomePacket(
+                            listOf(
+                                BattleOutcomeMon(
+                                    seated.id,
+                                    level,
+                                    ExpCurves.totalXpFor(rate, level),
+                                    hp = 1,
+                                    moves = List(4) { BattleOutcomeMove(0, 0) }))),
+                        session,
+                    ))
+
+            report(25)
+            store.getCharacter(id)!!.pokemon.single().level shouldBe 25
+
+            // The window is spent, so the growth is left where the record has it.
+            report(30)
+            store.getCharacter(id)!!.pokemon.single().level shouldBe 25
+          }
+        }
+
+        /** These are what a link contest scores on, so an untrue one beats another player. */
+        test("one report raises a contest condition by a Poffin, not to the ceiling") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            val svc = service(store, MapManager())
+            val factory =
+                WildMonFactory(
+                    SpeciesRegistry(), MoveRegistry(), LearnsetRegistry(), EntityIdService())
+            val seated = store.addPokemon(id, factory.create(387, 20, BattleRng(seed = 1))!!)!!
+
+            svc.onBattleOutcome(
+                PacketEvent(
+                    BattleOutcomePacket(
+                        listOf(
+                            BattleOutcomeMon(
+                                seated.id,
+                                seated.level.toInt(),
+                                seated.xp,
+                                hp = 1,
+                                moves = List(4) { BattleOutcomeMove(0, 0) },
+                                conditions = ContestConditions(255, 255, 255, 255, 255),
+                                sheen = 255,
+                                superContestRibbons = -1L))),
+                    session,
+                ))
+
+            val after = store.getCharacter(id)!!.pokemon.single()
+            after.conditions shouldBe ContestConditions(60, 60, 60, 60, 60)
+            after.sheen shouldBe 60
+            // Every bit set is twenty contests won at once, and the bits that name no contest are
+            // dropped before they are counted.
+            after.superContestRibbons shouldBe 0L
+          }
+        }
+
+        /** The reporter caps itself and carries the rest to its next report. */
+        test("a report wider than a client sends is refused whole") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            // A new character starts with the flags its region's new game sets.
+            val before = store.getCharacter(id)!!.storyFlags.toSet()
+
+            service(store, MapManager())
+                .onScriptState(
+                    PacketEvent(
+                        ScriptStatePacket(
+                            flags = (0 until 193).map { ScriptFlagEntry(it.toShort(), true) },
+                            vars = emptyList(),
+                        ),
+                        session,
+                    ))
+
+            store.getCharacter(id)!!.storyFlags shouldBe before
           }
         }
 
@@ -496,9 +640,9 @@ class LocalScriptServiceTest :
         }
 
         /**
-         * A capture is a monster the engine already rolled. Rolling a second one over it
-         * changed the nature the player saw the ball land on, its IVs, and, once in several
-         * thousand, the fact that it was shiny at all.
+         * A capture is a monster the engine already rolled. Rolling a second one over it changed
+         * the nature the player saw the ball land on, its IVs, and, once in several thousand, the
+         * fact that it was shiny at all.
          */
         test("a reported capture keeps the individual the client rolled") {
           runTest {
@@ -654,9 +798,9 @@ class LocalScriptServiceTest :
       }
 
       /**
-       * A destination this server cannot draw is refused rather than written: a position on a
-       * map that does not exist is one nobody can be seen on, and it would strand the
-       * character there across a relog.
+       * A destination this server cannot draw is refused rather than written: a position on a map
+       * that does not exist is one nobody can be seen on, and it would strand the character there
+       * across a relog.
        */
       test("a warp arrival on a map the server does not have is refused") {
         runTest {

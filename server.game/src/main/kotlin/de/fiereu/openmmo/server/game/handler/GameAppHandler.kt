@@ -141,6 +141,9 @@ import kotlinx.coroutines.cancel
 
 private val log = KotlinLogging.logger {}
 
+/** How much of a ping's token this server hands back. The client writes one byte and reads one. */
+private const val MAX_KEEPALIVE_BYTES = 8
+
 class GameAppHandler
 @Inject
 constructor(
@@ -299,7 +302,18 @@ constructor(
 
     // The client sends an empty heartbeat packet.
     on<NullPacket> {}
-    on<KeepAlivePacket> { event -> event.session.send(event.packet) }
+    // A ping, answered with the same token so the client can time the round trip. The codec takes
+    // the whole rest of the frame, and this handed every byte back before the session had
+    // authenticated, so the reply is trimmed to what a ping is.
+    on<KeepAlivePacket> { event ->
+      val data = event.packet.sessionData
+      if (data.size > MAX_KEEPALIVE_BYTES) {
+        log.warn { "A ping carried ${data.size} bytes of token; answering the first one" }
+      }
+      event.session.send(
+          if (data.size <= MAX_KEEPALIVE_BYTES) event.packet
+          else event.packet.copy(sessionData = data.copyOf(MAX_KEEPALIVE_BYTES)))
+    }
     // What the client sends when the player types. The text rides in target unless the mode
     // carries a message of its own.
     onSuspend<ChatMessageSendPacket> { event -> chatService.onSend(event.session, event.packet) }

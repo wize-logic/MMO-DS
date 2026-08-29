@@ -2,9 +2,13 @@ package de.fiereu.openmmo.server.game.services
 
 import de.fiereu.network.PacketEvent
 import de.fiereu.openmmo.common.ContestConditions
+import de.fiereu.openmmo.common.ContestRank
+import de.fiereu.openmmo.common.ContestType
 import de.fiereu.openmmo.common.MAX_CONTEST_STAT
+import de.fiereu.openmmo.common.MAX_PARTY_SIZE
 import de.fiereu.openmmo.common.PokemonMove
 import de.fiereu.openmmo.common.enums.Direction
+import de.fiereu.openmmo.common.enums.GrowthRate
 import de.fiereu.openmmo.common.enums.PokemonContainer
 import de.fiereu.openmmo.common.enums.Region
 import de.fiereu.openmmo.items.ItemRegistry
@@ -22,6 +26,7 @@ import de.fiereu.openmmo.net.game.packets.ScriptStatePacket
 import de.fiereu.openmmo.net.game.packets.ScriptWarpArrivedPacket
 import de.fiereu.openmmo.pokemon.LearnsetRegistry
 import de.fiereu.openmmo.pokemon.SpeciesRegistry
+import de.fiereu.openmmo.server.game.battle.ExpCurves
 import de.fiereu.openmmo.server.game.battle.StatCalculator
 import de.fiereu.openmmo.server.game.session.CLIENT_RUNS_SCRIPTS
 import de.fiereu.openmmo.server.game.session.PLAYER_STATE
@@ -37,10 +42,25 @@ import javax.inject.Singleton
 private val log = KotlinLogging.logger {}
 
 /**
- * The widest save block this server will store, matching the client's own
- * `MMO_SAVE_BLOCK_BYTES`.
+ * The widest save block this server will store, matching the client's own `MMO_SAVE_BLOCK_BYTES`.
  */
 private const val MAX_SAVE_BLOCK_BYTES = 8192
+
+/**
+ * What one script-state report may carry, which is what the client's own reporter sends. It diffs
+ * the engine's flag and var block and stops at these, leaving the rest for its next report, so
+ * anything wider did not come from it. The codec would take about 21,000 flags in one frame.
+ */
+private const val MAX_FLAGS_PER_REPORT = 192
+private const val MAX_VARS_PER_REPORT = 64
+private const val MAX_BLOCKS_PER_REPORT = 8
+
+/** The most one report may raise a contest condition by. A Poffin is worth a few dozen. */
+private const val MAX_CONDITION_GAIN_PER_REPORT = 60
+
+/** The twenty bits a ribbon mask can hold: four ranks for each of five types. */
+private val SUPER_CONTEST_RIBBON_MASK: Long =
+    (1L shl (ContestType.entries.size * ContestRank.entries.size)) - 1
 
 /** The record of a cutscene the client ran. */
 @Singleton
@@ -61,9 +81,9 @@ constructor(
 ) {
 
   /**
-   * The client saying whether it runs the game's field scripts itself. It arrives once, in
-   * front of the request that would start this map's entry script, so exactly one of the two
-   * ever runs a scene.
+   * The client saying whether it runs the game's field scripts itself. It arrives once, in front of
+   * the request that would start this map's entry script, so exactly one of the two ever runs a
+   * scene.
    */
   fun onScriptOwnership(event: PacketEvent<ClientScriptOwnershipPacket>) {
     val runs = event.packet.clientRunsFieldScripts
@@ -90,6 +110,22 @@ constructor(
     val characterId = state.characterId ?: return
     val regionId = state.regionId.toByte()
     val msg = event.packet
+
+    // A report wider than the reporter can build is refused whole rather than trimmed.
+    if (msg.flags.size > MAX_FLAGS_PER_REPORT ||
+        msg.vars.size > MAX_VARS_PER_REPORT ||
+        msg.blocks.size > MAX_BLOCKS_PER_REPORT) {
+      log.warn {
+        "char=$characterId reported ${msg.flags.size} flag(s), ${msg.vars.size} var(s) and" +
+            " ${msg.blocks.size} block(s), past what a client sends, refused"
+      }
+      return
+    }
+    // Every row is a write to this character's story rows, so the count is charged before the
+    // first one lands and a refused report writes nothing.
+    if (!budget.allow(characterId, GrantBudget.Kind.STORY_WRITES, msg.flags.size + msg.vars.size)) {
+      return
+    }
 
     for (flag in msg.flags) {
       val key = VmStoryKeys.flag(regionId, flag.id.toInt() and 0xFFFF)
@@ -126,8 +162,7 @@ constructor(
   }
 
   /**
-   * The client has already changed map. Move the record and the map group to where it says it
-   * is.
+   * The client has already changed map. Move the record and the map group to where it says it is.
    */
   fun onScriptWarpArrived(event: PacketEvent<ScriptWarpArrivedPacket>) {
     val session = event.session
@@ -218,11 +253,15 @@ constructor(
     // What each row said against what was held.
     val said = mutableListOf<String>()
     var moved = 0
-    for (entry in event.packet.mons) {
-      if (entry.level !in 1..100 || entry.xp < 0) continue
+    // One row per monster. A party holds six, so a report naming the same one many times is not
+    // many battles.
+    val rows = event.packet.mons.distinctBy { it.id }.take(MAX_PARTY_SIZE)
+    for (entry in rows) {
+      if (entry.level !in 1..ExpCurves.MAX_LEVEL || entry.xp < 0) continue
       val mon =
           stored.pokemon.firstOrNull { it.id == entry.id && it.container == PokemonContainer.PARTY }
               ?: continue
+      val definition = species.get(mon.dexId)
       // A fight is the one thing that moves these numbers, and it moves them one way.
       if (entry.level < mon.level || entry.xp < mon.xp) {
         log.warn {
@@ -238,43 +277,71 @@ constructor(
         }
         continue
       }
+      // The cap above bounds one report, and reports are free. Ten levels a packet at line rate
+      // is a level 100 party in a second, so the levels spend from a window too. A refusal leaves
+      // the monster where the record has it and lets the rest of the row through.
+      val levelGain = entry.level - mon.level
+      val growthAllowed =
+          levelGain <= 0 || budget.allow(characterId, GrantBudget.Kind.LEVELS, levelGain)
+      val level = if (growthAllowed) entry.level else mon.level.toInt()
+      // Level and experience are the same fact told twice, and only the level was bounded. A row
+      // could sit still and put two billion experience behind it, which the next server-run battle
+      // reads back as level 100. Past the band the level names it is clamped, not refused.
+      val ceiling = definition?.let { xpCeilingFor(it.growthRate, level) }
+      val xp = if (growthAllowed) entry.xp else mon.xp
+      val cappedXp = if (ceiling != null) xp.coerceAtMost(ceiling) else xp
+      if (ceiling != null && xp > ceiling) {
+        log.warn {
+          "char=$characterId reports monster ${entry.id} at level $level holding $xp xp," +
+              " past the $ceiling that level can hold, clamped"
+        }
+      }
       val moves =
           entry.moves.filter { it.id != 0 }.map { PokemonMove(it.id.toShort(), it.pp.toByte()) }
       // The contest half of the same report. All three only ever go up: a Poffin adds to a
-      // condition and a contest adds a ribbon, and nothing in the game takes either away.
-      val conditions =
+      // condition and a contest adds a ribbon, and nothing in the game takes either away. Up was
+      // unbounded, and one packet took every condition to the ceiling. A contest is scored against
+      // other players, so a report now carries a Poffin's worth and a window's worth in total.
+      val raised =
           ContestConditions(
-              cool =
-                  maxOf(mon.conditions.cool, entry.conditions.cool.coerceIn(0, MAX_CONTEST_STAT)),
-              beauty =
-                  maxOf(
-                      mon.conditions.beauty, entry.conditions.beauty.coerceIn(0, MAX_CONTEST_STAT)),
-              cute =
-                  maxOf(mon.conditions.cute, entry.conditions.cute.coerceIn(0, MAX_CONTEST_STAT)),
-              smart =
-                  maxOf(mon.conditions.smart, entry.conditions.smart.coerceIn(0, MAX_CONTEST_STAT)),
-              tough =
-                  maxOf(mon.conditions.tough, entry.conditions.tough.coerceIn(0, MAX_CONTEST_STAT)),
+              cool = raise(mon.conditions.cool, entry.conditions.cool),
+              beauty = raise(mon.conditions.beauty, entry.conditions.beauty),
+              cute = raise(mon.conditions.cute, entry.conditions.cute),
+              smart = raise(mon.conditions.smart, entry.conditions.smart),
+              tough = raise(mon.conditions.tough, entry.conditions.tough),
           )
-      val sheen = maxOf(mon.sheen, entry.sheen.coerceIn(0, MAX_CONTEST_STAT))
+      val raisedSheen = raise(mon.sheen, entry.sheen)
+      val points =
+          ContestType.entries.sumOf { raised[it] - mon.conditions[it] } + (raisedSheen - mon.sheen)
+      val takeContest =
+          points <= 0 || budget.allow(characterId, GrantBudget.Kind.CONTEST_POINTS, points)
+      val conditions = if (takeContest) raised else mon.conditions
+      val sheen = if (takeContest) raisedSheen else mon.sheen
       // A contest awards exactly one ribbon, so exactly one new bit may appear. More than that is
       // not a contest that happened; the ribbon is the rank gate, so a client that could set the
-      // mask outright could enter Master rank on a monster that has never competed.
-      val newRibbons = entry.superContestRibbons and mon.superContestRibbons.inv()
+      // mask outright could enter Master rank on a monster that has never competed. Bits that name
+      // no contest are dropped first, and a win spends from the window, since one at a time was
+      // still a full set in twenty packets.
+      val claimed = entry.superContestRibbons and SUPER_CONTEST_RIBBON_MASK
+      val newRibbons = claimed and mon.superContestRibbons.inv()
       val superContestRibbons =
-          if (java.lang.Long.bitCount(newRibbons) > 1) {
-            log.warn {
-              "char=$characterId reports monster ${entry.id} winning" +
-                  " ${java.lang.Long.bitCount(newRibbons)} ribbons at once, none taken"
+          when {
+            java.lang.Long.bitCount(newRibbons) > 1 -> {
+              log.warn {
+                "char=$characterId reports monster ${entry.id} winning" +
+                    " ${java.lang.Long.bitCount(newRibbons)} ribbons at once, none taken"
+              }
+              mon.superContestRibbons
             }
-            mon.superContestRibbons
-          } else {
-            mon.superContestRibbons or newRibbons
+            newRibbons == 0L -> mon.superContestRibbons
+            budget.allow(characterId, GrantBudget.Kind.RIBBONS, 1) ->
+                mon.superContestRibbons or newRibbons
+            else -> mon.superContestRibbons
           }
       val grown =
           mon.copy(
-              level = entry.level.toByte(),
-              xp = entry.xp,
+              level = level.toByte(),
+              xp = cappedXp,
               moves = moves.ifEmpty { mon.moves },
               conditions = conditions,
               sheen = sheen,
@@ -283,15 +350,15 @@ constructor(
       // Hit points are the engine's arithmetic, but the ceiling is the server's stat calculation:
       // an hp past the maximum for the level being reported is a monster that cannot be knocked
       // out, which is not something a battle can produce.
-      val maxHp = species.get(grown.dexId)?.let { StatCalculator.computeAll(it, grown).hp }
+      val maxHp = definition?.let { StatCalculator.computeAll(it, grown).hp }
       val hp = entry.hp.coerceIn(0, maxHp ?: entry.hp.coerceAtLeast(0)).toShort()
       characterStore.updatePokemon(characterId, grown.copy(hp = hp))
       said +=
-          "${entry.id} lv ${mon.level}->${entry.level} xp ${mon.xp}->${entry.xp}" +
+          "${entry.id} lv ${mon.level}->$level xp ${mon.xp}->$cappedXp" +
               " hp ${mon.hp}->$hp pp ${mon.moves.joinToString(",") { "${it.pp}" }}" +
               "->${grown.moves.joinToString(",") { "${it.pp}" }}"
-      if (entry.level.toByte() != mon.level ||
-          entry.xp != mon.xp ||
+      if (level.toByte() != mon.level ||
+          cappedXp != mon.xp ||
           hp != mon.hp ||
           grown.moves != mon.moves ||
           grown.conditions != mon.conditions ||
@@ -322,6 +389,22 @@ constructor(
             ": ${said.joinToString("; ")}"
       }
     }
+  }
+
+  /** One condition as the report leaves it: never below what is stored, never above the ceiling. */
+  private fun raise(stored: Int, reported: Int): Int =
+      maxOf(
+          stored,
+          reported
+              .coerceIn(0, MAX_CONTEST_STAT)
+              .coerceAtMost(stored + MAX_CONDITION_GAIN_PER_REPORT))
+
+  /** The most experience a monster at [level] can hold on this curve. */
+  private fun xpCeilingFor(rate: GrowthRate, level: Int): Int {
+    // The curve refuses a level outside its range, and a throw here disconnects the sender.
+    val safe = level.coerceIn(1, ExpCurves.MAX_LEVEL)
+    return if (safe >= ExpCurves.MAX_LEVEL) ExpCurves.totalXpFor(rate, ExpCurves.MAX_LEVEL)
+    else ExpCurves.totalXpFor(rate, safe + 1) - 1
   }
 
   /**
@@ -376,9 +459,9 @@ constructor(
   }
 
   /**
-   * The box screen let a monster go. Removed from whichever container holds it; refused when
-   * it would empty the party, or names a monster this character does not own, in either case
-   * the containers are resent so the screen snaps back to the record.
+   * The box screen let a monster go. Removed from whichever container holds it; refused when it
+   * would empty the party, or names a monster this character does not own, in either case the
+   * containers are resent so the screen snaps back to the record.
    */
   suspend fun onPokemonRelease(event: PacketEvent<PokemonReleasePacket>) {
     val session = event.session
@@ -442,8 +525,7 @@ constructor(
   }
 
   /**
-   * A local script's `GivePokemon` succeeded, and the engine's party already carries the
-   * monster.
+   * A local script's `GivePokemon` succeeded, and the engine's party already carries the monster.
    */
   suspend fun onScriptGrant(event: PacketEvent<ScriptGrantPacket>) {
     val session = event.session
@@ -489,6 +571,19 @@ constructor(
         return
       }
     }
+    // Shininess is the client's word and cannot be checked: the engine rolls it from the
+    // personality it is reporting and a trainer id this record does not carry. Past the allowance
+    // the monster is still granted, as the ordinary one it almost certainly is.
+    val shiny =
+        msg.isShiny &&
+            budget.allow(characterId, GrantBudget.Kind.SHINY, 1).also { allowed ->
+              if (!allowed) {
+                log.warn {
+                  "char=$characterId reports another shiny (dex ${msg.dexId} seed ${msg.seed});" +
+                      " granted as an ordinary one"
+                }
+              }
+            }
     val moves = learnsets.initialMoveset(msg.dexId, msg.level).ifEmpty { listOf(TACKLE_ID) }
     val container = if (msg.container == 0) PokemonContainer.PC else PokemonContainer.PARTY
     val granted =
@@ -504,7 +599,7 @@ constructor(
                 container,
                 msg.slot,
                 // A seed of zero is a report with no individual behind it; the server rolls one.
-                if (msg.seed != 0) StoryPlayerService.Individual(msg.seed, msg.ivBits, msg.isShiny)
+                if (msg.seed != 0) StoryPlayerService.Individual(msg.seed, msg.ivBits, shiny)
                 else null,
             ))
     if (granted == null) {
