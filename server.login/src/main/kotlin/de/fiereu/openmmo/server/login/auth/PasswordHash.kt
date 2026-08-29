@@ -32,12 +32,14 @@ object PasswordHash {
   private const val KEY_BITS = 256
 
   /**
-   * The work factor a new credential is written with, about 50ms. Deliberately not the 600,000 the
-   * OWASP guidance names for this algorithm: nothing limits how many login attempts a peer may make
-   * yet, so every attempt is server CPU somebody else asked for. Raise it once a login is rate
-   * limited; the format carries the number, so old rows keep working.
+   * The work factor a new credential is written with, which is the figure the OWASP guidance names
+   * for this algorithm, about 150ms. It was a third of this while nothing limited how many attempts
+   * a peer could make, because the work is spent before the answer is known. [LoginAttemptLimiter]
+   * now turns an attempt down before this runs, so the cost lands on the guesser. The stored string
+   * carries the number, so older rows still verify and are rewritten at this one the next time
+   * their owner signs in.
    */
-  const val ITERATIONS = 210_000
+  const val ITERATIONS = 600_000
 
   private val random = SecureRandom()
 
@@ -64,6 +66,18 @@ object PasswordHash {
     val salt = runCatching { decoder.decode(parts[2]) }.getOrNull() ?: return false
     val expected = runCatching { decoder.decode(parts[3]) }.getOrNull() ?: return false
     return MessageDigest.isEqual(expected, derive(clientHash, salt, iterations))
+  }
+
+  /**
+   * Whether this row should be written again the next time its owner proves they own it: either it
+   * is one of the old unsalted values, or it was written at a lower work factor than the one in use
+   * now. Without the second half, raising [ITERATIONS] would only apply to new accounts.
+   */
+  fun needsRehash(stored: String): Boolean {
+    if (isLegacy(stored)) return true
+    val parts = stored.split('$')
+    if (parts.size != 4 || parts[0] != PREFIX) return true
+    return (parts[1].toIntOrNull() ?: 0) < ITERATIONS
   }
 
   /**

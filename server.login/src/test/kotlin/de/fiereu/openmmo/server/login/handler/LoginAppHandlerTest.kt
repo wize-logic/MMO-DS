@@ -19,6 +19,7 @@ import de.fiereu.openmmo.net.login.packets.RequestGameServerListPacket
 import de.fiereu.openmmo.net.login.packets.SentCredentialsPacket
 import de.fiereu.openmmo.net.login.packets.TokenLogin
 import de.fiereu.openmmo.server.login.auth.InMemoryUserStore
+import de.fiereu.openmmo.server.login.auth.LoginAttemptLimiter
 import de.fiereu.openmmo.server.login.auth.sha1Hex
 import de.fiereu.openmmo.server.login.catalog.GameServerCatalog
 import de.fiereu.openmmo.server.login.config.GameServerEndpointConfig
@@ -117,6 +118,7 @@ class LoginAppHandlerTest :
               tokenIssuer = SessionTokenIssuer(secret, clock),
               rememberMeIssuer = RememberMeTokenIssuer(secret, clock),
               rememberMeVerifier = RememberMeTokenVerifier(secret, maxAge, clock),
+              attempts = LoginAttemptLimiter(),
               scope = CoroutineScope(Job()),
           )
 

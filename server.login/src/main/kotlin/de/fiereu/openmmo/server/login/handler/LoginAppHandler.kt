@@ -18,6 +18,7 @@ import de.fiereu.openmmo.net.login.packets.PasswordLogin
 import de.fiereu.openmmo.net.login.packets.RequestGameServerListPacket
 import de.fiereu.openmmo.net.login.packets.SentCredentialsPacket
 import de.fiereu.openmmo.net.login.packets.TokenLogin
+import de.fiereu.openmmo.server.login.auth.LoginAttemptLimiter
 import de.fiereu.openmmo.server.login.auth.UserService
 import de.fiereu.openmmo.server.login.catalog.GameServerCatalog
 import de.fiereu.openmmo.server.login.session.AUTHED_USER_ID
@@ -35,6 +36,7 @@ constructor(
     private val tokenIssuer: SessionTokenIssuer,
     private val rememberMeIssuer: RememberMeTokenIssuer,
     private val rememberMeVerifier: RememberMeTokenVerifier,
+    private val attempts: LoginAttemptLimiter,
     scope: CoroutineScope,
 ) : CoroutineProtocolHandler<LoginProtocol>(LoginProtocol, Side.SERVER, scope) {
 
@@ -56,12 +58,22 @@ constructor(
       method: PasswordLogin,
   ) {
     val username = event.packet.username
+    val address = addressOf(event)
+    // Before the password is checked, not after: checking one costs real work now, so an attempt
+    // nobody is allowed to make must not buy any of it.
+    if (!attempts.allow(username, address)) {
+      log.warn { "Too many failed logins for $username from $address" }
+      event.session.send(LoginResponsePacket(LoginState.RATE_LIMITED))
+      return
+    }
     val result = users.authenticate(username, method.password)
     log.info { "Login attempt for $username: ${result.state}" }
     if (result.state != LoginState.AUTHED || result.userId == null) {
+      attempts.recordFailure(username, address)
       event.session.send(LoginResponsePacket(result.state))
       return
     }
+    attempts.recordSuccess(username, address)
     event.session.attributes[AUTHED_USER_ID] = result.userId
     if (method.stayLoggedIn) {
       sendRememberMeToken(event, result.userId, result.tokenEpoch, username)
@@ -87,6 +99,16 @@ constructor(
     sendRememberMeToken(event, user.id, user.tokenEpoch, user.displayName)
     event.session.send(LoginResponsePacket(LoginState.AUTHED))
   }
+
+  /**
+   * The peer's address without its port, so every socket from one machine shares a counter. A port
+   * changes per connection, and a counter that a reconnect resets is not one.
+   */
+  private fun addressOf(event: PacketEvent<LoginRequestPacket>): String =
+      when (val remote = event.session.remoteAddress) {
+        is java.net.InetSocketAddress -> remote.address?.hostAddress ?: remote.hostString
+        else -> remote.toString()
+      }
 
   private fun sendRememberMeToken(
       event: PacketEvent<LoginRequestPacket>,

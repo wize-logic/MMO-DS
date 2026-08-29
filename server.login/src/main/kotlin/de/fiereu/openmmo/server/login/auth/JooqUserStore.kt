@@ -26,9 +26,10 @@ constructor(
         if (user == null || !PasswordHash.verify(user.passwordHash, password)) {
           UserService.AuthResult(LoginState.INVALID_PASSWORD)
         } else {
-          // The account still holds the old shape, and somebody just proved they own it, so this
-          // is the moment to rewrite it. The startup sweep gets the ones nobody logs into.
-          if (PasswordHash.isLegacy(user.passwordHash)) {
+          // The row is out of date, in shape or in cost, and somebody just proved they own it, so
+          // this is the moment to write it again. The startup sweep gets the unsalted ones nobody
+          // logs into; a merely cheap one is not urgent enough to rehash a whole table for.
+          if (PasswordHash.needsRehash(user.passwordHash)) {
             dsl.update(USERS)
                 .set(USERS.PASSWORD_HASH, PasswordHash.hash(password))
                 .where(USERS.ID.eq(user.id))
