@@ -1,0 +1,60 @@
+--- a/src/comm_manager.c
++++ b/src/comm_manager.c
+@@ -267,6 +267,15 @@
+  */
+ void CommManager_ResetUnderground(void)
+ {
++    /* openmmo: the communication manager is the DS radio's, and this port never
++     * boots one, but the Underground itself is up (the pipe in
++     * mmo/mods/openmmo/src/openmmo_underground.c), and its menus reach these
++     * three. A group that does not exist cannot be reset, paused or told not
++     * to connect, so each says so instead of writing through NULL. */
++    if (sCommMan == NULL) {
++        return;
++    }
++
+     CommSys_Reset();
+     sCommMan->retryConnectionAttempts = CommSys_CurNetId();
+     CommManager_SetTask(CommTask_ResetUnderground, 0);
+@@ -279,6 +288,11 @@
+  */
+ void CommManager_SetPauseUnderground(BOOL pause)
+ {
++    /* openmmo: likewise. */
++    if (sCommMan == NULL) {
++        return;
++    }
++
+     sCommMan->pauseUnderground = pause;
+ }
+ 
+@@ -329,6 +343,11 @@
+  */
+ void CommManager_SetDoNotConnectUndergroundFlag(void)
+ {
++    /* openmmo: likewise. */
++    if (sCommMan == NULL) {
++        return;
++    }
++
+     sCommMan->doNotConnectUnderground = TRUE;
+ }
+ 
+@@ -3139,6 +3158,17 @@
+  */
+ BOOL CommManager_SetCommError(int error)
+ {
++    /* openmmo: the trade scene's own watchdog lands here when the other side
++     * goes quiet mid-handshake. The official client soft-resets to the save point; this
++     * port hands the scene a polite exit instead (openmmo_trade.c). */
++    {
++        extern int openmmo_trade_comm_error(int error);
++
++        if (openmmo_trade_comm_error(error)) {
++            return TRUE;
++        }
++    }
++
+     if (sCommMan) {
+         sCommMan->commError = error;
+         CommSys_StartShutdown();

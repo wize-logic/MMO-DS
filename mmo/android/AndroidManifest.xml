@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Java side of this app is one class of one job: OpenMMOActivity extends
+  NativeActivity only to hear the document picker's answer, which the
+  framework delivers to onActivityResult and NativeActivity swallows.
+  Everything else still arrives in C (the surface, the input queue, the
+  lifecycle) because NativeActivity still loads the library named below and
+  calls ANativeActivity_onCreate in it.
+
+  targetSdkVersion is 28 deliberately and it is the one number here worth
+  arguing about: it is the last level before scoped storage, which is Phase
+  5's problem and not this one's. Raising it is a decision that belongs with
+  the cartridge delivery task, not with the surface.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          package="org.openmmo.handheld"
+          android:versionCode="1"
+          android:versionName="0.1">
+
+  <uses-feature android:glEsVersion="0x00020000" android:required="true" />
+  <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+  <uses-feature android:name="android.hardware.gamepad" android:required="false" />
+
+  <uses-permission android:name="android.permission.INTERNET" />
+
+  <!--
+    NO STORAGE PERMISSION AT ALL, and that is the point of the one Java class
+    this app carries. The cartridge is the player's file, chosen through the
+    system document picker, whose grant is per-file and needs no permission
+    row and no trip to Settings. The drawn fallback browser inside the front
+    door still exists for a device whose picker is broken, and on a stock
+    device it is the one path that may fail to read; it says so and points
+    back at the picker.
+
+    READ_EXTERNAL_STORAGE stays for Android 10 and older only, where the
+    fallback browser is more likely to be needed and this is the row that
+    feeds it.
+  -->
+  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+                   android:maxSdkVersion="29" />
+
+  <application android:label="OpenMMO"
+               android:icon="@mipmap/ic_launcher"
+               android:roundIcon="@mipmap/ic_launcher"
+               android:allowBackup="false">
+    <!-- showWhenLocked + turnScreenOn: a handheld's power button is how a
+         player pauses, and coming back must not strand the game behind a
+         swipe keyguard with its window revoked. The idle doze also swallowed
+         every adb-driven session before these two. -->
+    <activity android:name="org.openmmo.handheld.OpenMMOActivity"
+              android:label="OpenMMO"
+              android:launchMode="singleTask"
+              android:exported="true"
+              android:showWhenLocked="true"
+              android:turnScreenOn="true"
+              android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density|smallestScreenSize|uiMode">
+      <!-- The .so this loads: lib/armeabi-v7a/libpokeplatinum.so, which is
+           the engine, this client and the code beside this file, fused. -->
+      <meta-data android:name="android.app.lib_name" android:value="pokeplatinum" />
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>

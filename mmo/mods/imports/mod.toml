@@ -1,0 +1,6 @@
+id = "imports"
+name = "Imported Cartridge Content"
+version = "1.0.0"
+authors = ["openmmo"]
+requires = []
+load_after = []

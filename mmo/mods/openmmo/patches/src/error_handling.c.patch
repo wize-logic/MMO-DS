@@ -1,0 +1,16 @@
+--- a/src/error_handling.c
++++ b/src/error_handling.c
+@@ -10,6 +10,13 @@
+ 
+ void ErrorHandling_AssertFail(void)
+ {
++    /* A failed assertion is the engine telling us it is in a state it was
++     * written to rule out. The body below only speaks when the DS comm stack is
++     * up, which on a host it never is, so every one of them was being discarded
++     * and the caller carried on into the impossible state. */
++    extern void openmmo_engine_assert_failed(void);
++    openmmo_engine_assert_failed();
++
+     if (CommManager_IsInitialized() && (OS_GetProcMode() != OS_PROCMODE_IRQ)) {
+         ErrorMessageReset_PrintErrorAndReset();
+     }

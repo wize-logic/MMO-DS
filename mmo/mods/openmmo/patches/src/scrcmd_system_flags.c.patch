@@ -1,0 +1,14 @@
+--- a/src/scrcmd_system_flags.c
++++ b/src/scrcmd_system_flags.c
+@@ -44,6 +44,11 @@
+     FieldOverworldState *overworldState = SaveData_GetFieldOverworldState(ctx->fieldSystem->saveData);
+     PlayerData *playerData = FieldOverworldState_GetPlayerData(overworldState);
+     PlayerData_SetRunningShoes(playerData, TRUE);
++    /* PlayerData is outside the story block; say so or a rejoin loses it. */
++    {
++        extern void openmmo_running_shoes_given(void);
++        openmmo_running_shoes_given();
++    }
+     return FALSE;
+ }
+ 

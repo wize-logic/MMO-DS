@@ -1,0 +1,17 @@
+--- a/src/applications/pc_boxes/box_app_manager.c
++++ b/src/applications/pc_boxes/box_app_manager.c
+@@ -2234,6 +2234,14 @@
+     case RELEASE_MON_TRY_RELEASE:
+         if (BoxGraphics_CheckAllTasksDone(boxAppMan->unk_114)) {
+             if (BoxAppMan_CanReleaseMon(boxAppMan)) {
++                /* The session's containers are displays of a server's, so a
++                 * release only the screen performed is a monster the next
++                 * seat resurrects. Ledger it by PID before the removal, as
++                 * the one positive signal that this disappearance was chosen
++                 * rather than a scan losing track of someone. */
++                extern void openmmo_pc_note_release(void *boxMon);
++                openmmo_pc_note_release(BoxApp_GetPreviewedBoxMon(&boxAppMan->boxApp));
++
+                 if (BoxApp_GetPreviewMonSource(&boxAppMan->boxApp) == PREVIEW_MON_IN_CURSOR) {
+                     BoxAppMan_RemoveCursorMon(boxAppMan);
+                 } else {

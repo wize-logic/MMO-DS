@@ -1,0 +1,75 @@
+--- a/src/field_system.c
++++ b/src/field_system.c
+@@ -146,8 +146,11 @@
+ 
+ static FieldSystem *InitFieldSystem(ApplicationManager *appMan)
+ {
+-    Heap_Create(HEAP_ID_APPLICATION, HEAP_ID_FIELD2, HEAP_SIZE_FIELD2);
+-    Heap_Create(HEAP_ID_APPLICATION, HEAP_ID_FIELD3, HEAP_SIZE_FIELD3);
++    /* The map-object table is FIELD2's, at 296 bytes a slot; both sizes were
++     * carved for a 4 MB console and are spent from APPLICATION's spare here. */
++    extern u32 openmmo_heap_size(int heapID, u32 engineSize);
++    Heap_Create(HEAP_ID_APPLICATION, HEAP_ID_FIELD2, openmmo_heap_size(HEAP_ID_FIELD2, HEAP_SIZE_FIELD2));
++    Heap_Create(HEAP_ID_APPLICATION, HEAP_ID_FIELD3, openmmo_heap_size(HEAP_ID_FIELD3, HEAP_SIZE_FIELD3));
+     Heap_Create(HEAP_ID_SYSTEM, HEAP_ID_NETWORK_ICON, HEAP_SIZE_NETWORK_ICON);
+ 
+     FieldSystem *fieldSystem = ApplicationManager_NewData(appMan, sizeof(FieldSystem), HEAP_ID_FIELD2);
+@@ -180,6 +183,15 @@
+ {
+     FieldSystem *fieldSystem = ApplicationManager_Data(appMan);
+ 
++    /* Before anything is freed. The Underground's resources are the field's,
++     * they hold its saveData, its bgConfig and two SysTasks that read them
++     * every frame, and a session that ends down there (a disconnect, the
++     * title) never runs the climb that would have taken them down. The network
++     * icon goes here too: its heap is destroyed at the foot of this function.
++     * mmo/mods/openmmo/src/openmmo_underground.c. */
++    extern void openmmo_underground_field_leaving(void);
++    openmmo_underground_field_leaving();
++
+     MapMatrix_Free(fieldSystem->mapMatrix);
+     MapHeaderData_Free(fieldSystem);
+     Heap_Free(fieldSystem->bagCursor);
+@@ -190,6 +202,11 @@
+     Heap_Free(fieldSystem->processManager);
+     ApplicationManager_FreeData(appMan);
+     Heap_Destroy(HEAP_ID_NETWORK_ICON);
++
++    /* Every remote avatar allocation goes with this heap; drop the pointers to
++     * them here rather than freeing into a heap that is about to cease. */
++    extern void openmmo_field_heap_destroyed(void);
++    openmmo_field_heap_destroyed();
+     Heap_Destroy(HEAP_ID_FIELD2);
+     Heap_Destroy(HEAP_ID_FIELD3);
+ }
+@@ -254,7 +271,29 @@
+             FieldInput_Process_Underground(&fieldInput, fieldSystem);
+         }
+ 
+-        sub_0205805C(fieldSystem, processInput);
++        /* openmmo: the line below walks an underground player by reading this
++         * frame's keypad back out of the DS comm system's received ring
++         * (comm_player_manager.c, CommPlayer_Move -> sub_02035E84), and that
++         * ring is not up in this port, so it moves nobody. The keypad is
++         * taken straight to the avatar instead, which is the overworld's own
++         * step above. Everything else here is untouched, and deliberately so:
++         * FieldInput_Process_Underground is what opens the Underground menu,
++         * digs a sphere, touches a mining wall and reads the touch screen, and
++         * all of it works once its commands have somewhere to go
++         * (mmo/mods/openmmo/src/openmmo_underground.c). */
++        {
++            extern int openmmo_underground_walks_as_overworld(void);
++            extern u16 openmmo_underground_scramble(u16 keys);
++
++            sub_0205805C(fieldSystem, processInput);
++            if (processInput && openmmo_underground_walks_as_overworld()) {
++                /* The Confuse and Reverse traps mangle the keys a player is
++                 * walked by rather than the avatar itself, and on a cartridge
++                 * they do it on the way out to the group. This is that same
++                 * point in this build's chain. */
++                PlayerAvatar_MoveMain(fieldSystem->playerAvatar, fieldSystem->landDataMan, -1, openmmo_underground_scramble(fieldInput.pressedKeys), openmmo_underground_scramble(fieldInput.heldKeys), 0);
++            }
++        }
+         break;
+ 
+     case MAP_LOAD_TYPE_COLOSSEUM:

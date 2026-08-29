@@ -1,0 +1,14 @@
+--- a/src/resource_collection.c
++++ b/src/resource_collection.c
+@@ -212,6 +212,11 @@
+     GF_ASSERT(texMgr);
+ 
+     texResource = TextureResourceManager_AllocTexture(texMgr);
++    if (texResource == NULL) {
++        /* No free slot. The write on the next line is through the NULL. */
++        extern void openmmo_texture_pool_full(int id);
++        openmmo_texture_pool_full(id);
++    }
+     texResource->mode = mode;
+ 
+     if (texResource->mode == TEX_RESOURCE_MODE_SEPARATED) {

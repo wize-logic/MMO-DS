@@ -1,0 +1,17 @@
+--- a/src/player_move.c
++++ b/src/player_move.c
+@@ -1854,5 +1854,14 @@
+ static void PlayerAvatar_SetMovement(PlayerAvatar *playerAvatar, MapObject *mapObj, enum MovementAction movementAction, int speed)
+ {
++    /* A committed action is what goes up, not the pad. Idle face is ignored
++     * inside the hook; a tile leave is a MovementPacket, on-spot is a face.
++     * Catalog bodies have no run cycle, so remap those to a walk first. */
++    extern void openmmo_player_set_movement(void *playerAvatar, void *mapObj, int movementAction, int speed);
++    extern int openmmo_remap_movement(void *playerAvatar, int movementAction);
++
++    movementAction = (enum MovementAction)openmmo_remap_movement(playerAvatar, (int)movementAction);
++    openmmo_player_set_movement(playerAvatar, mapObj, movementAction, speed);
++
+     PlayerAvatar_SetMovementActionAndSpeed(playerAvatar, movementAction, speed);
+     LocalMapObj_SetAnimationCode(mapObj, movementAction);
+ }

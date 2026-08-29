@@ -1,0 +1,68 @@
+--- a/src/sound.c
++++ b/src/sound.c
+@@ -391,11 +391,20 @@
+     u16 *currentBGM = SoundSystem_GetParam(SOUND_SYSTEM_PARAM_FIELD_BGM);
+     u16 currentBankID = Sound_GetBankIDFromSequenceID(*currentBGM);
+ 
+-    if (currentBankID != BANK_BGM_FIELD_sbnk && currentBankID != BANK_BGM_DUNGEON_sbnk) {
+-        SoundSystem_LoadSequenceEx(bgmID, NNS_SND_ARC_LOAD_WAVE);
+-        GF_ASSERT(FALSE);
+-    } else {
+-        SoundSystem_LoadSequenceEx(*currentBGM, NNS_SND_ARC_LOAD_WAVE | NNS_SND_ARC_LOAD_BANK);
++    /* Sinnoh's field music is all in one of two banks, so resuming means
++     * reloading that bank and its waves and the official check asserts on
++     * anything else. A track carried in from another cartridge brings its OWN
++     * bank, and the player is about to be started through it, so load the
++     * bank whatever its number is, which is what the two-bank branch does and
++     * the third-bank branch forgot. The assert was the game's rule, not a
++     * diagnosis of anything wrong. */
++    SoundSystem_LoadSequenceEx(*currentBGM, NNS_SND_ARC_LOAD_WAVE | NNS_SND_ARC_LOAD_BANK);
++
++    /* Only reachable on a bank the official client never has: with the two Sinnoh banks the
++     * sequence being resumed shares the wave archives just loaded. A composed
++     * soundtrack track owns its bank outright, so that comes along too. */
++    if (bgmID != *currentBGM && currentBankID != BANK_BGM_FIELD_sbnk && currentBankID != BANK_BGM_DUNGEON_sbnk) {
++        SoundSystem_LoadSequenceEx(bgmID, NNS_SND_ARC_LOAD_WAVE | NNS_SND_ARC_LOAD_BANK);
+     }
+ 
+     SoundSystem_SaveHeapState(SoundSystem_GetParam(SOUND_SYSTEM_PARAM_HEAP_STATE_BGM));
+@@ -417,12 +426,21 @@
+         Sound_LoadSoundEffectsForScene(SOUND_SCENE_FIELD);
+         SoundSystem_SaveHeapState(SoundSystem_GetParam(SOUND_SYSTEM_PARAM_HEAP_STATE_SFX));
+ 
++        /* The bank above is the field BGM's, whichever bank that is, and the
++         * waves that go with it are what the player needs, the two-bank test
++         * the official client puts here only chose between loading them for the field BGM
++         * and loading them for the sequence being started, which are the same
++         * archives whenever the field BGM IS that sequence. Load the field
++         * BGM's, always. */
+         u16 newBankID = Sound_GetBankIDFromSequenceID(*newFieldBGM);
+-        if (newBankID != BANK_BGM_FIELD_sbnk && newBankID != BANK_BGM_DUNGEON_sbnk) {
+-            SoundSystem_LoadSequenceEx(seqID, NNS_SND_ARC_LOAD_WAVE);
+-            GF_ASSERT(FALSE);
+-        } else {
+-            SoundSystem_LoadSequenceEx(*newFieldBGM, NNS_SND_ARC_LOAD_WAVE);
++        SoundSystem_LoadSequenceEx(*newFieldBGM, NNS_SND_ARC_LOAD_WAVE);
++
++        /* And a ported track's bank holds only its own instruments, so a
++         * different sequence started over it, surf music, a radio jingle,
++         * has to bring its bank and its waves along. Sinnoh's two banks share
++         * theirs, so on a stock map this only reloads what is resident. */
++        if (seqID != *newFieldBGM && newBankID != BANK_BGM_FIELD_sbnk && newBankID != BANK_BGM_DUNGEON_sbnk) {
++            SoundSystem_LoadSequenceEx(seqID, NNS_SND_ARC_LOAD_WAVE | NNS_SND_ARC_LOAD_BANK);
+         }
+ 
+         SoundSystem_SaveHeapState(SoundSystem_GetParam(SOUND_SYSTEM_PARAM_HEAP_STATE_BGM));
+@@ -1358,9 +1376,11 @@
+     }
+ }
+ 
++void openmmo_mix_player_volume(int playerID, int volume); /* mods/openmmo/src/openmmo_mixer.c */
++
+ void Sound_SetPlayerVolume(int playerID, int volume)
+ {
+-    NNS_SndPlayerSetPlayerVolume(playerID, volume);
++    openmmo_mix_player_volume(playerID, volume);
+ }
+ 
+ void Sound_Set2PokemonCriesAllowed(BOOL allowed)

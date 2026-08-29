@@ -1,0 +1,22 @@
+--- a/src/scrcmd_contests.c
++++ b/src/scrcmd_contests.c
+@@ -98,6 +98,19 @@
+     u16 unused = ScriptContext_GetVar(ctx);
+     u32 mapID = MapHeader_GetMapLabelTextID(ctx->fieldSystem->location->mapHeaderID);
+ 
++    /* openmmo: a link contest's placements go up from here and its pipe comes
++     * down here, while the Contest is still allocated. Nothing else would send
++     * them, this client computed the whole contest and the server settles only
++     * when every seat agrees, and a pipe left standing answers for the whole
++     * comm layer afterwards, which would take the Underground and the trade
++     * table with it. A no-op for an official or practice contest, which never
++     * had a pipe. mmo/mods/openmmo/src/openmmo_contest_link.c. */
++    {
++        extern void openmmo_contest_link_ended(void *contest);
++
++        openmmo_contest_link_ended(*contest);
++    }
++
+     Contest_EndContest(*contest, ctx->fieldSystem->saveData, mapID, ctx->fieldSystem->journalEntry);
+     Contest_Free(*contest);
+ 

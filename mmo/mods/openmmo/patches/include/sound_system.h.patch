@@ -1,0 +1,18 @@
+--- a/include/sound_system.h
++++ b/include/sound_system.h
+@@ -8,7 +8,14 @@
+ #include "game_options.h"
+ #include "sys_task.h"
+ 
+-#define SOUND_SYSTEM_HEAP_SIZE           0xBBC00 // ~750kB
++#define SOUND_SYSTEM_HEAP_SIZE           0x1EBC00 // the official client's 0xBBC00 (~750kB) plus 0x130000:
++                                                  // 0xF0000 because a composed soundfont appends
++                                                  // its donor waves to the resident shared archive
++                                                  // (Black's PCM16 samples grow it from 458,564
++                                                  // to 1,397,548 bytes), and 0x40000 because a
++                                                  // composed soundtrack loads each track's own
++                                                  // bank and waves (mmo/SOUNDTRACKS; the biggest
++                                                  // closure measured is 232,468 bytes)
+ #define SOUND_SYSTEM_CAPTURE_BUFFER_SIZE 0x1000
+ #define SOUND_HEAP_STATE_INVALID         -1
+ #define SOUND_FILTER_MAX_SIZE            8

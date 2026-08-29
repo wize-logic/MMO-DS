@@ -1,0 +1,25 @@
+--- a/pc/include/pc_view.h
++++ b/pc/include/pc_view.h
+@@ -39,7 +39,9 @@
+ #endif
+ 
+ #define PC_VIEW_MAGIC   0x50504C56u     /* 'PPLV' */
+-#define PC_VIEW_VERSION 7u
++/* openmmo: 1007 is engine page 7 with PC_VIEW_WIDE_MAX raised below; a
++ * vanilla 7 page has smaller pixel arrays and must be refused on sight. */
++#define PC_VIEW_VERSION 1007u
+ 
+ /*
+  * The audio ring, diamond's design, whole (see that tree's pc_view.h for
+@@ -72,7 +74,10 @@
+  * A reader that ignores `width` reads a native frame correctly and a wide
+  * one skewed, which is why the viewer checks the version.
+  */
+-#define PC_VIEW_WIDE_MAX 342u
++/* openmmo: 684 is 32:9 against 192 rows, so an adaptive aspect can follow
++ * any real window instead of stopping at 16:9. Interiors keep their black
++ * margins past 4:3 either way; outdoors the wider frustum draws more world. */
++#define PC_VIEW_WIDE_MAX 684u
+ 
+ /*
+  * Internal resolution. The 3D layer can be rasterized at this many times the

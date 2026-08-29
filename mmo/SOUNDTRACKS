@@ -1,0 +1,194 @@
+# SOUNDTRACKS, which track answers for which, when Sinnoh plays another
+# cartridge's music.
+#
+# The `soundtrack` launcher key swaps the archive behind the game's own
+# sequence ids for one composed by mmo/tools/soundtrack.py, and this file is
+# the composition: one row per Platinum track, one cell per foreign game
+# naming the track that replaces it. A Platinum track with no row, or no cell
+# for the chosen game, keeps its own music, jingles, fanfares and sound
+# effects are deliberately not here at all, because they load out of resident
+# banks rather than per track, and because system sounds staying constant is
+# what makes the switch read as a soundtrack and not a different game.
+#
+#   <platinum SEQ name>  heartgold=<SEQ name>  blackwhite=<SEQ name>
+#
+# Cells may come in either order and either may be absent. A name that is not
+# in its game's archive stops the compose; nothing here is fuzzy-matched.
+#
+# THE PAIRING IS A JUDGMENT, ROW BY ROW. Same role where the role exists
+# (surf for surf, wild battle for wild battle, evolution for evolution), and
+# the closest neighbour where it does not (Johto has no snow route; Black has
+# no Amity Square). Several Platinum tracks may share one foreign track; the
+# compose carries that track once. Retuning the soundtrack is editing a cell
+# and running `make -C mmo soundtrack` again.
+
+# towns and cities ------------------------------------------------------
+SEQ_TOWN01_D   heartgold=SEQ_GS_T_WAKABA     blackwhite=SEQ_BGM_T_01
+SEQ_TOWN01_N   heartgold=SEQ_GS_T_WAKABA     blackwhite=SEQ_BGM_T_01
+SEQ_TOWN02_D   heartgold=SEQ_GS_C_YOSHINO    blackwhite=SEQ_BGM_T_02
+SEQ_TOWN02_N   heartgold=SEQ_GS_C_YOSHINO    blackwhite=SEQ_BGM_T_02
+SEQ_TOWN03_D   heartgold=SEQ_GS_T_HIWADA     blackwhite=SEQ_BGM_T_03
+SEQ_TOWN03_N   heartgold=SEQ_GS_T_HIWADA     blackwhite=SEQ_BGM_T_03
+SEQ_TOWN04_D   heartgold=SEQ_GS_T_CHOUJI     blackwhite=SEQ_BGM_T_04
+SEQ_TOWN04_N   heartgold=SEQ_GS_T_CHOUJI     blackwhite=SEQ_BGM_T_04
+SEQ_TOWN05_D   heartgold=SEQ_GS_T_MASARA     blackwhite=SEQ_BGM_T_05_SP
+SEQ_TOWN05_N   heartgold=SEQ_GS_T_MASARA     blackwhite=SEQ_BGM_T_05_SP
+SEQ_TOWN06_D   heartgold=SEQ_GS_C_ENJU       blackwhite=SEQ_BGM_C_03
+SEQ_TOWN06_N   heartgold=SEQ_GS_C_ENJU       blackwhite=SEQ_BGM_C_03
+SEQ_TOWN07_D   heartgold=SEQ_GS_T_CHION      blackwhite=SEQ_BGM_T_04
+SEQ_TOWN07_N   heartgold=SEQ_GS_T_CHION      blackwhite=SEQ_BGM_T_04
+SEQ_CITY01_D   heartgold=SEQ_GS_C_KOGANE     blackwhite=SEQ_BGM_C_04
+SEQ_CITY01_N   heartgold=SEQ_GS_C_KOGANE     blackwhite=SEQ_BGM_C_04
+SEQ_CITY02_D   heartgold=SEQ_GS_C_KIKYOU     blackwhite=SEQ_BGM_C_02
+SEQ_CITY02_N   heartgold=SEQ_GS_C_KIKYOU     blackwhite=SEQ_BGM_C_02
+SEQ_CITY03_D   heartgold=SEQ_GS_C_ENJU       blackwhite=SEQ_BGM_C_03
+SEQ_CITY03_N   heartgold=SEQ_GS_C_ENJU       blackwhite=SEQ_BGM_C_03
+SEQ_CITY04_D   heartgold=SEQ_GS_C_ASAGI      blackwhite=SEQ_BGM_C_05
+SEQ_CITY04_N   heartgold=SEQ_GS_C_ASAGI      blackwhite=SEQ_BGM_C_05
+SEQ_CITY05_D   heartgold=SEQ_GS_C_TANBA      blackwhite=SEQ_BGM_C_07
+SEQ_CITY05_N   heartgold=SEQ_GS_C_TANBA      blackwhite=SEQ_BGM_C_07
+SEQ_CITY06_D   heartgold=SEQ_GS_C_KUCHIBA    blackwhite=SEQ_BGM_C_06
+SEQ_CITY06_N   heartgold=SEQ_GS_C_KUCHIBA    blackwhite=SEQ_BGM_C_06
+SEQ_CITY07_D   heartgold=SEQ_GS_C_FUSUBE     blackwhite=SEQ_BGM_C_08_B
+SEQ_CITY07_N   heartgold=SEQ_GS_C_FUSUBE     blackwhite=SEQ_BGM_C_08_B
+SEQ_CITY08_D   heartgold=SEQ_GS_C_HANADA     blackwhite=SEQ_BGM_C_01
+SEQ_CITY08_N   heartgold=SEQ_GS_C_HANADA     blackwhite=SEQ_BGM_C_01
+SEQ_CITY09_D   heartgold=SEQ_GS_C_YAMABUKI   blackwhite=SEQ_BGM_C_10_B
+SEQ_CITY09_N   heartgold=SEQ_GS_C_YAMABUKI   blackwhite=SEQ_BGM_C_10_B
+SEQ_CITY10_D   heartgold=SEQ_GS_C_TOKIWA     blackwhite=SEQ_BGM_POKEMON_LEAGUE
+SEQ_CITY10_N   heartgold=SEQ_GS_C_TOKIWA     blackwhite=SEQ_BGM_POKEMON_LEAGUE
+SEQ_CITY11_D   heartgold=SEQ_GS_C_SEKICHIKU  blackwhite=SEQ_BGM_C_02
+SEQ_CITY11_N   heartgold=SEQ_GS_C_SEKICHIKU  blackwhite=SEQ_BGM_C_02
+
+# routes ----------------------------------------------------------------
+SEQ_ROAD_A_D   heartgold=SEQ_GS_R_1_29       blackwhite=SEQ_BGM_R_A
+SEQ_ROAD_A_N   heartgold=SEQ_GS_R_1_29       blackwhite=SEQ_BGM_R_A
+SEQ_ROAD_B_D   heartgold=SEQ_GS_R_1_30       blackwhite=SEQ_BGM_R_B_SP
+SEQ_ROAD_B_N   heartgold=SEQ_GS_R_1_30       blackwhite=SEQ_BGM_R_B_SP
+SEQ_ROAD_C_D   heartgold=SEQ_GS_R_4_34       blackwhite=SEQ_BGM_R_C_SP
+SEQ_ROAD_C_N   heartgold=SEQ_GS_R_4_34       blackwhite=SEQ_BGM_R_C_SP
+SEQ_ROAD_D_D   heartgold=SEQ_GS_R_6_38       blackwhite=SEQ_BGM_R_D_SP
+SEQ_ROAD_D_N   heartgold=SEQ_GS_R_6_38       blackwhite=SEQ_BGM_R_D_SP
+SEQ_ROAD_E_D   heartgold=SEQ_GS_R_5_34       blackwhite=SEQ_BGM_R_E_SP
+SEQ_ROAD_E_N   heartgold=SEQ_GS_R_5_34       blackwhite=SEQ_BGM_R_E_SP
+SEQ_ROAD_F_D   heartgold=SEQ_GS_R_7_42       blackwhite=SEQ_BGM_R_F
+SEQ_ROAD_F_N   heartgold=SEQ_GS_R_7_42       blackwhite=SEQ_BGM_R_F
+# Johto has no snow route; Black's winter arrangement is the one that fits.
+SEQ_ROAD_SNOW_D  heartgold=SEQ_GS_R_2_30     blackwhite=SEQ_BGM_R_D_WI
+SEQ_ROAD_SNOW_N  heartgold=SEQ_GS_R_2_30     blackwhite=SEQ_BGM_R_D_WI
+# The Battle Zone is the postgame island, which in Johto's world is Kanto.
+SEQ_ROAD_BZA_D heartgold=SEQ_GS_R_9_01       blackwhite=SEQ_BGM_R_B_SU
+SEQ_ROAD_BZA_N heartgold=SEQ_GS_R_9_01       blackwhite=SEQ_BGM_R_B_SU
+SEQ_ROAD_BZB_D heartgold=SEQ_GS_R_16_01      blackwhite=SEQ_BGM_R_C_AU
+SEQ_ROAD_BZB_N heartgold=SEQ_GS_R_16_01      blackwhite=SEQ_BGM_R_C_AU
+
+# surf, bicycle ---------------------------------------------------------
+SEQ_NAMINORI   heartgold=SEQ_GS_NAMINORI     blackwhite=SEQ_BGM_NAMINORI
+SEQ_BICYCLE    heartgold=SEQ_GS_BICYCLE      blackwhite=SEQ_BGM_BICYCLE
+SEQ_PL_BICYCLE heartgold=SEQ_GS_BICYCLE      blackwhite=SEQ_BGM_BICYCLE
+
+# buildings the player lives in -----------------------------------------
+SEQ_PC_01      heartgold=SEQ_GS_POKESEN      blackwhite=SEQ_BGM_POKECEN
+SEQ_PC_02      heartgold=SEQ_GS_POKESEN      blackwhite=SEQ_BGM_POKECEN
+SEQ_GYM        heartgold=SEQ_GS_GYM          blackwhite=SEQ_BGM_GYM
+SEQ_FS         heartgold=SEQ_GS_FS           blackwhite=SEQ_BGM_FS
+SEQ_KENKYUJO   heartgold=SEQ_GS_UTSUGI_RABO  blackwhite=SEQ_BGM_LABO
+SEQ_BLD_GAME   heartgold=SEQ_GS_GAME
+SEQ_BLD_CON    heartgold=SEQ_GS_KABURENJOU   blackwhite=SEQ_BGM_MSL_BEFORE
+SEQ_BLD_BLD_GTC heartgold=SEQ_GS_BLD_GTC     blackwhite=SEQ_BGM_GTS
+SEQ_PL_WIFITOWER  heartgold=SEQ_GS_WIFITOWER
+SEQ_PL_WIFIUNION  heartgold=SEQ_GS_WIFIUNION
+SEQ_PL_WIFIPARADE heartgold=SEQ_GS_WIFIPARADE
+SEQ_PL_WIFIGAME   heartgold=SEQ_GS_WIFIGAME
+SEQ_PL_GURUGURU   heartgold=SEQ_GS_GURUGURU  blackwhite=SEQ_BGM_GURUGURU
+SEQ_PRESENT    heartgold=SEQ_GS_WIFI_PRESENT blackwhite=SEQ_BGM_WIFI_PRESENT
+
+# caves, forests, towers ------------------------------------------------
+SEQ_TANKOU     heartgold=SEQ_GS_D_IWAYAMA    blackwhite=SEQ_BGM_D_02
+SEQ_D_01       heartgold=SEQ_GS_D_CHIKATSUURO blackwhite=SEQ_BGM_D_01
+SEQ_D_02       heartgold=SEQ_GS_D_TOKIWANOMORI3 blackwhite=SEQ_BGM_D_03
+SEQ_D_03       heartgold=SEQ_GS_TO_MADATSUBOMI1 blackwhite=SEQ_BGM_D_06
+SEQ_D_04       heartgold=SEQ_GS_D_CHIKATSUURO blackwhite=SEQ_BGM_D_01
+SEQ_D_05       heartgold=SEQ_GS_D_IWAYAMA    blackwhite=SEQ_BGM_D_02
+SEQ_D_06       heartgold=SEQ_GS_RYUUNOANA    blackwhite=SEQ_BGM_D_05
+SEQ_D_KOUEN    heartgold=SEQ_GS_D_KOUEN
+SEQ_D_AGITO    heartgold=SEQ_GS_D_AJITO      blackwhite=SEQ_BGM_N_CASTLE
+SEQ_D_GINLOBBY heartgold=SEQ_GS_D_AJITO      blackwhite=SEQ_BGM_N_CASTLE
+SEQ_D_SAFARI   heartgold=SEQ_GS_SAFARI_FIELD blackwhite=SEQ_BGM_PALPARK
+SEQ_D_LAKE     heartgold=SEQ_GS_TO_SUZU      blackwhite=SEQ_BGM_D_04
+SEQ_D_MOUNT1   heartgold=SEQ_GS_RYUUNOANA    blackwhite=SEQ_BGM_D_05
+SEQ_D_MOUNT2   heartgold=SEQ_GS_D_KOORINONUKE blackwhite=SEQ_BGM_D_05
+SEQ_D_ICE      heartgold=SEQ_GS_D_KOORINONUKE blackwhite=SEQ_BGM_D_07
+SEQ_D_SECRET   heartgold=SEQ_GS_D_SHINTO     blackwhite=SEQ_BGM_D_06
+SEQ_D_UNKNOWN  heartgold=SEQ_GS_D_UNKNOWN_ISEKI blackwhite=SEQ_BGM_D_04
+SEQ_D_LEAGUE   heartgold=SEQ_GS_D_CHAMPROAD  blackwhite=SEQ_BGM_D_CHAMPROAD
+SEQ_D_CROAD    heartgold=SEQ_GS_CHAMPROAD    blackwhite=SEQ_BGM_D_CHAMPROAD
+SEQ_D_HARDMT   heartgold=SEQ_GS_TO_YAKETA    blackwhite=SEQ_BGM_D_07
+SEQ_POKEPARK   heartgold=SEQ_GS_SAFARI_ROAD  blackwhite=SEQ_BGM_PALPARK
+SEQ_BLD_DENDO  heartgold=SEQ_GS_E_DENDOUIRI  blackwhite=SEQ_BGM_E_DENDOUIRI
+SEQ_BLD_LEGEND heartgold=SEQ_GS_D_SHINTO     blackwhite=SEQ_BGM_N_CASTLE
+SEQ_PL_D_GIRATINA heartgold=SEQ_GS_D_SHINTO  blackwhite=SEQ_BGM_N_CASTLE_BRIDGE
+
+# the Battle Frontier, which HeartGold shares and Black answers with the
+#    Gear Station and its subway --------------------------------------------
+SEQ_BF_TOWWER  heartgold=SEQ_GS_BATTLETOWER  blackwhite=SEQ_BGM_GEAR_STATION
+SEQ_BF_FACT    heartgold=SEQ_GS_BF_FACTORY   blackwhite=SEQ_BGM_GEAR_STATION
+SEQ_PL_BF_ROULETTE heartgold=SEQ_GS_BF_ROULETTE blackwhite=SEQ_BGM_GEAR_STATION
+SEQ_PL_BF_STAGE    heartgold=SEQ_GS_BF_STAGE    blackwhite=SEQ_BGM_GEAR_STATION
+SEQ_PL_BF_CASTLE   heartgold=SEQ_GS_BF_CASTLE   blackwhite=SEQ_BGM_GEAR_STATION
+SEQ_PL_BF_CASTLE02 heartgold=SEQ_GS_BF_CASTLE   blackwhite=SEQ_BGM_GEAR_STATION
+SEQ_PL_BF_FACTORY  heartgold=SEQ_GS_BF_FACTORY  blackwhite=SEQ_BGM_GEAR_STATION
+
+# trainers spotted ------------------------------------------------------
+SEQ_EYE_BOY    heartgold=SEQ_GS_EYE_J_SHOUNEN blackwhite=SEQ_BGM_EYE_01
+SEQ_EYE_KID    heartgold=SEQ_GS_EYE_BOUZU     blackwhite=SEQ_BGM_EYE_02
+SEQ_EYE_GIRL   heartgold=SEQ_GS_EYE_J_SHOUJO  blackwhite=SEQ_BGM_EYE_03
+SEQ_EYE_LADY   heartgold=SEQ_GS_EYE_MAIKO     blackwhite=SEQ_BGM_EYE_04
+SEQ_EYE_RICH   heartgold=SEQ_GS_EYE_K_SHOUJO  blackwhite=SEQ_BGM_EYE_05
+SEQ_EYE_MOUNT  heartgold=SEQ_GS_EYE_K_SHOUNEN blackwhite=SEQ_BGM_EYE_06
+SEQ_EYE_FIGHT  heartgold=SEQ_GS_EYE_K_SHOUNEN blackwhite=SEQ_BGM_EYE_07
+SEQ_EYE_SPORT  heartgold=SEQ_GS_EYE_J_SHOUNEN blackwhite=SEQ_BGM_EYE_08
+SEQ_EYE_FUN    heartgold=SEQ_GS_EYE_J_SHOUJO  blackwhite=SEQ_BGM_EYE_09
+SEQ_EYE_MYS    heartgold=SEQ_GS_EYE_J_AYASHII blackwhite=SEQ_BGM_EYE_10
+SEQ_EYE_ENKA   heartgold=SEQ_GS_EYE_K_AYASHII blackwhite=SEQ_BGM_EYE_11
+SEQ_EYE_ELITE  heartgold=SEQ_GS_EYE_K_AYASHII blackwhite=SEQ_BGM_EYE_12
+SEQ_EYE_TENNO  heartgold=SEQ_GS_EYE_K_SHOUJO  blackwhite=SEQ_BGM_EYE_13
+SEQ_EYE_GINGA  heartgold=SEQ_GS_EYE_ROCKET    blackwhite=SEQ_BGM_EYE_PLASMA
+
+# battles ---------------------------------------------------------------
+SEQ_BA_POKE    heartgold=SEQ_GS_VS_NORAPOKE  blackwhite=SEQ_BGM_VS_NORAPOKE
+SEQ_BA_TRAIN   heartgold=SEQ_GS_VS_TRAINER   blackwhite=SEQ_BGM_VS_TRAINER
+SEQ_BA_GYM     heartgold=SEQ_GS_VS_GYMREADER blackwhite=SEQ_BGM_VS_GYMLEADER
+SEQ_BA_RIVAL   heartgold=SEQ_GS_VS_RIVAL     blackwhite=SEQ_BGM_VS_RIVAL
+SEQ_BA_GINGA   heartgold=SEQ_GS_VS_ROCKET    blackwhite=SEQ_BGM_VS_PLASMA
+SEQ_BA_GINGA3  heartgold=SEQ_GS_VS_ROCKET    blackwhite=SEQ_BGM_VS_PLASMA
+SEQ_BA_AKAGI   heartgold=SEQ_GS_VS_ROCKET    blackwhite=SEQ_BGM_VS_G_CIS
+SEQ_BA_CHANP   heartgold=SEQ_GS_VS_CHAMP     blackwhite=SEQ_BGM_VS_SHIRONA
+SEQ_BA_TENNO   heartgold=SEQ_GS_VS_GYMREADER_KANTO blackwhite=SEQ_BGM_VS_SHITENNO
+SEQ_BA_DPOKE1  heartgold=SEQ_GS_VS_HOUOU     blackwhite=SEQ_BGM_VS_SETPOKE
+SEQ_BA_DPOKE2  heartgold=SEQ_GS_VS_LUGIA     blackwhite=SEQ_BGM_VS_MOVEPOKE
+SEQ_BA_SECRET1 heartgold=SEQ_GS_VS_SUICUNE   blackwhite=SEQ_BGM_VS_MOVEPOKE
+SEQ_BA_SECRET2 heartgold=SEQ_GS_VS_RAIKOU    blackwhite=SEQ_BGM_VS_SETPOKE
+SEQ_PL_BA_GIRA heartgold=SEQ_GS_VS_LUGIA     blackwhite=SEQ_BGM_VS_SHIN
+SEQ_PL_BA_REGI heartgold=SEQ_GS_VS_ENTEI     blackwhite=SEQ_BGM_VS_SETPOKE
+SEQ_PL_BA_BRAIN heartgold=SEQ_GS_BA_BRAIN    blackwhite=SEQ_BGM_VS_SUBWAY_TRAINER
+SEQ_BA_TOWER   heartgold=SEQ_GS_VS_TRAINER_KANTO blackwhite=SEQ_BGM_VS_SUBWAY_TRAINER
+
+# victories -------------------------------------------------------------
+SEQ_WINPOKE    heartgold=SEQ_GS_WIN1         blackwhite=SEQ_BGM_WIN1
+SEQ_WINTRAIN   heartgold=SEQ_GS_WIN2         blackwhite=SEQ_BGM_WIN2
+SEQ_WINTGYM    heartgold=SEQ_GS_WIN3         blackwhite=SEQ_BGM_WIN3
+SEQ_WINCHAMP   heartgold=SEQ_GS_WIN3         blackwhite=SEQ_BGM_WIN5
+SEQ_WINGINGA   heartgold=SEQ_GS_WIN2         blackwhite=SEQ_BGM_WIN2
+SEQ_WINAKAGI   heartgold=SEQ_GS_WIN2         blackwhite=SEQ_BGM_WIN2
+SEQ_WINTENNO   heartgold=SEQ_GS_WIN3         blackwhite=SEQ_BGM_WIN4
+SEQ_PL_WINBRAIN heartgold=SEQ_GS_WINBRAIN    blackwhite=SEQ_BGM_WIN6
+
+# moments every game has ------------------------------------------------
+SEQ_SHINKA     heartgold=SEQ_GS_SHINKA       blackwhite=SEQ_BGM_SHINKA
+SEQ_KOUKAN     heartgold=SEQ_GS_KOUKAN       blackwhite=SEQ_BGM_KOUKAN
+SEQ_TSURETEKE  heartgold=SEQ_GS_E_TSURETEKE1 blackwhite=SEQ_BGM_E_TSURETEKE1
+SEQ_THE_RIV    heartgold=SEQ_GS_E_RIVAL1     blackwhite=SEQ_BGM_E_RIVAL
+SEQ_THE_BOY    heartgold=SEQ_GS_E_SUPPORT_M  blackwhite=SEQ_BGM_E_SUPPORT
+SEQ_THE_GIRL   heartgold=SEQ_GS_E_SUPPORT_F  blackwhite=SEQ_BGM_E_SUPPORT
+SEQ_PL_HANDSOME blackwhite=SEQ_BGM_E_HANDSOME

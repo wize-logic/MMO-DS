@@ -1,0 +1,86 @@
+{
+  "asset": {
+    "version": "2.0"
+  },
+  "scene": 0,
+  "scenes": [
+    {
+      "nodes": [
+        0
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "mesh": 0
+    }
+  ],
+  "meshes": [
+    {
+      "name": "box",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "COLOR_0": 2
+          },
+          "indices": 1,
+          "mode": 4
+        }
+      ]
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 8,
+      "type": "VEC3",
+      "min": [
+        -8,
+        0,
+        -8
+      ],
+      "max": [
+        8,
+        12,
+        8
+      ]
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5123,
+      "count": 36,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 8,
+      "type": "VEC3"
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 96
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 96,
+      "byteLength": 72
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 168,
+      "byteLength": 96
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 264,
+      "uri": "data:application/octet-stream;base64,AAAAwQAAAAAAAADBAAAAQQAAAAAAAADBAAAAQQAAAAAAAABBAAAAwQAAAAAAAABBAAAAwQAAQEEAAADBAAAAQQAAQEEAAADBAAAAQQAAQEEAAABBAAAAwQAAQEEAAABBAAABAAIAAAACAAMABAAGAAUABAAHAAYAAAAEAAUAAAAFAAEAAwACAAYAAwAGAAcAAAADAAcAAAAHAAQAAQAFAAYAAQAGAAIAAAAAAAAAgD8AAIA/AAAAAAAAgD8AAIA/AAAAAAAAgD8AAIA/AAAAAAAAgD8AAIA/AAAAAAAAgD8AAIA/AAAAAAAAgD8AAIA/AAAAAAAAgD8AAIA/AAAAAAAAgD8AAIA/"
+    }
+  ]
+}

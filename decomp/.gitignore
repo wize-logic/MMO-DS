@@ -1,0 +1,5 @@
+# Point DECOMP_DIR at your own checkouts, or put them here by name:
+#   pokeemerald  pokefirered  pokeheartgold
+# Sinnoh comes from the engine submodule and needs nothing here.
+*
+!.gitignore

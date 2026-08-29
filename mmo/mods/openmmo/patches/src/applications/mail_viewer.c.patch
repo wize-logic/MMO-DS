@@ -1,0 +1,20 @@
+--- a/src/applications/mail_viewer.c
++++ b/src/applications/mail_viewer.c
+@@ -814,6 +814,9 @@
+ 
+ static void MailViewer_PrintText(MailViewerApp *mailViewerApp)
+ {
++    extern int openmmo_mail_paint(Window *windows, int heap);
++
++    if (!openmmo_mail_paint(mailViewerApp->windows, mailViewerApp->heapID)) {
+     for (int i = 0; i < MAIL_MAX_SENTENCES; i++) {
+         if (!EasyChatSentence_IsValid(&mailViewerApp->args->sentences[i])) {
+             continue;
+@@ -825,6 +828,7 @@
+         String_Free(sentenceStr);
+         Window_CopyToVRAM(&mailViewerApp->windows[i]);
+     }
++    }
+ 
+     if (mailViewerApp->mode == MAIL_VIEWER_MODE_WRITE) {
+         mailViewerApp->loader = MessageLoader_Init(MSG_LOADER_LOAD_ON_DEMAND, NARC_INDEX_MSGDATA__PL_MSG, TEXT_BANK_MAIL, mailViewerApp->heapID);

@@ -1,0 +1,2 @@
+# nitrogfx refuses LF in JASC-PAL files.
+*.pal text eol=crlf

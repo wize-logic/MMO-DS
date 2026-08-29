@@ -1,0 +1,273 @@
+# The same client, built for Windows.
+#
+#   make -f Makefile.win winlibs     # fetch/build SDL2, raylib, freetype (once)
+#   make -f Makefile.win all         # openmmo-client.exe
+#   make -f Makefile.win viewer      # openmmo-view.exe
+#   make -f Makefile.win launcher    # openmmo-launch.exe
+#   make -f Makefile.win programs    # all three
+#   make -f Makefile.win fused       # pokeplatinum.exe (the game itself)
+#   make -f Makefile.win package     # all of it as one zip a person unpacks
+#
+# This is mmo/Makefile retargeted at i686-w64-mingw32, ONE pipeline, two
+# toolchains, which is the arrangement the engine's own pc/Makefile.win uses
+# and for the same reason: a Windows makefile written as a copy pays for every
+# pipeline fix twice. Everything above is `?=`, so this file sets
+# what genuinely differs and nothing else.
+#
+# WHY A WINDOWS BUILD AT ALL. A Windows exe draws through Windows and never
+# meets WSLg, whose compositor can degrade to "copy mode" and present a Linux
+# window as black. That is the engine's measurement, made 2026-08-11, and it is
+# why every one of diamond's play sessions uses its .exe.
+#
+# WHAT IS THE SAME AND MUST STAY SO:
+#
+#   * 32-bit. The client's structs are the console's, so the guest ABI is not
+#     negotiable, and the fused build links this archive. i686-w64-mingw32 is
+#     32-bit by construction, so there is no -m32 to pass.
+#
+#   * -mno-ms-bitfields -mno-align-double ARE THE ABI, not tuning. Without them
+#     mingw gives bitfield / long-long / double structs a private layout and
+#     every guest struct offset silently diverges from the DS's. Diamond
+#     measured saves written without these as unreadable anywhere else, and
+#     `abicheck` below reads them back out of the engine's own flags.
+#
+#   * Everything is 32-bit here, INCLUDING the window. On Linux the window is a
+#     64-bit program because the host's SDL2 is a 64-bit ELF that a -m32 process
+#     can neither link nor dlopen, that split is why the two halves meet in a
+#     shared page at all. Here one toolchain builds everything, so the split is
+#     not forced; the page stays, because the page is the design and not a
+#     workaround, and it is all uint32_t either way.
+#
+# WHAT THE THREE LIBRARIES ARE. No distribution puts SDL2, raylib or freetype
+# on a mingw prefix, so the build brings its own: tools/win_deps.sh fetches the
+# two that publish a mingw binary and cross-builds the one that does not, into
+# build/win/deps, which is inside the gitignored build directory. No
+# third-party bytes are ever committed.
+#
+# WHAT IS NOT HERE. `test` builds a -m32 ELF suite of 45 C files and 75 shell
+# scripts that drive Linux binaries, servers and a ROM; a PE binary cannot be
+# run by any of it on this host. The Windows build's gate is that it LINKS,
+# `make -f Makefile.win programs fused`, and past that it is a person on a
+# Windows machine. The instruments (portasan, portmelon, portdiff) are the ELF
+# build's for the same reason.
+
+WROOT := $(abspath $(dir $(firstword $(MAKEFILE_LIST))))
+
+# Every PE link embeds a TimeDateStamp, so two builds of one tree hash
+# differently, the feed calls binaries that did not change stale, and a
+# repair re-downloads ~14 MB the player already has. SOURCE_DATE_EPOCH is
+# the reproducible-builds lever binutils honours for that stamp; the
+# commit's own time keeps it meaningful, and EXPORTING it here reaches our
+# three links and the engine's own (`fused` runs pc/Makefile.win in this
+# environment) without touching either file's flags. Measured on this
+# host's binutils 2.46: two links under one epoch are byte-identical.
+export SOURCE_DATE_EPOCH ?= $(or $(shell git -C $(WROOT) log -1 --format=%ct 2>/dev/null),0)
+
+MINGW ?= i686-w64-mingw32
+# Not whichever compiler is first on $PATH. The engine's pc/Makefile.win says
+# why in full; the short form is that brew's mingw links the C library out of
+# api-ms-win-crt-*.dll (a Windows 10 component: Windows 7 needs a
+# redistributable, XP refuses the exe before main) and its posix thread model
+# drags in winpthread, whose clock imports GetTickCount64, a Vista symbol
+# and the same loader refusal. The -win32 variant links msvcrt.dll, which
+# every Windows since 98 has, and this client calls no pthread anywhere.
+# `make -f Makefile.win winabi` reads the finished import tables, which is
+# the only statement about this that cannot go stale.
+MINGW_TOOLS ?= /usr/bin/$(MINGW)
+MINGW_CC    ?= $(MINGW_TOOLS)-gcc-win32
+CC    := $(MINGW_CC)
+AR    := $(MINGW_TOOLS)-ar
+
+ifeq ($(shell command -v $(MINGW_CC) 2>/dev/null),)
+$(error no $(MINGW_CC); install mingw-w64 (Debian/Ubuntu: gcc-mingw-w64-i686) \
+ or set MINGW_CC to a msvcrt-linking cross compiler)
+endif
+
+EXE   := .exe
+BUILD ?= $(WROOT)/build/win$(if $(filter 1,$(RELEASE)),-release)
+
+# The one thing the release differs by. package.sh is the same script on both
+# hosts, same layout, same allowlist, same manifest, and this picks the
+# .exe names, the DLL beside the window, the .cmd front door and the zip.
+PACKAGE_HOST := windows
+
+# 32-bit is the toolchain's only shape, so no -m32; PIE/PIC is not the PE
+# model, so no -fno-pie. The two -mno- flags are the ABI (see the header).
+ABI := -mno-ms-bitfields -mno-align-double
+
+# What this build calls itself, in every line `abicheck` prints. Three
+# makefiles build this client for three ABIs; the verdict has to say which.
+ABI_NAME := windows-x86-32
+
+# -static so a player's machine needs nothing installed: the exe carries
+# libgcc (the win32 thread model has no winpthread to carry). SDL2.dll is the
+# one library that cannot be absorbed, and `dist` below is where it is copied.
+LDFLAGS := $(ABI) -static
+# ws2_32 is the socket layer this client's src/sockets.c calls; on Linux those
+# symbols are glibc's and need no naming. comdlg32 is the system's own
+# "open a file" window, which src/platform.c calls for the ROM picker; it is
+# in every program because platform.o is.
+LDLIBS  := -lm -lws2_32 -lcomdlg32
+
+# ---------------------------------------------------------------- libraries
+#
+# Recursively expanded (`=`, not `:=`) on purpose: on a tree that has never
+# built for Windows these prefixes do not exist when this file is read, and
+# they do by the time a recipe runs, winlibs below is an order-only
+# prerequisite of both windows. A `:=` here would bake in the empty answer and
+# report "SDL2 not found" on the build that had just fetched it.
+# Under the working tree's build/win even when BUILD is the release one: these
+# are toolchain artifacts (a cross-built freetype, an unpacked raylib), not
+# something a build profile changes. Anchored to $(BUILD) instead, every new
+# tree re-fetches and cross-builds all three before it can compile anything,
+# which is a first release build that fails on a fresh checkout for no reason.
+WINDEPS    ?= $(WROOT)/build/win/deps
+SDL2_MINGW  = $(shell cat $(WINDEPS)/.sdl2-prefix 2>/dev/null)
+RAYLIB_DIR ?= $(WINDEPS)/raylib
+FREETYPE   ?= $(WINDEPS)/freetype
+
+SDL_CFLAGS       = $(if $(SDL2_MINGW),-I$(SDL2_MINGW)/include/SDL2 -Dmain=SDL_main)
+SDL_LIBS         = $(if $(SDL2_MINGW),-L$(SDL2_MINGW)/lib -lmingw32 -lSDL2main -lSDL2)
+FREETYPE_CFLAGS  = -I$(FREETYPE)/include/freetype2
+FREETYPE_LIBS    = $(if $(wildcard $(FREETYPE)/lib/libfreetype.a),-L$(FREETYPE)/lib -lfreetype)
+FREETYPE_RPATH  :=
+# -mwindows so no console box appears beside the window a player is looking at.
+# SDL2main supplies the WinMain the GUI subsystem's entry point wants.
+VIEWLINK         = $(SDL_LIBS) $(FREETYPE_LIBS) -mwindows -lm
+
+RAYLIB_CFLAGS  = -I$(RAYLIB_DIR)/include
+RAYLIB_LIBS    = $(if $(wildcard $(RAYLIB_DIR)/lib/libraylib.a),-L$(RAYLIB_DIR)/lib -lraylib)
+RAYLIB_RPATH  :=
+# raylib's own Windows dependencies: the GL context, the window, and the timer
+# and audio device it opens through winmm.
+LAUNCHLINK     = $(RAYLIB_LIBS) -lopengl32 -lgdi32 -lwinmm -lcomdlg32 -mwindows -lm
+
+# ------------------------------------------------------------------- fused
+#
+# The game itself, on the other toolchain: the engine's own Windows build with
+# this client stacked into it as a mod, exactly as `fused` does on Linux.
+# Recursive, like the library prefixes above: ENGINE is the base makefile's
+# and that file is included below this line.
+ENGINE_MAKEFILE  = $(ENGINE)/pc/Makefile.win
+FUSED           := $(BUILD)/fused
+
+include $(WROOT)/Makefile
+
+# The ebp chain is how a stack is walked on 32-bit Windows, and here it is
+# load-bearing rather than a debugging nicety: src/platform.c's
+# mmo_plat_backtrace follows the saved-ebp links itself, and every line of
+# stack in a crash log comes from that walk. At -O2 gcc takes ebp as a general
+# register on i386, which leaves nothing to follow, a release built without
+# this writes crash logs with no stack in them, on Windows and under wine
+# alike.
+#
+# It cannot be handed to ntdll instead. RtlCaptureStackBackTrace is the call
+# that does this on Windows, and wine's own ntdll is compiled without frame
+# pointers, so on i386 it starts the walk from the ebp ITS frame holds and
+# dereferences a scratch register: `movl (%ebp),%edx` with ebp=6, a SEGV in
+# any program that asks, whatever this file compiles ours with. That is what
+# mmo/dist.sh's `wine bin/openmmo-launch.exe --help` check was refusing the
+# whole windows half of a release over, a crash handler warming up before
+# main() had looked at argv, and why platform.c walks the chain this flag
+# leaves behind.
+#
+# Appended rather than assigned, and after the include: RELEASE picks the
+# optimisation level above and this is the same flag either way. Both knobs,
+# because our three programs come from two of them, the client and the
+# archive through CFLAGS/OPTFLAGS, the window and the front door through
+# VIEWFLAGS/VIEWOPT. The engine's own objects are compiled by pc/Makefile.win
+# and keep its flags, so a walk that climbs out of our code into theirs stops
+# there: one frame short rather than one crash, which is what the bounds check
+# around the read is for.
+OPTFLAGS += -fno-omit-frame-pointer
+VIEWOPT  += -fno-omit-frame-pointer
+
+# EXTRA_OBJS names the icon object as well as our archive, because a command
+# line assignment beats the `+=` the engine's Makefile.win uses to add it,
+# passing only the archive would silently drop the icon and the version block
+# out of every exe. Both are files, so both may stand as prerequisites.
+# -e names our own entry point, which reserves the console's addresses before
+# the C runtime starts and then jumps to the startup it replaced. It rides in
+# LDLIBS because that is the only part of the fused link line this file owns,
+# and it lands after the engine's own `-Wl,-e,_mainCRTStartup`, which is what
+# makes it win. src/platform.c is the other half; if the symbol is renamed
+# there, this breaks loudly at the link and not quietly at boot.
+FUSEDVARS := MODS_DIR=$(ROOT)/mods MODS=openmmo \
+             EXTRA_OBJS='$(LIB) $(FUSED)/icon/pokeplatinum.res.o' \
+             LDLIBS='-lm -lws2_32 -lcomdlg32 -lwinpthread -Wl,-e,_openmmo_pe_start' \
+             PC_MODS_DIR=$(PC_MODS_DIR) $(if $(PC_MODS),PC_MODS=$(PC_MODS))
+
+.PHONY: winlibs programs
+# A stamp rather than a phony, so a build that already has the three trees does
+# not re-run the script for every program. Delete build/win/deps/.ok to make it
+# look again.
+winlibs: $(WINDEPS)/.ok
+$(WINDEPS)/.ok:
+	@$(ROOT)/tools/win_deps.sh $(WINDEPS)
+	@touch $@
+
+# The three programs a player is given, which is what "it builds for Windows"
+# means. The game is `fused` and needs the engine checkout as well.
+programs: $(TARGET) $(VIEWER) $(LAUNCHER) winabi
+	@echo "windows: ok -- $(TARGET), $(VIEWER), $(LAUNCHER)"
+
+# Every shipped exe must import its C library from msvcrt.dll and nothing
+# that arrived after Windows XP: the loader resolves every import before
+# main() runs, so one post-XP name in one of them is a machine where nothing
+# starts. The engine's checker reads the finished import tables, the only
+# statement about this that cannot go stale.
+.PHONY: winabi
+# SKIPped, loudly, on an engine checkout that has no checker: the script is the
+# engine's and an engine that predates it is not a broken Windows build. A
+# silent pass would be worse than either, "the checks passed" must never mean
+# "the checks were skipped", so the skip says which file it wanted.
+WINABI_CHECK := $(ENGINE)/pc/win_abi_check.py
+winabi: $(TARGET) $(VIEWER) $(LAUNCHER)
+	@if [ ! -f $(WINABI_CHECK) ]; then \
+	    echo "winabi: SKIP -- no $(WINABI_CHECK) in this engine checkout;"; \
+	    echo "        the import tables of the three exes were NOT read."; \
+	    exit 0; \
+	fi; \
+	for exe in $(TARGET) $(VIEWER) $(LAUNCHER); do \
+	    python3 $(WINABI_CHECK) \
+	        --objdump $(MINGW_TOOLS)-objdump $$exe || exit 1; \
+	done
+
+$(VIEWER) $(LAUNCHER): | $(WINDEPS)/.ok
+
+# The smallest binary that asks the game's first question. Same toolchain,
+# same ABI, same entry point, none of the game, so a failure here is the
+# machine's and a success here is the game's. Console subsystem on purpose:
+# it is run from a terminal and read there. tools/win_guest_probe.c says what
+# the two answers mean.
+# TWO of them, because one is not a control. The plain build takes mingw's
+# defaults; the second takes the three link settings the fused game differs by,
+# its image base, ASLR turned off, and an 8 MB stack. If both hold all nine
+# regions the binary is not the cause and the machine is. If only the first
+# does, the cause is one of those three, and there is nothing else left in the
+# difference between a 5 KB program and a 94 MB one that the loader sees.
+.PHONY: winprobe
+WINPROBE  := $(BUILD)/openmmo-guest-probe$(EXE)
+WINPROBE2 := $(BUILD)/openmmo-guest-probe-gamelink$(EXE)
+GAMELINK  := -Wl,--image-base=0x10000000 -Wl,--disable-dynamicbase \
+             -Wl,--stack,8388608
+winprobe: $(WINPROBE) $(WINPROBE2)
+	@echo "winprobe: ok -- $(WINPROBE)"
+	@echo "winprobe: ok -- $(WINPROBE2)  (the game's image base, no ASLR, 8 MB stack)"
+$(WINPROBE): $(ROOT)/tools/win_guest_probe.c $(LIB)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB) $(LDFLAGS) -Wl,-e,_openmmo_pe_start $(LDLIBS)
+$(WINPROBE2): $(ROOT)/tools/win_guest_probe.c $(LIB)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB) $(LDFLAGS) $(GAMELINK) \
+	    -Wl,-e,_openmmo_pe_start $(LDLIBS)
+
+# SDL2.dll beside the window, because it is the one library a -static exe
+# cannot absorb and the one thing a Windows machine does not already have. The
+# port ships it the same way from its own Makefile.win. It is not game data,
+# package.sh's rule is about the cartridge and what comes out of it, and its
+# licence (zlib) asks for nothing this build does not already do.
+$(VIEWER): $(BUILD)/SDL2.dll
+$(BUILD)/SDL2.dll: | $(WINDEPS)/.ok
+	@mkdir -p $(BUILD)
+	@cp -f $(SDL2_MINGW)/bin/SDL2.dll $@

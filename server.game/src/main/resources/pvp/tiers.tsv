@@ -1,0 +1,43 @@
+# Which species a competitive queue will not take.
+#
+# THIS IS A SEED, NOT A TIER LIST. What it holds is the one thing that can be
+# stated without a competitive judgement: the cover legendaries and mythicals
+# that official play has restricted in every generation through this one. It
+# says nothing at all about Over Used, Under Used or Never Used, because those
+# are a balance decision that belongs to a person watching real matches, and a
+# list invented here would be worse than an empty one, it would look
+# authoritative.
+#
+# Until somebody tiers them, Under Used and Never Used behave exactly like Over
+# Used. The server says so at startup rather than letting it be discovered in a
+# match.
+#
+# This file is read at runtime. Point OPENMMO_PVP_TIERS at another copy to
+# change tiering without a release; the packaged one is the fallback.
+#
+# Columns are tab-separated:
+#   dex   form   tiers                   name
+#
+# `tiers` is a comma-separated list of TierGroup names. A species may sit in
+# several. A species absent from this file is untiered, and untiered is
+# permitted everywhere, so an addition here is a restriction, never a grant.
+#
+# form 0 is the ordinary forme. A row with form -1 covers every forme.
+
+150	-1	UBERS	Mewtwo
+151	-1	UBERS	Mew
+249	-1	UBERS	Lugia
+250	-1	UBERS	Ho-Oh
+251	-1	UBERS	Celebi
+382	-1	UBERS	Kyogre
+383	-1	UBERS	Groudon
+384	-1	UBERS	Rayquaza
+385	-1	UBERS	Jirachi
+386	-1	UBERS	Deoxys
+483	-1	UBERS	Dialga
+484	-1	UBERS	Palkia
+487	-1	UBERS	Giratina
+490	-1	UBERS	Manaphy
+491	-1	UBERS	Darkrai
+492	-1	UBERS	Shaymin
+493	-1	UBERS	Arceus

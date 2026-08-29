@@ -1,0 +1,54 @@
+--- a/src/wireless_manager.c
++++ b/src/wireless_manager.c
+@@ -991,6 +991,11 @@
+  */
+ u16 WirelessManager_GetConnectedBitmap(void)
+ {
++    /* openmmo: no radio here; see WirelessManager_SetDisconnectCallback. */
++    if (sWirelessManager == NULL) {
++        return 0;
++    }
++
+     return sWirelessManager->connectedBitmap;
+ }
+ 
+@@ -1711,6 +1716,16 @@
+  */
+ void WirelessManager_SetDisconnectCallback(WirelessManagerConnectFunc callback)
+ {
++    /* openmmo: there is no DS radio in this port, so this manager is never
++     * allocated, and the Underground registers a disconnect callback on its
++     * way up whether one exists or not (underground/manager.c,
++     * UndergroundMan_Init), which is a write through NULL. A link that cannot
++     * drop has nothing to call back, so the registration is simply dropped.
++     * The engine's own guard everywhere else in this file is the same test. */
++    if (sWirelessManager == NULL) {
++        return;
++    }
++
+     sWirelessManager->disconnectCallback = callback;
+ }
+ 
+@@ -1731,6 +1746,11 @@
+  */
+ void WirelessManager_SetPauseConnection(BOOL pause)
+ {
++    /* openmmo: no radio here; see WirelessManager_SetDisconnectCallback. */
++    if (sWirelessManager == NULL) {
++        return;
++    }
++
+     sWirelessManager->pauseConnection = pause;
+ }
+ 
+@@ -1761,5 +1781,10 @@
+  */
+ void WirelessManager_SetPauseClientConnection(BOOL pause)
+ {
++    /* openmmo: no radio here; see WirelessManager_SetDisconnectCallback. */
++    if (sWirelessManager == NULL) {
++        return;
++    }
++
+     sWirelessManager->pauseConnectionClient = pause;
+ }

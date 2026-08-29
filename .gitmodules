@@ -1,0 +1,7 @@
+# The engine the client is fused with. `make -C mmo fused` builds against it,
+# and it is also where the Sinnoh generators read their data. ENGINE or
+# ENGINE_DIR overrides it for a machine with its own checkout.
+[submodule "engine/pokeplatinum"]
+	path = engine/pokeplatinum
+	url = https://github.com/wize-logic/pokeplatinum-port
+	branch = main

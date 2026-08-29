@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Create your account &middot; OpenMMO DS</title>
+<meta name="description" content="Create an account. Free, no email needed.">
+<link rel="canonical" href="https://mmods.net/register.html">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#0a0e1c">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="OpenMMO DS">
+<meta property="og:url" content="https://mmods.net/register.html">
+<meta property="og:title" content="Create your account &middot; OpenMMO DS">
+<meta property="og:description" content="Create an account. Free, no email needed.">
+<meta property="og:image" content="https://mmods.net/og-image.png?v=2">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="OpenMMO DS">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Create your account &middot; OpenMMO DS">
+<meta name="twitter:description" content="Create an account. Free, no email needed.">
+<meta name="twitter:image" content="https://mmods.net/og-image.png?v=2">
+
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="/"><span class="mark"></span>OpenMMO DS</a>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/news.html">News</a>
+    <a href="https://github.com/wize-logic/OpenMMO-DS">Download</a>
+    <a class="only-wide" href="https://github.com/openmmo-org/OpenMMO">Source</a>
+    <a class="cta" href="/register.html">Play now</a>
+  </nav>
+</header>
+
+<main class="shell narrow">
+  <div class="section-head">
+    <h1>Create your account</h1>
+  </div>
+
+  <div class="card">
+    <form method="post" action="/api/register">
+      <label for="username">Username</label>
+      <input id="username" name="username" autocomplete="username" required
+             minlength="3" maxlength="32" pattern="[A-Za-z0-9_-]+" autofocus>
+      <p class="hint">3 to 32 characters: letters, numbers, underscore and hyphen.</p>
+
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" required
+             minlength="8" maxlength="128">
+      <p class="hint">At least 8 characters. No email on file, so it can't be reset if lost.</p>
+
+      <label for="confirm">Password again</label>
+      <input id="confirm" name="confirm" type="password" autocomplete="new-password" required
+             minlength="8" maxlength="128">
+
+      <div class="actions">
+        <button class="button" type="submit">Create my account &rarr;</button>
+      </div>
+    </form>
+  </div>
+
+  <p class="muted centered">Already have one? Sign in from the
+    <a href="https://github.com/wize-logic/OpenMMO-DS">client</a>, not here.</p>
+</main>
+
+<footer class="bar foot">
+  <span>OpenMMO DS is a fan project in development. Not affiliated with PokeMMO or Nintendo.</span>
+</footer>
+</body>
+</html>

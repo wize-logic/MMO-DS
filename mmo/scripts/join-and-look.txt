@@ -1,0 +1,18 @@
+# A reproducible headless session.
+#
+# Run against a live server:
+#   openmmo-client script --script mmo/scripts/join-and-look.txt \
+#       --user admin --pass admin
+#
+# Directives run in order; an `await` blocks until the condition holds or the
+# per-step budget runs out. See mmo/include/script.h for the full grammar.
+
+connect
+await authed
+await in_game
+frames 120          # let the join burst (self spawn, map, world state) settle
+move south
+move south
+move north
+frames 120
+disconnect

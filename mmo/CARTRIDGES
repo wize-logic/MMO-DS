@@ -1,0 +1,118 @@
+# CARTRIDGES, every cartridge this client can be handed, and what each one
+# serves once it is in the folder.
+#
+# A cartridge is a SLOT, not an argument. `make import IMPORT_ROM=…` reads a
+# path off a make line and the image's identity survives only as the four
+# characters at the head of a `port.recipe` line; the official client instead keeps a table
+# of slots, gives each one a name a player recognises, and dispatches every
+# question, what this image is, what it unlocks, why it was turned away, on
+# a lookup into it. This is that table. `tools/modport.sh` reads it, and
+# `tools/gen_cartridges.py` renders it into `src/cartridges.gen.h` so the
+# launcher and the porter cannot answer the same question differently.
+#
+# A ROW IS A BUILD, NOT A GAME. The fourth character of an NDS game code is the
+# build's region, and it is where the language comes from, IPKE and IPKD are
+# the same game and not the same cartridge. So a row is a full four-character
+# code, and a code whose first three characters are known while its fourth is
+# not gets a refusal that names the slot ("the German build of Heart Gold is
+# not one this client has read") rather than a parse error. That is the official client's
+# behaviour too: it turns down a build it does not know with a sentence naming
+# the slot, not the file.
+#
+# NOTHING HERE IS BELIEVED, ONLY MEASURED. A row is `read` only if an image of
+# that exact code has been in front of this repository and the archive it names
+# was counted through the porter's own NARC reader. Every other build of a game
+# we do know is `unread`: the slot exists, the code is the published one, and no
+# claim is made about its archives until somebody hands us one. `unread` refuses
+# like a stranger does, but it refuses by NAME, which is the difference between
+# "this client has never seen that build" and "that is not a cartridge".
+#
+# WHAT A SLOT SERVES is the kind list on its row, in `port.recipe`'s vocabulary.
+# `-` means it serves nothing: either it is the image the game runs on (the host
+# slot), or the porter reads it and what comes out does not draw here.
+#
+#   status    what it means for a fill
+#   ------    ------------------------
+#   host      the player's own image. The game runs on it and nothing is
+#             imported from it; handed as a SOURCE it is refused as a no-op.
+#   read      an image of this code was measured here. It serves the kinds
+#             listed and a recipe line may name it.
+#   extracts  the porter copies members out of it and the engine's loader does
+#             not draw them, and nothing here knows how to fix that. Refused as
+#             a source, on the porter's own warning. No cartridge is this today:
+#             Diamond was, until its scramble direction was measured.
+#   refuses   turned away before a byte of its archive is read, because its
+#             layout is not the one this engine's loaders read at all.
+#   unread    the slot is known and no image of this build has been read here.
+#
+# Columns: code, slot, status, kinds, then the title its own header carries
+# (quoted, because a header title has a space in it) and the note saying how the
+# row was arrived at.
+
+# code  slot        status    kinds     title         note
+CPUE    platinum    host      -         "POKEMON PL"  read 2026-08-16; the client's own image
+IPKE    heartgold   read      pokemon,item_icon,trainer  "POKEMON HG"  read 2026-08-16; a/0/0/4 six a species, a/0/1/8 two an item, a/0/5/8 five a class; gs_sound_data read 2026-08-25 (2379 sequences), serves the soundtrack switch
+ADAE    diamond     read      pokemon   "POKEMON D"   read 2026-08-16; its sheets scramble back-to-front and are re-encoded on the way in (2026-08-21)
+IPGE    soulsilver  read      pokemon,item_icon,trainer  "POKEMON SS"  read 2026-08-21; the HeartGold twin, and all three archives are byte-identical to it, a second way to own the same art, not new art; the soundtrack door takes it as the twin, gated by the audio lab
+APAE    pearl       read      pokemon   "POKEMON P"   read 2026-08-21; the Diamond twin, and its pokegra is byte-identical to it, a second way to own the same art, not new art
+IRBO    black       refuses   -         "POKEMON B"   read 2026-08-16; a/0/0/4 is 14285 members, LZ-compressed; wb_sound_data read 2026-08-25 (2076 sequences, one bank per track) and serves the soundtrack switch through its own door, tools/soundtrack.py
+
+# The published codes of builds no image of which has been in front of this
+# repository. They are here so a player who owns one is told which slot they
+# handed us and that we have not read it, instead of being told their file is
+# not a cartridge. Adding a row above means measuring one, not editing this
+# comment.
+IRAO    white       unread    -         -             White, the Black twin; the soundtrack door takes it as one, gated by the audio lab
+CPUJ    platinum    unread    -         -             Japanese Platinum
+IPKJ    heartgold   unread    -         -             Japanese HeartGold
+
+# What a slot is CALLED. The rows above use an identifier because a shell
+# matches on it; a player reads the name on the box. The official client's refusals name the
+# cartridge this way too ("Heart Gold/SoulSilver ROM"), and a sentence that says
+# `heartgold` reads like a variable that escaped.
+slot  platinum    "Platinum"
+slot  heartgold   "Heart Gold"
+slot  soulsilver  "SoulSilver"
+slot  diamond     "Diamond"
+slot  pearl       "Pearl"
+slot  black       "Black"
+slot  white       "White"
+
+# WHICH DIRECTION A GAME SCRAMBLES ITS SPRITES. Gen 4 sprite character data is
+# obfuscated by the engine's own build tool (tools/nitrogfx/gfx.c): an LCG XORed
+# against the low half of its state, walked either back to front (mode 1) or
+# front to back (mode 2). The Gen 4 games here do not agree, and that
+# disagreement, nothing else, is why Diamond's sheet drew as noise. Measured
+# on species 1's front sheet, by which mode leaves palette index 0 dominating:
+#
+#   2026-08-21  Platinum pl_pokegra  85.9% at mode 2      Black  not scrambled
+#               Diamond  pokegra     85.9% at mode 1
+#               Pearl    pokegra     85.9% at mode 1      (identical to Diamond)
+#               HeartGold  a/0/0/4   87.3% at mode 2
+#               SoulSilver a/0/0/4   87.3% at mode 2      (identical to HeartGold)
+#
+# THE MODE BELONGS TO THE ARCHIVE, NOT THE CARTRIDGE. Platinum carries a second,
+# DP-format `poketool/pokegra/pokegra.narc` beside its own `pl_pokegra.narc`,
+# and that one reads mode 1, the engine picks between them on `preferDP`
+# (`Pokemon_BuildSpriteTemplateDP`). A row here is the mode of the archive this
+# porter reads for that slot, which is `pokegra` for the DP pair and `a/0/0/4`
+# for the HGSS pair. A fill re-encodes into this game's direction; a game with
+# no row is not converted.
+sprite  CPUE  2
+sprite  IPKE  2
+sprite  ADAE  1
+sprite  APAE  1
+sprite  IPGE  2
+
+# Region character -> language, from the fourth character of the code. The two
+# marked `read` are the ones an image on this machine actually carried; the rest
+# are the NDS convention and are used only to say WHICH build was refused.
+lang  E  english   read
+lang  O  english   read
+lang  J  japanese
+lang  P  english
+lang  D  german
+lang  F  french
+lang  I  italian
+lang  S  spanish
+lang  K  korean

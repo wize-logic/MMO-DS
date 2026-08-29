@@ -1,0 +1,61 @@
+--- a/src/network_icon.c
++++ b/src/network_icon.c
+@@ -142,7 +142,15 @@
+ {
+     void *heapPtr = Heap_AllocAtEnd(heapID, 600);
+ 
+-    ReadFileToBuffer("data/pl_wm.NCLR", &heapPtr);
++    /* openmmo: the names below are the official cartridge's. This port builds its
++     * own ROM, and platinum.us/filesys.csv places all three of this icon's files
++     * with a lowercase extension, so the three ReadFileToBuffer calls in this
++     * file have never found anything, and FS_OpenFile failing leaves the buffer
++     * as whatever the heap held. It was unreachable while the icon was gated on
++     * a wireless driver that this port does not have; it is reachable now that
++     * the gate below has been widened, so it is corrected here rather than left
++     * to hand NNS_G2dGetUnpackedPaletteData a wild pointer. */
++    ReadFileToBuffer("data/pl_wm.nclr", &heapPtr);
+     DC_FlushRange(heapPtr, 600);
+ 
+     return heapPtr;
+@@ -153,7 +161,7 @@
+     void *heapPtr = Heap_AllocAtEnd(heapID, 600);
+ 
+     if (heapPtr) {
+-        ReadFileToBuffer("data/pl_wm.NCLR", &heapPtr);
++        ReadFileToBuffer("data/pl_wm.nclr", &heapPtr);
+         DC_FlushRange(heapPtr, 600);
+ 
+         NNSG2dPaletteData *paletteData;
+@@ -176,9 +184,9 @@
+     if (ncgrFile) {
+ 
+         if (isWifi) {
+-            ReadFileToBuffer("data/pl_wifi.NCGR", &ncgrFile);
++            ReadFileToBuffer("data/pl_wifi.ncgr", &ncgrFile);
+         } else {
+-            ReadFileToBuffer("data/pl_wm.NCGR", &ncgrFile);
++            ReadFileToBuffer("data/pl_wm.ncgr", &ncgrFile);
+         }
+ 
+         DC_FlushRange(ncgrFile, 600);
+@@ -263,8 +271,18 @@
+ 
+ static void InitGlobalNetworkIcon(int x, int y, BOOL isWifi, enum NNS_G2D_VRAM_TYPE vramType)
+ {
+-    if (!WirelessDriver_Initialized()) {
+-        return;
++    /* openmmo: this icon is the DS radio's, and there is no radio here, the
++     * link is a socket. The Underground is the one screen that draws it, and
++     * what it means there ("the group is up, and this well") is a question this
++     * client can answer from its own round-trip clock, so the gate is widened
++     * rather than the icon reinvented. Everything below is the engine's.
++     * mmo/mods/openmmo/src/openmmo_underground.c. */
++    {
++        extern int openmmo_network_icon_wanted(void);
++
++        if (!WirelessDriver_Initialized() && !openmmo_network_icon_wanted()) {
++            return;
++        }
+     }
+ 
+     if (sGlobalNetworkIcon) {

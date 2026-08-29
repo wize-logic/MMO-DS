@@ -1,0 +1,20 @@
+--- a/src/font_manager.c
++++ b/src/font_manager.c
+@@ -160,11 +160,12 @@
+ 
+ void FontManager_TryLoadGlyph(const FontManager *fontManager, charcode_t c, TextGlyph *outGlyph)
+ {
+-    if (c <= fontManager->header.numGlyphs) {
+-        c--;
+-    } else {
+-        c = CHAR_QUESTION - 1;
+-    }
++    /* Which glyph stands in for a code point this font cannot draw, and the
++     * count of how often that happened. Charcode 0 used to pass the bounds test
++     * here and underflow to index 0xFFFF. */
++    extern charcode_t openmmo_glyph_index(charcode_t c, u32 numGlyphs);
++
++    c = openmmo_glyph_index(c, fontManager->header.numGlyphs);
+ 
+     fontManager->glyphBitmapFunc(fontManager, c, outGlyph);
+ }

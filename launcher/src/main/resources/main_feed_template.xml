@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<main_feed>
+  <ip>{{IP}}</ip>
+  <ip_cn>{{IP}}</ip_cn>
+  <port>{{PORT}}</port>
+  <revision>{{REVISION}}</revision>
+  <min_ipa_revision>{{REVISION}}</min_ipa_revision>
+  <updater_location>https://{{IP}}:{{FEED_PORT}}/updater/pokemmo_updater.jar</updater_location>
+  <updater_hash_sha256>0000000000000000000000000000000000000000000000000000000000000000</updater_hash_sha256>
+  <updaters>
+    <base_location>https://{{IP}}:{{FEED_PORT}}/updater/</base_location>
+    <updater arch="x64" name="PokeMMO-Updater.exe" os="windows" sha256="0000000000000000000000000000000000000000000000000000000000000000" size="0"/>
+    <updater arch="x64" name="PokeMMO-Updater" os="linux" sha256="0000000000000000000000000000000000000000000000000000000000000000" size="0"/>
+    <updater arch="x64" name="PokeMMO-Updater" os="macos" sha256="0000000000000000000000000000000000000000000000000000000000000000" size="0"/>
+  </updaters>
+  <android_apk_location>https://{{IP}}:{{FEED_PORT}}/PokeMMO-Client.apk</android_apk_location>
+  <android_apk_sha256>0000000000000000000000000000000000000000000000000000000000000000</android_apk_sha256>
+  <android_apk_size>0</android_apk_size>
+  <android_patches>
+    <base_location>https://{{IP}}:{{FEED_PORT}}/patches/</base_location>
+  </android_patches>
+</main_feed>

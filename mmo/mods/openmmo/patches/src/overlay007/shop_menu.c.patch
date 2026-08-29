@@ -1,0 +1,53 @@
+--- a/src/overlay007/shop_menu.c
++++ b/src/overlay007/shop_menu.c
+@@ -266,7 +266,13 @@
+     }
+ 
+     Shop_SetItemsForSale(shopMenu, shopItems);
+-    FieldTask_InitCall(task, FieldTask_InitShop, shopMenu);
++    /* Walking the field has no task (field_settled is task == NULL). A
++     * script-started mart still nests on the script task. */
++    if (task == NULL) {
++        FieldSystem_CreateTask(fieldSystem, FieldTask_InitShop, shopMenu);
++    } else {
++        FieldTask_InitCall(task, FieldTask_InitShop, shopMenu);
++    }
+ }
+ 
+ static u8 Shop_GetCameraPosDest(FieldSystem *fieldSystem)
+@@ -1215,6 +1221,21 @@
+         return SHOP_STATE_CONFIRM_PURCHASE;
+     }
+ 
++    /* The server prices and decrements. The bag and cash it sends back
++     * are what the engine then holds. */
++    {
++        extern int openmmo_shop_buying(u16 item, u16 qty);
++        if (openmmo_shop_buying(shopMenu->itemId, shopMenu->itemAmount)) {
++            Shop_PrintCurrentMoney(shopMenu, TRUE);
++            if (shopMenu->itemAmount > 1) {
++                shopMenu->itemPurchaseCount = 2;
++            } else if (shopMenu->itemPurchaseCount != 255) {
++                shopMenu->itemPurchaseCount++;
++            }
++            return SHOP_STATE_FINISH_PURCHASE;
++        }
++    }
++
+     if (shopMenu->martType == MART_TYPE_NORMAL) {
+         Bag_TryAddItem(shopMenu->destInventory, shopMenu->itemId, shopMenu->itemAmount, HEAP_ID_FIELD2);
+         FieldSystem_SaveTVSegment_SinnohShoppingChampCorner(shopMenu->saveData, shopMenu->itemId, shopMenu->itemAmount);
+@@ -1324,6 +1345,13 @@
+ 
+ static u32 Shop_GetItemPrice(ShopMenu *shopMenu, u16 itemId)
+ {
++    extern int openmmo_shop_price(u16 item, u32 *out);
++    u32 priced;
++
++    if (openmmo_shop_price(itemId, &priced)) {
++        return priced;
++    }
++
+     if (shopMenu->martType == MART_TYPE_NORMAL) {
+         return Item_LoadParam(itemId, ITEM_PARAM_PRICE, HEAP_ID_FIELD2);
+     } else if (shopMenu->martType == MART_TYPE_FRONTIER) {

@@ -1,0 +1,36 @@
+--- a/src/field_comm_manager.c
++++ b/src/field_comm_manager.c
+@@ -925,7 +925,19 @@
+  */
+ void FieldCommManager_PauseUndergroundResources(void)
+ {
+-    if (sFieldCommMan && sFieldCommMan->isUnderground) {
++    /* openmmo: this manager is allocated by the DS comm boot, which this port
++     * never runs, so both of these said no, and the Underground was never
++     * paused around a field map that goes away and comes back. The mining game
++     * is one of those: it tears the map down and calls FieldSystem_StartFieldMap
++     * on the way out. What survived that rebuild was the touch-projection
++     * context still pointing at the freed camera, which is a segfault on the
++     * next tap, and the comm player manager's own map objects, one of which
++     * stood on the tile that was just mined like an npc. This client's
++     * Underground answers for itself. */
++    extern int openmmo_underground_active(void);
++
++    if ((sFieldCommMan && sFieldCommMan->isUnderground)
++        || openmmo_underground_active()) {
+         UndergroundMan_PauseResources();
+     }
+ }
+@@ -935,7 +947,11 @@
+  */
+ void FieldCommManager_UnpauseUndergroundResources(void)
+ {
+-    if (sFieldCommMan && sFieldCommMan->isUnderground) {
++    /* openmmo: likewise. This is the half that puts the camera back. */
++    extern int openmmo_underground_active(void);
++
++    if ((sFieldCommMan && sFieldCommMan->isUnderground)
++        || openmmo_underground_active()) {
+         UndergroundMan_UnpauseResources();
+     }
+ }

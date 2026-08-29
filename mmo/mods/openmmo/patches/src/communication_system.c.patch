@@ -1,0 +1,381 @@
+--- a/src/communication_system.c
++++ b/src/communication_system.c
+@@ -1146,18 +1146,69 @@
+     sCommunicationSystem->sendHeldKeys += newHeldKeys;
+ }
+ 
++/* openmmo: the Underground talks to itself. Every one of its own actions is a
++ * command sent over this system and delivered back through CommCmd_Callback,
++ * on one console, by the ring looping to itself. No CommunicationSystem is
++ * allocated in this port, so the four senders below hand the bytes to that
++ * loop directly instead. Above them nothing changes: the command table, the
++ * handlers and the ordering are the engine's.
++ * mmo/mods/openmmo/src/openmmo_underground.c.
++ *
++ * Declared up here rather than beside those senders, because the first CALL is
++ * further up the file than they are. An implicit declaration whose return type
++ * then disagrees with the real one is a warning on gcc and a hard error on
++ * clang, which is how the Android build found it. */
++extern int openmmo_ug_comm_up(void);
++extern int openmmo_ug_send(int cmd, const void *data, int size);
++extern int openmmo_ug_net_id(void);
++extern int openmmo_ug_queued(int cmd);
++extern int openmmo_ug_player_connected(int netId);
++extern void openmmo_underground_set_movement_state(int state);
++
++/* The third pipe, and the only one with more than two ends: a link Super
++ * Contest. It answers ahead of the chain above rather than inside it, because a
++ * contest's group is two to four rather than one or two and its answers to "how
++ * many of us" and "is that one still here" are its own.
++ * mmo/mods/openmmo/src/openmmo_contest_link.c. */
++extern int openmmo_contest_pipe_up(void);
++extern int openmmo_contest_send(int cmd, const void *data, int size);
++extern int openmmo_contest_net_id(void);
++extern int openmmo_contest_queued(int cmd);
++extern int openmmo_contest_player_connected(int netId);
++extern int openmmo_contest_connected(void);
++
+ void CommSys_RandomizePlayerMovement(void)
+ {
++    /* The Confuse trap. On a cartridge this state mangles the keys on their way
++     * out to the group; here the local player is not walked by a keypad that
++     * has been anywhere, so the same mangle is kept and applied one step later
++     * (openmmo_underground_scramble, and the field_system.c patch). */
++    if (openmmo_ug_comm_up()) {
++        openmmo_underground_set_movement_state(MOVEMENT_STATE_RANDOM);
++        return;
++    }
++
+     sCommunicationSystem->playerMovementState = MOVEMENT_STATE_RANDOM;
+ }
+ 
+ void CommSys_ReversePlayerMovement(void)
+ {
++    /* And the Reverse trap. */
++    if (openmmo_ug_comm_up()) {
++        openmmo_underground_set_movement_state(MOVEMENT_STATE_REVERSE);
++        return;
++    }
++
+     sCommunicationSystem->playerMovementState = MOVEMENT_STATE_REVERSE;
+ }
+ 
+ void CommSys_RevertPlayerMovementToNormal(void)
+ {
++    if (openmmo_ug_comm_up()) {
++        openmmo_underground_set_movement_state(MOVEMENT_STATE_NORMAL);
++        return;
++    }
++
+     sCommunicationSystem->playerMovementState = MOVEMENT_STATE_NORMAL;
+ }
+ 
+@@ -1315,6 +1366,14 @@
+ 
+ BOOL CommSys_SendDataHuge(int cmd, const void *data, int size)
+ {
++    if (openmmo_contest_pipe_up()) {
++        return openmmo_contest_send(cmd, data, size);
++    }
++
++    if (openmmo_ug_comm_up()) {
++        return openmmo_ug_send(cmd, data, size);
++    }
++
+     if (!CommSys_IsPlayerConnected(CommSys_CurNetId()) && !CommSys_IsAlone()) {
+         return FALSE;
+     }
+@@ -1332,6 +1391,14 @@
+ 
+ BOOL CommSys_SendData(int cmd, const void *data, int size)
+ {
++    if (openmmo_contest_pipe_up()) {
++        return openmmo_contest_send(cmd, data, size);
++    }
++
++    if (openmmo_ug_comm_up()) {
++        return openmmo_ug_send(cmd, data, size);
++    }
++
+     if (!CommSys_IsPlayerConnected(CommSys_CurNetId()) && !CommSys_IsAlone()) {
+         return FALSE;
+     }
+@@ -1349,6 +1416,14 @@
+ 
+ BOOL CommSys_SendDataHugeServer(int cmd, const void *data, int size)
+ {
++    if (openmmo_contest_pipe_up()) {
++        return openmmo_contest_send(cmd, data, size);
++    }
++
++    if (openmmo_ug_comm_up()) {
++        return openmmo_ug_send(cmd, data, size);
++    }
++
+     if (CommSys_CurNetId() != 0) {
+         GF_ASSERT(FALSE);
+         return FALSE;
+@@ -1375,6 +1450,14 @@
+ 
+ BOOL CommSys_SendDataServer(int cmd, const void *data, int size)
+ {
++    if (openmmo_contest_pipe_up()) {
++        return openmmo_contest_send(cmd, data, size);
++    }
++
++    if (openmmo_ug_comm_up()) {
++        return openmmo_ug_send(cmd, data, size);
++    }
++
+     if (CommSys_CurNetId() != 0) {
+         sub_020363BC();
+ 
+@@ -1407,6 +1490,12 @@
+ 
+ int CommSys_SendRingRemainingSize(void)
+ {
++    /* The queue is not a ring and does not run out the way one does; what a
++     * caller wants to hear is "there is room". */
++    if (openmmo_ug_comm_up()) {
++        return 264;
++    }
++
+     return CommRing_RemainingSize(&sCommunicationSystem->sendRing);
+ }
+ 
+@@ -1545,6 +1634,19 @@
+ 
+ BOOL CommSys_IsPlayerConnected(u16 param0)
+ {
++    /* openmmo: net id 0 is this client, and it is present. Asked by the
++     * Underground's own per-frame sweep over the eight slots, and, while a
++     * conversation is up, of the person on the other end of it: both talk menus
++     * ask this every frame, and answering FALSE is the official client's own way of telling
++     * them a peer has walked out. mmo/mods/openmmo/src/openmmo_underground.c. */
++    if (openmmo_contest_pipe_up()) {
++        return openmmo_contest_player_connected(param0);
++    }
++
++    if (openmmo_ug_comm_up()) {
++        return openmmo_ug_player_connected(param0);
++    }
++
+     if (!sCommunicationSystem) {
+         return FALSE;
+     }
+@@ -1586,8 +1688,23 @@
+ 
+ int CommSys_ConnectedCount(void)
+ {
++    /* openmmo: likewise. Two, while a link battle is up. */
++    extern int openmmo_link_battle_connected(void);
++    int openmmoCount = openmmo_contest_connected();
+     int v0 = 0, i;
+ 
++    /* A contest counts its own seats, two to four; the engine fills the rest of
++     * the four with its own rivals off this number. */
++    if (openmmoCount > 0) {
++        return openmmoCount;
++    }
++
++    openmmoCount = openmmo_link_battle_connected();
++
++    if (openmmoCount > 0) {
++        return openmmoCount;
++    }
++
+     for (i = 0; i < (7 + 1); i++) {
+         if (CommSys_IsPlayerConnected(i)) {
+             v0++;
+@@ -1599,6 +1716,23 @@
+ 
+ BOOL CommSys_IsInitialized(void)
+ {
++    /* openmmo: the Underground's top-screen map will not put the local
++     * player's own marker on itself unless this says yes (top_screen.c,
++     * UndergroundMap_FetchPlayerPositions), and no DS comm stack is up to say
++     * it. openmmo_underground.c answers for exactly the stretch this client
++     * is down there, and stops the frame the climb starts, the engine's own
++     * exit waits on this same answer turning false. */
++    extern int openmmo_underground_comm_up(void);
++
++    /* Contest_SetUpLinkContest refuses outright unless this says yes. */
++    if (openmmo_contest_pipe_up()) {
++        return TRUE;
++    }
++
++    if (openmmo_underground_comm_up()) {
++        return TRUE;
++    }
++
+     if (sCommunicationSystem) {
+         if (CommLocal_IsWifiGroup(CommManager_GetCommType())) {
+             return TRUE;
+@@ -1610,11 +1744,27 @@
+ 
+ void CommSys_SetSendSpeed(u8 param0)
+ {
++    /* openmmo: the eight functions from here down are the ones the Underground
++     * and its player manager reach that read the CommunicationSystem without
++     * asking whether there is one, on a cartridge there always is by the time
++     * they run. With the pipe up there is not, so each answers what a lone
++     * console's would have held. Nothing here invents behaviour; where an
++     * answer cannot be given honestly it is the neutral one and the limit is
++     * written down in mmo/mods/openmmo/src/openmmo_underground.c. */
++    if (openmmo_ug_comm_up()) {
++        return; /* nobody is being sent a speed */
++    }
++
+     sCommunicationSystem->sendSpeed = param0;
+ }
+ 
+ u8 CommSys_RecvSpeed(int param0)
+ {
++    /* Walking. The same 2 CommPlayerMan_Init seats every slot with. */
++    if (openmmo_ug_comm_up()) {
++        return 2;
++    }
++
+     return sCommunicationSystem->recvSpeed[param0];
+ }
+ 
+@@ -1657,6 +1807,11 @@
+ 
+ BOOL CommSys_WriteToQueueServer(int cmd, const void *data, int size)
+ {
++    /* A send by another name, so it goes the same way as the four above. */
++    if (openmmo_ug_comm_up()) {
++        return openmmo_ug_send(cmd, data, size);
++    }
++
+     if (CommSys_TransmissionType() == 1) {
+         return CommQueue_Write(&sCommunicationSystem->commQueueManSend, cmd, (u8 *)data, size, 1, 0);
+     } else {
+@@ -1666,6 +1821,10 @@
+ 
+ BOOL CommSys_WriteToQueue(int cmd, const void *data, int size)
+ {
++    if (openmmo_ug_comm_up()) {
++        return openmmo_ug_send(cmd, data, size);
++    }
++
+     return CommQueue_Write(&sCommunicationSystem->commQueueManSend, cmd, (u8 *)data, size, 0, 0);
+ }
+ 
+@@ -1738,6 +1897,31 @@
+ 
+ u16 CommSys_CurNetId(void)
+ {
++    /* openmmo: a native link battle is this build's own link, with the server
++     * as the wire. The DS stack is not up, so the two ids the fight runs under
++     * are ours to name (mmo/mods/openmmo/src/openmmo_link.c). */
++    extern int openmmo_link_battle_net_id(void);
++    int openmmoNetId = openmmo_link_battle_net_id();
++
++    if (openmmoNetId >= 0) {
++        return (u16)openmmoNetId;
++    }
++
++    /* And underground, where the same is true for the same reason: the group is
++     * this session and the ids in it are ours to name. */
++    openmmoNetId = openmmo_ug_net_id();
++
++    if (openmmoNetId >= 0) {
++        return (u16)openmmoNetId;
++    }
++
++    /* And in a contest, where the id is the seat the server gave. */
++    openmmoNetId = openmmo_contest_net_id();
++
++    if (openmmoNetId >= 0) {
++        return (u16)openmmoNetId;
++    }
++
+     if (sCommunicationSystem) {
+         if (CommLocal_IsWifiGroup(CommManager_GetCommType())) {
+             int netId = NintendoWFC_GetNetID();
+@@ -1816,6 +2000,14 @@
+ 
+ BOOL CommSys_IsAlone(void)
+ {
++    /* openmmo: with the pipe up this client IS the group's server and the only
++     * machine in it, which is the answer a solo cartridge gives underground,
++     * and the one the Underground's own input gate (sub_02058C40) and error
++     * check both short-circuit on. */
++    if (openmmo_ug_comm_up()) {
++        return TRUE;
++    }
++
+     if (sCommunicationSystem) {
+         return sCommunicationSystem->unk_6AE;
+     }
+@@ -1847,11 +2039,28 @@
+ 
+ BOOL CommSys_IsCmdQueuedServer(int cmd)
+ {
++    /* Asked before re-sending a periodic answer, so the queue IS the ring. */
++    if (openmmo_contest_pipe_up()) {
++        return openmmo_contest_queued(cmd);
++    }
++
++    if (openmmo_ug_comm_up()) {
++        return openmmo_ug_queued(cmd);
++    }
++
+     return CommQueueMan_IsCmdInQueue(&sCommunicationSystem->commQueueManSendServer, cmd);
+ }
+ 
+ BOOL CommSys_IsCmdQueued(int cmd)
+ {
++    if (openmmo_contest_pipe_up()) {
++        return openmmo_contest_queued(cmd);
++    }
++
++    if (openmmo_ug_comm_up()) {
++        return openmmo_ug_queued(cmd);
++    }
++
+     return CommQueueMan_IsCmdInQueue(&sCommunicationSystem->commQueueManSend, cmd);
+ }
+ 
+@@ -1904,6 +2113,12 @@
+ {
+     int i;
+ 
++    /* openmmo: the trade scene throttles the Wi-Fi ring through here. There
++     * is no ring and no comm block on this port, and nothing to slow down. */
++    if (sCommunicationSystem == NULL) {
++        return;
++    }
++
+     if (CommLocal_IsWifiGroup(CommManager_GetCommType())) {
+         if (sCommunicationSystem->unk_65C == param0) {
+             return;
+@@ -1936,6 +2151,13 @@
+ 
+ BOOL sub_020363A0(void)
+ {
++    /* "is the transport busy", asked on the Underground's own input frame,
++     * before it will accept an A press (field_control.c,
++     * FieldInput_Process_Underground). The queue never stalls, so it is not. */
++    if (openmmo_ug_comm_up()) {
++        return FALSE;
++    }
++
+     if (sCommunicationSystem->unk_6A9) {
+         return TRUE;
+     }
+@@ -1945,6 +2167,13 @@
+ 
+ void sub_020363BC(void)
+ {
++    /* The transport's own "something went wrong" latch, reached from the send
++     * path's failure branch. There is no latch to set here, and CommSys_CheckError
++     * already answers FALSE while the pipe is up. */
++    if (openmmo_ug_comm_up()) {
++        return;
++    }
++
+     sCommunicationSystem->unk_6B1 = 1;
+ }
+ 

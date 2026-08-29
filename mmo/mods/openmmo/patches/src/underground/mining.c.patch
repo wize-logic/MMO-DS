@@ -1,0 +1,20 @@
+--- a/src/underground/mining.c
++++ b/src/underground/mining.c
+@@ -758,6 +758,17 @@
+         int maxBuriedSpheres = Spheres_SpawnMiningSpotsNearBuriedSpheres(&rand);
+         int spawnIterations = 25 - (maxBuriedSpheres / 10) - 1;
+ 
++        /* openmmo: official sized this for one cartridge; the cavern is shared
++         * here, so the number of rounds scales with the players in it. Nothing
++         * else about the spawn changes, including the 250-slot ceiling the
++         * loop below already stops at
++         * (mmo/mods/openmmo/src/openmmo_underground.c). */
++        {
++            extern int openmmo_underground_spawn_iterations(int official);
++
++            spawnIterations = openmmo_underground_spawn_iterations(spawnIterations);
++        }
++
+         for (int i = 0; i < spawnIterations; i++) {
+             Mining_SpawnMiningSpotsAndTraps(&rand, i);
+         }

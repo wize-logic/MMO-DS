@@ -1,0 +1,35 @@
+--- a/src/battle/battle_controller.c
++++ b/src/battle/battle_controller.c
+@@ -193,7 +193,19 @@
+  */
+ static void SendMessage(BattleSystem *battleSys, int recipient, int battler, void *message, u8 size)
+ {
+-    u8 *data = message;
++    /* The one funnel every message between the battle's computing half and its
++     * presenting half passes through. The hook may deliver a message of its own
++     * in place of this one, or nothing at all. */
++    extern int openmmo_battle_emit(void *battleSys, int recipient, int battler, void **message, int size);
++    u8 *data;
++    int emit = openmmo_battle_emit(battleSys, recipient, battler, &message, size);
++
++    if (emit <= 0) {
++        return;
++    }
++
++    size = (u8)emit;
++    data = message;
+ 
+     if (battleSys->battleType & BATTLE_TYPE_LINK && (battleSys->battleStatusMask & BATTLE_TYPE_TAG) == FALSE) {
+         if (recipient == COMM_RECIPIENT_CLIENT) {
+@@ -211,6 +223,11 @@
+         BattleController_SendLocalMessage(battleSys, recipient, battler, message, size);
+     }
+ }
++
++void BattleController_SendMessage(BattleSystem *battleSys, int recipient, int battler, void *message, u8 size)
++{
++    SendMessage(battleSys, recipient, battler, message, size);
++}
+ 
+ /**
+  * @brief Emits a message to set up the battle UI

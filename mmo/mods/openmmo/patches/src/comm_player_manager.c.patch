@@ -1,0 +1,47 @@
+--- a/src/comm_player_manager.c
++++ b/src/comm_player_manager.c
+@@ -375,6 +375,21 @@
+ {
+     PlayerAvatar *playerAvatar;
+ 
++    /* openmmo: this client's own slot is a mirror of the field's avatar, never
++     * a comm player with an avatar of its own (see CommPlayer_MoveClient
++     * below). The guard underneath is the official client's: the slot already holds the
++     * field's avatar, so there is nothing to add. It stops holding it for the
++     * few frames a field map is torn down and rebuilt, the mining game does
++     * exactly that, and a second player then appeared beside the first,
++     * standing on the tile that was just mined. */
++    {
++        extern int openmmo_comm_player_is_local_mirror(int netId);
++
++        if (openmmo_comm_player_is_local_mirror(netId)) {
++            return;
++        }
++    }
++
+     if (sCommPlayerManager->playerAvatar[netId] != NULL) {
+         return;
+     }
+@@ -970,6 +985,22 @@
+ 
+ static void CommPlayer_MoveClient(int netId)
+ {
++    /* openmmo: underground, the local player is walked by the overworld input
++     * path, there is no ring to read this frame's keypad back out of, so the
++     * engine's own way round (broadcast your keys, receive them, move) has no
++     * first step. Its comm slot is kept as a MIRROR of where the avatar already
++     * is, because every Underground system asks CommPlayer rather than the
++     * avatar for a position; driving the avatar from that mirror as well would
++     * set an idle action on top of a step in progress, every frame.
++     * mmo/mods/openmmo/src/openmmo_underground.c. */
++    {
++        extern int openmmo_comm_player_is_local_mirror(int netId);
++
++        if (openmmo_comm_player_is_local_mirror(netId)) {
++            return;
++        }
++    }
++
+     u16 pad = 0;
+     CommPlayerLocation *playerLocation = &sCommPlayerManager->playerLocation[netId];
+     PlayerAvatar *playerAvatar;

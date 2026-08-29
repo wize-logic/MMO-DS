@@ -1,0 +1,44 @@
+--- a/pc/include/pc_modfs.h
++++ b/pc/include/pc_modfs.h
+@@ -62,6 +62,41 @@
+ int pc_modfs_billboard_nsbtx(int gfx_id);
+ 
+ /*
++ * The whole cooked row, for a body the youngster's renderer does not fit.
++ * A billboard_gfx.txt row is `<gfx> <nsbtx> [model] [seq]`, and the two
++ * optional columns are -1 when absent, which means "the youngster's",
++ * and is what every row written before they existed says. A follower
++ * Pokemon is the case they exist for: 8 frames where a person has 16,
++ * two palettes where a person has one, and 64x64 for 31 of them.
++ * Returns 1 when the gfx id is cooked.
++ */
++struct pc_modfs_billboard {
++    int nsbtx;
++    int model; /* enum BillboardModel, or -1 for the youngster's */
++    int seq;   /* enum BillboardFrameSequence, or -1 for the youngster's */
++};
++
++int pc_modfs_billboard(int gfx_id, struct pc_modfs_billboard *out);
++
++/*
++ * A cooked frame sequence: an id past the engine's own table (which stops
++ * at 22 and is sentinel-scanned, so a miss is the NULL its caller
++ * asserts on) -> the appended mmodel member holding the blob, and how the
++ * cook measured that blob's timeline. `facings` and `frames` are what a
++ * BillboardAnim list gets built from; they are written down rather than
++ * derived here because the cook has the sequence in front of it and this
++ * does not. Written as .cooked/generated/billboard_seq.txt, one row
++ * `<seq> <member> <facings> <frames>`. Returns 1 when the id is cooked.
++ */
++struct pc_modfs_billboard_seq {
++    int member;
++    int facings;
++    int frames;
++};
++
++int pc_modfs_billboard_seq(int seq_id, struct pc_modfs_billboard_seq *out);
++
++/*
+  * Cooked map prop: Nth extra build_model id the area loader should
+  * pull in on top of area_build, or -1. Written by cook as
+  * .cooked/generated/extra_props.txt. The file is loaded only;

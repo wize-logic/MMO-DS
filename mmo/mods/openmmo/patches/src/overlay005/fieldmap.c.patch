@@ -1,0 +1,47 @@
+--- a/src/overlay005/fieldmap.c
++++ b/src/overlay005/fieldmap.c
+@@ -182,7 +182,11 @@
+             }
+         }
+ 
+-        Heap_Create(HEAP_ID_APPLICATION, HEAP_ID_FIELD1, fieldSystem->mapLoadMode->unk_04);
++        /* The billboard queues and the overworld animation managers are spent
++         * from here. Not HEAP_SIZE_FIELD1: the field's own size is per map load
++         * mode (field_map_change.c's sMapLoadMode[]), and stays relative. */
++        extern u32 openmmo_heap_size(int heapID, u32 engineSize);
++        Heap_Create(HEAP_ID_APPLICATION, HEAP_ID_FIELD1, openmmo_heap_size(HEAP_ID_FIELD1, fieldSystem->mapLoadMode->unk_04));
+         GF_ASSERT(fieldSystem->unk_04 == NULL);
+ 
+         fieldSystem->unk_04 = Heap_Alloc(HEAP_ID_FIELD1, sizeof(FieldSystem_sub2));
+@@ -451,6 +455,9 @@
+     FieldOverworldState *fieldState = SaveData_GetFieldOverworldState(fieldSystem->saveData);
+ 
+     fieldSystem->location->mapHeaderID = mapHeaderID;
++
++    extern void openmmo_on_distortion_floor_change(int header);
++    openmmo_on_distortion_floor_change((int)mapHeaderID);
+ 
+     MapHeaderData_Load(fieldSystem, mapHeaderID);
+     FieldMapChange_UpdateGameDataDistortionWorld(fieldSystem, 1);
+@@ -803,7 +811,9 @@
+     fieldSystem->fieldEffMan = FieldEffectManager_New(fieldSystem, FIELD_EFFECT_RENDERER_COUNT, HEAP_ID_FIELD1);
+ 
+     {
+-        int v0 = 80;
++        /* One per animating map object, so a crowd of walkers spends them. */
++        extern int openmmo_overworld_anim_capacity(void);
++        int v0 = openmmo_overworld_anim_capacity();
+ 
+         if (FieldMap_InDistortionWorld(fieldSystem) == TRUE) {
+             v0 = 112;
+@@ -841,7 +851,9 @@
+             v2 = 5;
+         }
+ 
+-        ov5_021ECC20(fieldSystem->mapObjMan, 32, MapObjectsToPreload_GetCount(fieldSystem->mapObjectsToPreload) + 3, MapObjectsToPreload_GetIDs(fieldSystem->mapObjectsToPreload), v2);
++        /* How many distinct overworld appearances may be resident at once. */
++        extern int openmmo_texture_slot_capacity(void);
++        ov5_021ECC20(fieldSystem->mapObjMan, openmmo_texture_slot_capacity(), MapObjectsToPreload_GetCount(fieldSystem->mapObjectsToPreload) + 3, MapObjectsToPreload_GetIDs(fieldSystem->mapObjectsToPreload), v2);
+     }
+ 
+     FieldEffect_InitRenderObject(fieldSystem->fieldEffMan);

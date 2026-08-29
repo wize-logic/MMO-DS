@@ -1,0 +1,24 @@
+OpenMMO DS
+Copyright (C) 2026 wize-logic
+
+Two licences apply here.
+
+AGPL-3.0-or-later, in LICENSE, covers the work written for this project:
+the Kotlin servers, the shared protocol and network modules, the launcher,
+the website, and the C client's own sources under mmo/src, mmo/include,
+mmo/viewer, mmo/launcher and mmo/tools.
+
+GPL-3.0-or-later covers the parts derived from the engine this client is
+fused with, which is itself GPL-3.0: everything under mmo/mods/openmmo, both
+the C sources compiled as game code and the patches stacked onto engine
+sources. The engine is the engine/pokeplatinum submodule and the licence text
+is its own LICENSE file.
+
+The fused client links both halves into one binary. Distributing that binary
+means honouring GPL-3.0 for the whole of it.
+
+mmo/third_party keeps the licence it arrived with. raygui is under the zlib
+licence, in mmo/third_party/raygui.LICENSE.
+
+No game data is in this repository, and none is distributed with it. The
+image the client reads is the player's own.

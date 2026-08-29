@@ -1,0 +1,558 @@
+# The same client, built for Android.
+#
+#   make -f Makefile.android status     # build build/android/libopenmmo.so
+#   make -f Makefile.android programs   # build it and read its ABI back out
+#
+# mmo/Makefile retargeted at the NDK, the way Makefile.win retargets it at
+# mingw and Makefile.arm at arm-linux-gnueabihf: ONE pipeline, now four
+# toolchains, and this file sets what genuinely differs.
+#
+# WHY: the RG556 runs stock Android and an RG556 owner installs an app. This
+# is the half of that which is a compiler question; the surface, the buttons,
+# the sound and the files are the framework's and come after it.
+#
+# WHAT IS THE SAME AS THE OTHER ARM BUILD, and it is most of it: armeabi-v7a
+# is the same 32-bit ARM instruction set as armhf, the same four-byte `long`
+# and pointer, the same four-byte enums, the same signed `char`, and the same
+# aligned(4) on the 64-bit typedefs. Makefile.arm's header is where each of
+# those was measured.
+#
+# WHAT IS DIFFERENT, and each of these is a place Android is not Linux:
+#
+#   * A SHARED OBJECT, NOT AN EXECUTABLE, so -fPIC and no -fno-pie. An app is
+#     a library the framework loads and places; Android has refused non-PIE
+#     executables since API 21. That is why the guest map is a question here
+#     and is not one on the Linux side, where -no-pie and a fixed identity map
+#     cost nothing. It is the whole reason the slab exists as a task.
+#
+#   * SOFTFP, NOT HARD FLOAT. armeabi-v7a passes floating point in core
+#     registers; armhf passes it in VFP registers. It changes no integer
+#     struct layout and no guest offset, the ROM's structs are integers and
+#     bitfields, but it is a different ABI and a library built one way
+#     cannot be linked with objects built the other. The compiler picks it;
+#     this file does not fight it.
+#
+#   * NO POSIX SHARED MEMORY. bionic has no shm_open, and it is not an
+#     oversight to work around: an app is one process, so there is no second
+#     process to share a page with. src/platform.c answers this by defaulting
+#     to the one-process page on __ANDROID__ (platform.h says how), which is
+#     the same page the desktop can be told to use and is checked both ways
+#     there every run.
+#
+#   * time_t IS ALREADY FOUR BYTES. bionic never made the 64-bit transition on
+#     32-bit Android, so -D_TIME_BITS=32 is not a flag here, it does not
+#     exist and asking for it is an error. `androidabi` below measures the
+#     size rather than trusting this sentence.
+#
+# WHAT IS NOT HERE. Any Java, any Gradle, any aapt: this file compiles C and
+# links one shared object, and `androidabi` fails if that ever stops being
+# true. The manifest, the APK and the activity are a later task's, and the
+# plan for this port is that none of them is ours to write in Java.
+
+NROOT := $(abspath $(dir $(firstword $(MAKEFILE_LIST))))
+
+# THE NDK, not a system compiler. Unpacked under a prefix rather than
+# installed, the same arrangement the armhf cross toolchain uses, because
+# neither needs root and both are one directory.
+NDK      ?= $(HOME)/.local/opt/android-ndk-r27c
+NDK_HOST ?= linux-x86_64
+NDK_BIN  ?= $(NDK)/toolchains/llvm/prebuilt/$(NDK_HOST)/bin
+
+# The API level, and it is a floor rather than a target: both devices ship
+# Android 13 and 14, so nothing here is lost by asking for a recent one.
+#   21 where Android began refusing non-PIE executables, below this the
+#       question the slab answers would not even arise
+#   24  where bionic honours _FILE_OFFSET_BITS=64
+#   26  where AAudio arrives, which is this port's sound
+# 26 is the highest of the three, so 26 it is, and it costs nothing a device
+# in this plan can feel.
+ANDROID_API ?= 26
+ANDROID_ARCH ?= armv7a-linux-androideabi
+
+CC := $(NDK_BIN)/$(ANDROID_ARCH)$(ANDROID_API)-clang
+AR := $(NDK_BIN)/llvm-ar
+READELF ?= $(NDK_BIN)/llvm-readelf
+OBJDUMP ?= $(NDK_BIN)/llvm-objdump
+
+ifeq ($(shell command -v $(CC) 2>/dev/null),)
+$(error no $(CC); unpack the NDK under $(NDK), or set NDK to where it is)
+endif
+
+BUILD ?= $(NROOT)/build/android$(if $(filter 1,$(RELEASE)),-release)
+
+# A .so, so TARGET is not an executable name and the link is -shared. The
+# archive keeps the base file's name and is what an app's own entry point
+# links against; the .so is what `status` builds and what proves the whole
+# client compiles and links for this target.
+TARGET := $(BUILD)/libopenmmo.so
+
+# The three that are the same 32-bit ARM promise as Makefile.arm, plus PIC.
+# NOT -fno-pie (see the header) and NOT -D_TIME_BITS=32 (bionic has no such
+# switch and never needed one).
+#
+# -D_FILE_OFFSET_BITS=64 for the same reason the armhf build sets it: it is
+# the host's file interface, it appears in no DS structure, and a 32-bit off_t
+# is a trap waiting on a filesystem with large inodes. bionic honours it from
+# API 24 and this build asks for 26.
+ABI := -fno-short-enums -fsigned-char -fPIC -D_FILE_OFFSET_BITS=64
+
+# What this build calls itself, in every line `abicheck` prints.
+ABI_NAME := android-armeabi-v7a
+
+LDFLAGS := $(ABI) -shared -Wl,-soname,libopenmmo.so
+# bionic folds libm, libpthread and libdl into libc; -lm is accepted and empty.
+LDLIBS  := -lm -llog
+
+# No window on this toolchain: the surface is the framework's and is a later
+# task. Naming a cross prefix that does not exist makes the base file's probe
+# answer "no" for the right reason rather than finding the host's.
+SDL2_CONFIG := android-sdl2-config
+
+# The engine's Android build, when there is one. There is not yet, that is
+# the engine tree's to write, the way pc/Makefile.arm was, so `fused` here
+# fails at the missing makefile and `abicheck` says so out loud rather than
+# skipping.
+ENGINE_MAKEFILE = $(ENGINE)/pc/Makefile.android
+
+include $(NROOT)/Makefile
+
+# --------------------------------------------------------------- the gate
+#
+# What "it built for Android" means, read off the finished shared object and
+# off what the build left behind rather than claimed by the flags above.
+#
+# "No Java" is checked as an absence of Java SOURCES in the tree, not as an
+# absence of tool names in this file. Grepping the text for `javac` and
+# friends matched the list of names doing the grepping, which is the kind of
+# check that is right until somebody reads its output.
+#
+# IT USED TO COUNT BUILD ARTIFACTS, and that stopped being the right question
+# the day the doorbell landed (the one class, below): a successful `make apk`
+# leaves classes.dex, three OpenMMOActivity classes and the APK itself under
+# the build directory, so every `make test` after an APK build failed here
+# with the app's own output. The rule was never about leftovers. It is about
+# what is WRITTEN in this language, and the answer is one file, the java/
+# directory holds the doorbell and may never hold more, which is exactly what
+# this now says.
+.PHONY: programs androidabi
+programs: $(TARGET) androidabi
+	@echo "android: ok -- $(TARGET)"
+
+androidabi: $(TARGET)
+	@ec=0; \
+	 h="$$($(READELF) -h $(TARGET))"; \
+	 case "$$h" in *"ELF32"*) ;; *) echo "androidabi: NOT 32-bit"; ec=1;; esac; \
+	 case "$$h" in *"Machine:"*"ARM"*) ;; \
+	   *) echo "androidabi: not an ARM machine"; ec=1;; esac; \
+	 case "$$h" in *"DYN ("*) ;; \
+	   *) echo "androidabi: not a shared object, an app cannot load it"; ec=1;; esac; \
+	 e=`$(READELF) -A $(TARGET) 2>/dev/null | \
+	    awk '/ABI_enum_size/ { f = 1 } f && /Description:/ { print $$2; exit }'`; \
+	 case "$$e" in Int32) ;; \
+	   *) echo "androidabi: enums are '$${e:-unstated}', not Int32, -fno-short-enums did not reach the link"; ec=1;; esac; \
+	 v=`$(READELF) -A $(TARGET) 2>/dev/null | \
+	    awk '/ABI_VFP_args/ { f = 1 } f && /Description:/ { print $$2; exit }'`; \
+	 if $(READELF) --dyn-syms $(TARGET) | grep -q ' JNI_OnLoad$$'; then \
+	   echo "androidabi: this object exports JNI_OnLoad, something Java-shaped got in"; ec=1; fi; \
+	 j=`find $(NROOT) \( -name build -o -name 'build-*' \) -prune -o \
+	        -name '*.java' -print 2>/dev/null | sort`; \
+	 if [ "$$j" != "$(JAVA_SRC)" ]; then \
+	   echo "androidabi: the java in this tree is not the one doorbell:"; \
+	   printf '%s\n' "$$j" | sed 's/^/androidabi:      /'; ec=1; fi; \
+	 if [ $$ec -eq 0 ]; then \
+	   echo "androidabi: ok, ELF32 ARM shared object, 4-byte enums, one java file"; \
+	   echo "androidabi:      float ABI $${v:-base AAPCS (softfp)}, armeabi-v7a, not armhf"; \
+	 fi; \
+	 exit $$ec
+
+# ------------------------------------------------- what bionic actually says
+#
+# The three sentences in the header that are claims about a C library rather
+# than about a flag: how wide a time_t is, how wide an off_t is, and whether a
+# 64-bit integer is four-aligned the way every guest struct needs. Compiled,
+# not asserted, there is no device here to run it on, so this reads the
+# sizes out of the compiler and stops.
+.PHONY: bionic
+bionic:
+	@mkdir -p $(BUILD)
+	@printf '%s\n' \
+	  '#include <time.h>' '#include <sys/types.h>' '#include "mmo.h"' \
+	  'char probe_time_t_is_4[sizeof(time_t) == 4 ? 1 : -1];' \
+	  'char probe_off_t_is_8[sizeof(off_t) == 8 ? 1 : -1];' \
+	  'char probe_s64_is_4_aligned[_Alignof(s64) == 4 ? 1 : -1];' \
+	  'char probe_enum_is_4[sizeof(enum { E_A, E_B }) == 4 ? 1 : -1];' \
+	  > $(BUILD)/bionic_probe.c
+	@$(CC) $(filter-out -MMD -MP,$(CFLAGS)) -c \
+	   -o $(BUILD)/bionic_probe.o $(BUILD)/bionic_probe.c
+	@echo " BIONIC time_t 4, off_t 8, s64 4-aligned, enum 4, as the header says"
+
+# ============================================================== the app
+#
+# NativeActivity, and the whole Java side of it is thirty lines of manifest.
+# The framework's own activity class loads a named library and calls
+# ANativeActivity_onCreate in it; native_app_glue turns that into a thread
+# with a loop, and android/src/mmo_android_main.c is what runs on it. No
+# classes.dex is produced and `androidabi` above already fails if one ever is.
+#
+# WHERE THE ENTRY POINT LIVES, and it is not obvious: in the FUSED library,
+# not in libopenmmo.so. An app loads ONE library and that library has to be
+# the game, engine, client and this entry point on one link, so these
+# objects go onto the engine's link through EXTRA_FUSED_OBJS. As objects and
+# not as an archive, deliberately: nothing in the engine references
+# ANativeActivity_onCreate, so a linker walking an archive would leave it out
+# and the app would install, launch and die with "unable to load native
+# library".
+APPDIR   := $(NROOT)/android
+APPGLUE  := $(NDK)/sources/android/native_app_glue
+APPOBJ   := $(BUILD)/android
+APPOBJS  := $(APPOBJ)/mmo_android_main.o $(APPOBJ)/android_native_app_glue.o
+#
+# -MMD -MP, FOR THE REASON THE ELF MAKEFILE GIVES AND THIS FILE USED NOT TO.
+# Without them a header edit rebuilds only the .c files that changed, and the
+# rest of the link keeps objects compiled against the OLD declarations. That
+# is not a stale build that fails loudly: struct offsets move, every
+# translation unit still links, and the app reads fields at addresses the
+# other half never wrote.
+#
+# It cost a crash to learn. A field added to the MIDDLE of
+# view_ui_frame_layout (viewer/view_ui_game.h) shifted `body`, `rows` and
+# everything after it by sixteen bytes; view_ui_game.o was rebuilt and
+# view_ui_gtl.o, view_ui_mail.o and view_ui_wins.o were not, so opening the
+# broker or the mailbox read a garbage rectangle and a garbage row count and
+# took the game down on the spot. The desktop build never saw it, because
+# mmo/Makefile has had these two flags all along.
+APPCFLAGS := $(ABI) $(OPT) -std=gnu99 -Wall -MMD -MP -I$(APPGLUE) \
+             -I$(NROOT)/include -I$(NROOT)/android/sdlshim
+
+# ---------------------------------------------------- the desktop viewer
+#
+# THE WHOLE DESKTOP WINDOW, COMPILED FOR THE DEVICE. Phase 7's shim
+# (android/sdlshim) is an SDL.h of our own over the app's GLES2 context, and
+# it is sized so that every viewer translation unit compiles UNMODIFIED,
+# viewer.c included, with its main renamed by a flag. The handheld then runs
+# the desktop's own fill layout, HUD bar, chat, party, frames, trade, mail
+# and theme, and a fork of any of it never exists to rot.
+#
+# FreeType is the one dependency the NDK does not ship: a static armeabi-v7a
+# build unpacked under a prefix, the same arrangement as the NDK itself.
+FT_ANDROID ?= $(HOME)/.local/opt/freetype-android
+
+VIEWOBJ  := $(APPOBJ)/viewer
+VIEWSRCS := viewer.c view_geom.c view_font.c view_input.c view_status.c \
+            view_hud.c view_ui.c view_ui_draw.c view_ui_chat.c \
+            view_ui_game.c view_ui_bar.c view_ui_wins.c view_ui_party.c \
+            view_ui_gtl.c view_ui_mail.c view_ui_theme.c
+VIEWOBJS := $(VIEWSRCS:%.c=$(VIEWOBJ)/%.o) $(APPOBJ)/sdlshim.o \
+            $(APPOBJ)/mmo_frontdoor.o $(APPOBJ)/mmo_update_notice.o
+VIEWCFLAGS := $(ABI) $(OPT) -std=gnu99 -Wall -MMD -MP \
+              -I$(NROOT)/android/sdlshim -I$(NROOT)/include \
+              -I$(NROOT)/viewer -I$(FT_ANDROID)/include/freetype2
+
+$(VIEWOBJ)/viewer.o: EXTRA_VIEWFLAGS := -Dmain=openmmo_viewer_main
+
+$(VIEWOBJ)/%.o: $(NROOT)/viewer/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(VIEWCFLAGS) $(EXTRA_VIEWFLAGS) -c -o $@ $<
+
+$(APPOBJ)/sdlshim.o: $(NROOT)/android/sdlshim/sdlshim.c
+	@mkdir -p $(dir $@)
+	$(CC) $(VIEWCFLAGS) -c -o $@ $<
+
+# The front door speaks the viewer's language (SDL.h, the ui primitives),
+# so it compiles with the viewer's flags even though it lives with the app.
+$(APPOBJ)/mmo_frontdoor.o: $(NROOT)/android/src/mmo_frontdoor.c
+	@mkdir -p $(dir $@)
+	$(CC) $(VIEWCFLAGS) -c -o $@ $<
+
+# ------------------------------------------------- reading the channel
+#
+# FOUR FILES OF THE DESKTOP FRONT DOOR, FOR THE HALF OF IT THAT READS. The
+# app cannot update itself, the package installer owns the APK, so none
+# of the patcher comes over: what these four buy is one signed document
+# fetched and verified (mmo_update_latest_revision), which is how the front
+# door learns a newer build exists and offers its player the download.
+# The design notes, "the android channel", says why that is a check and not an
+# update. They are the app's flags, not the viewer's: no SDL, no freetype.
+FEEDSRCS := feed.c feed_verify.c fetch.c update.c
+FEEDOBJS := $(FEEDSRCS:%.c=$(APPOBJ)/feed/%.o)
+
+$(APPOBJ)/feed/%.o: $(NROOT)/launcher/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(APPCFLAGS) -I$(NROOT)/launcher -c -o $@ $<
+
+# The notice speaks both languages, the viewer's primitives to draw the
+# panel, the launcher's headers to ask the question, so it takes the
+# viewer's flags plus the launcher and the generated pin.
+#
+# THE REVISION IS COMPILED IN, from the same commit count as the APK's
+# versionCode, because there is nothing on a device to read it back out of:
+# the desktop parses revision.txt beside the install and an app has no
+# install. Zero (a working tree with no git) asks nothing at all.
+$(APPOBJ)/mmo_update_notice.o: $(NROOT)/android/src/mmo_update_notice.c \
+                               $(FEEDPIN)
+	@mkdir -p $(dir $@)
+	$(CC) $(VIEWCFLAGS) -I$(NROOT)/launcher -I$(dir $(FEEDPIN)) \
+	    -DOPENMMO_APK_REVISION=$(APK_REVISION) -c -o $@ $<
+
+# The client archive appears AFTER the viewer objects too: the engine's link
+# names EXTRA_OBJS as '$(LIB) $(EXTRA_FUSED_OBJS)', and an archive resolves
+# nothing for an object listed after it. The feed objects sit with them for
+# the same reason, they need $(LIB)'s sockets and sha256.
+EXTRA_FUSED_OBJS := $(APPOBJS) $(VIEWOBJS) $(FEEDOBJS) $(LIB) \
+                    $(FT_ANDROID)/lib/libfreetype.a
+FUSED_NAME := libpokeplatinum.so
+FUSEDVARS += EXTRA_LDLIBS='-lEGL -lGLESv2 -laaudio'
+# THE ONLY SYMBOL THE PLATFORM LOOKS UP IN THIS LIBRARY. NativeActivity
+# dlsyms it and calls it; everything else in here talks to everything else
+# in here, inside one link, and must stay invisible, an exported name is a
+# name bionic itself might bind to, and the engine has thousands that
+# collide with a C library's (see the engine makefile's EXPORTS).
+FUSEDVARS += EXPORTS=ANativeActivity_onCreate
+
+$(APPOBJ)/%.o: $(APPDIR)/src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(APPCFLAGS) -c -o $@ $<
+
+$(APPOBJ)/android_native_app_glue.o: $(APPGLUE)/android_native_app_glue.c
+	@mkdir -p $(dir $@)
+	$(CC) $(APPCFLAGS) -Wno-deprecated-declarations -c -o $@ $<
+
+.PHONY: appobjs viewobjs feedobjs
+appobjs: $(APPOBJS)
+viewobjs: $(VIEWOBJS)
+feedobjs: $(FEEDOBJS)
+
+# The .d files the flags above emit: one per object, listing every header it
+# read. Without this include they are written and never consulted, which is
+# the same as not having them.
+ANDROID_DEPS := $(APPOBJS:.o=.d) $(VIEWOBJS:.o=.d) $(FEEDOBJS:.o=.d)
+-include $(ANDROID_DEPS)
+
+# ------------------------------------------------------------ packaging
+#
+# aapt2, zipalign and apksigner, from an SDK unpacked under a prefix with no
+# privilege, the same arrangement as the NDK. No Gradle: there is no Java to
+# compile, so there is nothing for it to do that these three do not.
+SDK        ?= $(HOME)/.local/opt/android-sdk
+SDK_BT     ?= $(SDK)/build-tools/34.0.0
+SDK_JAR    ?= $(SDK)/platforms/android-34/android.jar
+AAPT2      ?= $(SDK_BT)/aapt2
+ZIPALIGN   ?= $(SDK_BT)/zipalign
+APKSIGNER  ?= $(SDK_BT)/apksigner
+MIN_SDK    ?= 26
+TARGET_SDK ?= 28
+
+APK      := $(BUILD)/openmmo.apk
+APKSTAGE := $(BUILD)/apk
+KEYSTORE := $(BUILD)/debug.keystore
+
+# A debug key, generated here rather than committed: a signing key in a
+# repository is a signing key everyone has. It only has to be the SAME key
+# between two installs, which a build directory manages fine.
+$(KEYSTORE):
+	@mkdir -p $(dir $@)
+	@keytool -genkeypair -keystore $@ -storepass android -keypass android \
+	   -alias openmmo -keyalg RSA -keysize 2048 -validity 10000 \
+	   -dname "CN=OpenMMO handheld debug" >/dev/null 2>&1
+	@echo "  KEY     $@"
+
+# ------------------------------------------------------- the release key
+#
+# A STORE KEYS AN APP TO ITS SIGNING CERTIFICATE, FOREVER. Upload an update
+# signed by a different key and it is not an update, it is a stranger: the
+# store refuses it and no installed copy can ever move forward. There is no
+# recovery and no appeal, which makes this the one file in this project that
+# genuinely cannot be lost.
+#
+# The debug key above fails that test in the quietest possible way. It lives
+# under $(BUILD), which is a directory whose whole purpose is being deleted,
+# and `keytool -genkeypair` makes a NEW random key when it is gone. Fine for
+# sideloading, where the only requirement is that two installs on one bench
+# agree. Fatal the day the app is published, because the first `make clean`
+# after that silently ends the ability to update it.
+#
+# So a release key lives OUTSIDE the repository and outside the build tree,
+# defaulting to the config home the rest of this client already uses, and the
+# build prefers it whenever it exists. `make -f Makefile.android releasekey`
+# creates one and refuses to overwrite one.
+# The revision, the way every other half of this release names itself.
+APK_VERSION_CODE ?= $(shell git -C $(NROOT) rev-list --count HEAD 2>/dev/null || echo 1)
+APK_VERSION_NAME ?= r$(APK_VERSION_CODE)
+
+# WHAT THE UPDATE NOTICE THINKS THIS BUILD IS, which is the versionCode and
+# is only ever anything else on purpose. Lowering it is the one way to SEE
+# the notice before a channel is published that is ahead of this tree:
+#
+#   make -f Makefile.android FEED_URL=http://mmods.net/updates/linux \
+#        FEED_KEY=<pub.pem> APK_REVISION=800 apk
+#
+# raises the panel against the live channel, and because the versionCode is
+# untouched the APK still installs over the one already on the device,
+# a downgrade would not, and uninstalling to test takes the save with it.
+APK_REVISION ?= $(APK_VERSION_CODE)
+
+RELEASE_KEYSTORE  ?= $(HOME)/.config/openmmo/openmmo-release.jks
+RELEASE_KEY_ALIAS ?= openmmo
+RELEASE_KEY_PASS  ?= file:$(HOME)/.config/openmmo/openmmo-release.pass
+
+HAVE_RELEASE_KEY := $(wildcard $(RELEASE_KEYSTORE))
+ifeq ($(HAVE_RELEASE_KEY),)
+SIGN_KS    := $(KEYSTORE)
+SIGN_PASS  := pass:android
+SIGN_ALIAS := openmmo
+SIGN_WHAT  := debug (NOT publishable -- make releasekey)
+SIGN_DEP   := $(KEYSTORE)
+else
+SIGN_KS    := $(RELEASE_KEYSTORE)
+SIGN_PASS  := $(RELEASE_KEY_PASS)
+SIGN_ALIAS := $(RELEASE_KEY_ALIAS)
+SIGN_WHAT  := release ($(RELEASE_KEYSTORE))
+SIGN_DEP   :=
+endif
+
+.PHONY: releasekey storecheck
+releasekey:
+	@if [ -f "$(RELEASE_KEYSTORE)" ]; then \
+	  echo "releasekey: $(RELEASE_KEYSTORE) already exists, and this will NOT"; \
+	  echo "releasekey: overwrite it, replacing a published app's key ends"; \
+	  echo "releasekey: its updates permanently. Move it aside by hand if you"; \
+	  echo "releasekey: really mean to start a new identity."; exit 1; fi
+	@mkdir -p $(dir $(RELEASE_KEYSTORE))
+	@if [ ! -f "$(HOME)/.config/openmmo/openmmo-release.pass" ]; then \
+	  head -c 24 /dev/urandom | base64 | tr -d '\n' \
+	    > $(HOME)/.config/openmmo/openmmo-release.pass; \
+	  chmod 600 $(HOME)/.config/openmmo/openmmo-release.pass; \
+	  echo "  PASS    $(HOME)/.config/openmmo/openmmo-release.pass (generated)"; fi
+	@pw=`cat $(HOME)/.config/openmmo/openmmo-release.pass`; \
+	 keytool -genkeypair -keystore $(RELEASE_KEYSTORE) \
+	   -storepass "$$pw" -keypass "$$pw" -alias $(RELEASE_KEY_ALIAS) \
+	   -keyalg RSA -keysize 4096 -validity 10000 \
+	   -dname "CN=OpenMMO, O=OpenMMO" >/dev/null 2>&1
+	@chmod 600 $(RELEASE_KEYSTORE)
+	@echo "  KEY     $(RELEASE_KEYSTORE)"
+	@echo ""
+	@echo "  BACK BOTH OF THESE UP, OFF THIS MACHINE, NOW:"
+	@echo "    $(RELEASE_KEYSTORE)"
+	@echo "    $(HOME)/.config/openmmo/openmmo-release.pass"
+	@echo "  Losing them means the published app can never be updated again."
+	@echo ""
+	@pw=`cat $(HOME)/.config/openmmo/openmmo-release.pass`; \
+	 keytool -list -v -keystore $(RELEASE_KEYSTORE) -storepass "$$pw" \
+	   2>/dev/null | grep -E 'SHA256:' | head -1
+
+# Refuses an APK that a store cannot accept. Ask before uploading.
+storecheck: $(APK)
+	@if [ -z "$(HAVE_RELEASE_KEY)" ]; then \
+	  echo "storecheck: this APK is signed with the DEBUG key, which lives in"; \
+	  echo "storecheck: $(BUILD) and is regenerated whenever that is cleaned."; \
+	  echo "storecheck: Publishing it means the next clean build can never"; \
+	  echo "storecheck: update it. Run: make -f Makefile.android releasekey"; \
+	  exit 1; fi
+	@echo "storecheck: signed with the release key"
+	@$(APKSIGNER) verify --print-certs $(APK) | grep -E 'SHA-256' | head -1
+	@$(AAPT2) dump badging $(APK) 2>/dev/null | head -1
+
+.PHONY: apk apk-live
+apk: $(APK)
+
+# The APK a person PLAYS: pinned to the live server, exactly as dist.sh pins
+# a release, and read from dist.sh so the address never lives in two files.
+# A plain `apk` keeps dialing this WSL's own servers, which no device can
+# reach from outside, so the playable build is this one.
+apk-live:
+	@host=$$(sh -c '. /dev/null; grep -o "RELEASE_HOST=.*" $(NROOT)/dist.sh | head -1 | sed "s/.*:-\([^}]*\)}.*/\1/"'); \
+	 key=$$(grep -o 'RELEASE_ROOT_KEY=.*' $(NROOT)/dist.sh | head -1 | sed 's/.*:-\([^}]*\)}.*/\1/'); \
+	 if [ -z "$$host" ] || [ -z "$$key" ]; then \
+	   echo "apk-live: cannot read RELEASE_HOST / RELEASE_ROOT_KEY from dist.sh"; exit 1; fi; \
+	 echo "apk-live: pinning $$host"; \
+	 $(MAKE) -f $(firstword $(MAKEFILE_LIST)) \
+	   SERVER_HOST=$$host SERVER_LOGIN_PORT=2106 SERVER_GAME_PORT=7777 \
+	   SERVER_ROOT_KEY=$$key apk
+
+# The fused library is the payload and it is stripped on the way in. The
+# unstripped one is 48 MB of which 44 are debug info no phone can use and
+# every install has to carry; the armhf kit strips for the same reason.
+APKRES := $(shell find $(APPDIR)/res -type f 2>/dev/null)
+
+# ---------------------------------------------------------- the one class
+#
+# THE DOORBELL. Android's document picker is an Intent and its answer only
+# arrives at onActivityResult, which NativeActivity swallows, so the picker
+# was unreachable from C, and the cartridge browser had to be drawn by hand
+# and fed with MANAGE_EXTERNAL_STORAGE, the permission a store listing has to
+# apologise for. One small subclass hears the result and writes it to a file
+# the C side polls; the java/ directory holds it and may never hold more.
+#
+# -parameters is LOAD-BEARING, not style: javac 21 without it emits the
+# anonymous Runnable with a nameless parameter entry and this d8 dies on it
+# with a bare NullPointerException that names neither the file nor the
+# reason.
+JAVA_SRC := $(APPDIR)/java/org/openmmo/handheld/OpenMMOActivity.java
+D8       ?= $(SDK_BT)/d8
+
+$(BUILD)/classes.dex: $(JAVA_SRC)
+	@mkdir -p $(BUILD)/classes
+	@javac -source 8 -target 8 -parameters -bootclasspath $(SDK_JAR) \
+	   -d $(BUILD)/classes $(JAVA_SRC) 2>&1 | grep -v 'source value 8' || true
+	@$(D8) --min-api $(MIN_SDK) --lib $(SDK_JAR) --output $(BUILD) \
+	   $(BUILD)/classes/org/openmmo/handheld/*.class
+	@echo "  DEX     $@"
+
+$(APK): $(APPOBJS) $(VIEWOBJS) $(FEEDOBJS) $(SIGN_DEP) $(APKRES) \
+        $(BUILD)/classes.dex FORCE
+	@$(MAKE) -s -f $(firstword $(MAKEFILE_LIST)) fused
+	@# A TRANSLATION UNIT THE COMPILER REFUSED IS NOT A WARNING HERE. The
+	@# engine's build skips one that will not compile and carries on, which is
+	@# right while a port is being brought up on a new toolchain and wrong the
+	@# moment it is packaged: the link still succeeds, because a shared object
+	@# may carry undefined symbols, and the app then dies at dlopen with one
+	@# symbol name and no hint of where it went. Ask before packaging.
+	@sk=$$(find $(FUSED)/obj -name '*.skipped' 2>/dev/null); 	 if [ -n "$$sk" ]; then 	   echo "apk: the fused build skipped $$(printf '%s\n' "$$sk" | wc -l) translation unit(s):"; 	   printf '%s\n' "$$sk" | sed 's|.*/obj/|  |; s|\.o\.skipped$$|.c|'; 	   echo "apk: read the .err beside each one; an APK built from this link"; 	   echo "apk: installs and then fails to load."; exit 1; fi
+	@# AND THE SAME QUESTION AT THE LINK, which is the one that actually
+	@# bites: a shared object may carry undefined symbols and still link, and
+	@# Android's linker binds every one of them at load. `nound` relinks with
+	@# --no-undefined and fails if anything is left. Both times this fired for
+	@# real, the APK had installed cleanly and died on launch with a symbol
+	@# name and nothing else, once a TU the compiler had refused, once the
+	@# divide-by-zero wrapper dropped by an EXTRA_OBJS override.
+	@$(MAKE) -s -f $(ENGINE_MAKEFILE) BUILD=$(FUSED) $(FUSEDVARS) nound
+	@rm -rf $(APKSTAGE)
+	@mkdir -p $(APKSTAGE)/lib/armeabi-v7a
+	@$(NDK_BIN)/llvm-strip -o $(APKSTAGE)/lib/armeabi-v7a/libpokeplatinum.so \
+	    $(FUSED)/libpokeplatinum.so
+	@# THE RESOURCES, which this APK had none of until it had an icon. aapt2
+	@# is two passes by design: compile turns the res tree into its own
+	@# intermediate, link binds that to the manifest. Skipping the first and
+	@# pointing link at the directory does not work, link takes compiled
+	@# input only, and the error it gives for a raw png names the file and
+	@# not the reason.
+	@$(AAPT2) compile --dir $(APPDIR)/res -o $(BUILD)/res.zip
+	@# THE VERSION A STORE ORDERS UPDATES BY. The manifest carries 1, and a
+	@# store will not take a second upload at the same versionCode, so a
+	@# hardcoded one means exactly one release, ever. The revision is the
+	@# commit count, which is the same number dist.sh names a release by
+	@# (r837) and the feed publishes, so the store, the channel and the
+	@# filename all say one thing. --replace-version because the manifest
+	@# already has the attributes and aapt2 otherwise only fills in absent
+	@# ones.
+	@$(AAPT2) link -o $(APK).unaligned \
+	    --manifest $(APPDIR)/AndroidManifest.xml \
+	    -R $(BUILD)/res.zip --auto-add-overlay \
+	    -I $(SDK_JAR) \
+	    --version-code $(APK_VERSION_CODE) \
+	    --version-name $(APK_VERSION_NAME) --replace-version \
+	    --min-sdk-version $(MIN_SDK) --target-sdk-version $(TARGET_SDK)
+	@cd $(APKSTAGE) && zip -q -r $(APK).unaligned lib
+	@cd $(BUILD) && zip -q -j $(APK).unaligned classes.dex
+	@$(ZIPALIGN) -f 4 $(APK).unaligned $(APK).aligned
+	@# NO --key-pass, and that is not an omission. apksigner's `file:` reader
+	@# takes ONE LINE PER PASSWORD from the same file in order, so handing it
+	@# the same one-line file twice makes the second read run off the end:
+	@# "end of file reached in ...release.pass". The key and the store share a
+	@# password here, and apksigner falls back to the store's for the key when
+	@# it is not told otherwise, which is the arrangement that reads right.
+	@$(APKSIGNER) sign --ks $(SIGN_KS) --ks-pass $(SIGN_PASS) \
+	    --ks-key-alias $(SIGN_ALIAS) \
+	    --out $(APK) $(APK).aligned
+	@rm -f $(APK).unaligned $(APK).aligned $(APK).idsig
+	@echo "  APK     $(APK) ($$(du -h $(APK) | cut -f1)) v$(APK_VERSION_CODE) $(APK_VERSION_NAME), $(SIGN_WHAT))"

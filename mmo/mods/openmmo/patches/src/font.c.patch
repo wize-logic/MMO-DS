@@ -1,0 +1,23 @@
+--- a/src/font.c
++++ b/src/font.c
+@@ -157,6 +157,20 @@
+     return &sFontWork->curGlyph;
+ }
+ 
++/* Whether a font has a manager behind it right now. Font_TryLoadGlyph reads
++ * sFontWork->fontManagers[font] with no guard, which is safe for every caller
++ * inside a screen that loaded the font and is a null dereference for anything
++ * drawn outside one. A caller that is not part of a screen, an overlay drawn
++ * over the world, has no other way to ask. */
++BOOL Font_HasManager(enum Font font)
++{
++    if (sFontWork == NULL || font >= FONT_MAX) {
++        return FALSE;
++    }
++
++    return sFontWork->fontManagers[font] != NULL;
++}
++
+ enum RenderResult Font_RenderText(enum Font font, TextPrinter *printer)
+ {
+     TextPrinterSubstruct *substruct = (TextPrinterSubstruct *)printer->substruct;

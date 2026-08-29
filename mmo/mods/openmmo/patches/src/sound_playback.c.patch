@@ -1,0 +1,24 @@
+--- a/src/sound_playback.c
++++ b/src/sound_playback.c
+@@ -105,10 +105,20 @@
+     int currentSeqID = Sound_GetSequenceIDFromSoundHandle(SoundSystem_GetSoundHandle(SOUND_HANDLE_TYPE_FIELD_BGM));
+     Sound_LoadSoundDataForFieldBGM(seqID, Sound_GetBankIDFromSequenceID(currentSeqID));
+ 
++    /* The official client starts every field sequence through the FIELD BGM's bank, which
++     * works because Sinnoh's two field banks are supersets of the shared set
++     * every field track selects from, surf over a town keeps its sound. A
++     * composed soundtrack track owns a bank holding only its own instruments,
++     * so the start has to name the track's bank, and on the one path that
++     * reaches here without the switch-state load (a scripted start over an
++     * idle bank) that bank may not be resident yet. Loading is free when it
++     * already is: the loader reuses a registered file. */
++    SoundSystem_LoadSequenceEx(seqID, NNS_SND_ARC_LOAD_BANK | NNS_SND_ARC_LOAD_WAVE);
++
+     return NNS_SndArcPlayerStartSeqEx(
+         SoundSystem_GetSoundHandle(handleType),
+         -1,
+-        Sound_GetBankIDFromSequenceID(*newFieldBGM),
++        Sound_GetBankIDFromSequenceID(seqID),
+         -1,
+         seqID);
+ }

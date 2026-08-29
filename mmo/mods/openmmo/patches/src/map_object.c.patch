@@ -1,0 +1,16 @@
+--- a/src/map_object.c
++++ b/src/map_object.c
+@@ -330,8 +330,13 @@
+ 
+ void MapObject_Delete(MapObject *mapObj)
+ {
++    /* A remote player's PlayerAvatar is a separate allocation the object table
++     * does not own; this is the one point every deletion path reaches. */
++    extern void openmmo_map_object_deleting(void *mapObj);
+     const MapObjectManager *mapObjMan = MapObject_MapObjectManager(mapObj);
+ 
++    openmmo_map_object_deleting(mapObj);
++
+     if (MapObjectMan_IsDrawInitialized(mapObjMan) == TRUE) {
+         sub_02062B7C(mapObj);
+     }

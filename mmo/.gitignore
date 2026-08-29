@@ -1,0 +1,4 @@
+
+# Python leaves these beside a tool the moment another tool imports it.
+__pycache__/
+*.pyc

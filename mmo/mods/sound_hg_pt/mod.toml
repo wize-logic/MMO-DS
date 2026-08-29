@@ -1,0 +1,6 @@
+id = "sound_hg_pt"
+name = "Heart Gold Soundtrack, Platinum Soundfont"
+version = "1.0.0"
+authors = ["openmmo"]
+requires = []
+load_after = []

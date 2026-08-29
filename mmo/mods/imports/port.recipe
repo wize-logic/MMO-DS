@@ -1,0 +1,81 @@
+# port.recipe, what this package takes out of a cartridge, and where it lands.
+#
+# Every line names one piece of content in another Nintendo DS game
+# and the Sinnoh slot it is served at. `tools/modport.sh` reads this file, checks
+# the ROM it was handed is the game each line asks for, and hands each line to
+# the engine's own porter. Nothing here is bytes: the bytes come from the
+# player's own image, land in narc/ beside this file, and are not committed.
+#
+#   <game code>  <kind>  <source name>  <destination name>
+#
+# `<game code>` is the four-character id printed in the cartridge header, which
+# `modport.py --identify` reads back out of an image. A line whose code is not
+# the code of the ROM in hand is refused rather than ported from whatever was
+# passed, so a Diamond image cannot quietly answer a HeartGold line.
+#
+# `trainer` copies the five a trainer class's picture is, sheet, palette,
+# cell bank, animation bank, scan sheet, onto the five the destination class
+# draws from; both games index them at `class * 5` and mmo/TRAINER_GFX names
+# the classes on each side.
+#
+# `pokemon` copies one species' six sprite members, four character sheets,
+# front and back for each of the two genders, and two palettes, normal and
+# shiny, onto the destination species' six. `item_icon` copies the two an
+# item's picture is, a character sheet and a palette, onto the two the
+# destination item draws from; the member numbers come from mmo/ITEM_ICONS,
+# which is generated from each game's own item table because the two number
+# their icons differently.
+#
+# `mmodel`, `build_model` and `cry` are refused by NAME rather than left
+# unrecognised, each on a measurement written up in the design notes: an overworld
+# person's members are not a function of any id named in a tree we can read, a
+# building's textures live in its map's area texture set and not in the model
+# archive, and a cry is one record inside the same SDAT the music refusal
+# measures. An unrecognised kind is indistinguishable from a gap, which is why
+# none of them is simply absent.
+#
+# `map` and `text` are refused by name, here and by the porter, and that
+# refusal is a decision rather than a gap: measured across three cartridges in
+# The design notes, a foreign region's per-tile meanings and script opcodes are
+# numbered by the game they came from and no source we can read names one of
+# them. What a kind needs before it is added is an oracle, the engine's own
+# loader reading the ported member back, and mmo/CARTRIDGES records which
+# cartridge was measured to serve which kind, so a line asking a slot for a
+# kind it does not serve stops before the image is opened.
+#
+# Which cartridges can answer a line is settled the same way. HeartGold can: a
+# species is six members there, in the NCGR this engine's loader reads, and the
+# ported member is read back through the game to prove it. Black cannot, a
+# species is not six members and the sheets are compressed, and the driver
+# turns that image away by name before it reads this file's first line. Diamond
+# can serve too, since 2026-08-21: its sheets scramble in the opposite
+# direction to this game's and are re-encoded on the way in, which is the whole
+# of what used to be "extracts and does not draw". A
+# decompilation checkout is never a source at all: the ones in this repository
+# feed the server's tables, and content crosses from an image the player owns.
+#
+# ONE PACKAGE, ONE CARTRIDGE. Every line here names IPKE, and a recipe naming
+# two codes is refused rather than half-filled. A second cartridge gets a
+# second package, ordered against this one in `mod.toml`, because that is what
+# makes "which image filled this" answerable per package (the `fill` line at
+# the head of port.log) and hands a collision between two packages to the same
+# rule an authored package already needs. The alternative, one package with
+# several sources and a per-line origin, puts a mapping that belongs to two
+# games inside a directory that ships, and gives `mod.toml` a requirement it
+# cannot express.
+#
+# The lines below are a demonstration of the door and not the world: this
+# package is never in a default load order, and a session that does not name it
+# in PC_MODS sees the cartridge's own art.
+#
+# The first three are the Johto starters wearing the Sinnoh starters' numbers,
+# matched by type. The fourth is an item Sinnoh never had: an Apricorn is what
+# a Johto ball is made from, and HeartGold's icon for it lands on the Cherish
+# Ball, whose palette no other item shares. The fifth is a person: Falkner,
+# Violet City's gym leader, standing where Sinnoh draws a Youngster.
+
+IPKE  pokemon    chikorita     turtwig
+IPKE  pokemon    cyndaquil     chimchar
+IPKE  pokemon    totodile      piplup
+IPKE  item_icon  red_apricorn  cherish_ball
+IPKE  trainer    leader_falkner  youngster

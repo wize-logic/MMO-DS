@@ -1,0 +1,24 @@
+--- a/src/underground/player_talk.c	2026-08-23 08:18:29.053303629 -0400
++++ b/src/underground/player_talk.c	2026-08-23 08:19:42.487211996 -0400
+@@ -1443,6 +1443,21 @@
+     return sizeof(TalkMessage);
+ }
+ 
++/* openmmo: whether either of the two menus above is on the screen.
++ *
++ * Both of them are SysTasks that free themselves, and the only thing that knows
++ * one has finished is the static it clears on its way out. On a cartridge
++ * nothing has to ask: an underground player is walked by a keypad the group's
++ * server stops sending while they are talking, so the field takes itself back.
++ * Here the local player is walked by the overworld's own input path and the
++ * field is paused for the length of a conversation instead, so the moment it
++ * ends has to be observable, and it is also when the other end of the
++ * conversation has to be told. mmo/mods/openmmo/src/openmmo_underground.c. */
++BOOL UndergroundTalk_IsActive(void)
++{
++    return sCurrentTalkMenu != NULL || sCurrentResponseMenu != NULL;
++}
++
+ void UndergroundTalk_ExitConversation(void)
+ {
+     if (sCurrentTalkMenu) {

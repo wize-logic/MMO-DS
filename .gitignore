@@ -1,0 +1,88 @@
+.gradle
+build/
+# mmo/build-release: the release profile builds beside the working tree rather
+# than into it, so a release object and a working one are never confused.
+build-release/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+### Kotlin ###
+.kotlin
+
+### Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+### VS Code ###
+.vscode/
+
+### Mac OS ###
+.DS_Store
+
+### Local environment / secrets ###
+# Never commit local config or secrets. Use `.env.example` as the template.
+.env
+.env.*
+!.env.example
+docker-compose.override.yml
+
+### Internal working notes (never committed)
+/internal/
+
+### Content ported out of a player's own cartridge (never committed)
+# mmo/mods/imports tracks a recipe; `make -C mmo import` fills these from an
+# image the player supplies. A second such package needs its own two lines here
+# rather than a wildcard, so its bytes show up in `git status` until someone
+# has decided they are ignorable.
+/mmo/mods/imports/narc/
+/mmo/mods/imports/port.log
+
+# The composed sound packages: one per soundtrack/soundfont pair
+# (sound_<tracks>_<font>, slugs pt/hg/bw), each tracking only its mod.toml.
+# `make -C mmo soundtrack` fills replace/ and the two manifests from the
+# player's own images (tools/soundtrack.py, tools/soundfont.py; the rows in
+# SOUNDTRACKS and SOUNDFONTS). One family, one tool, so one pattern set
+# instead of the usual per-package lines.
+/mmo/mods/sound_*_*/replace/
+/mmo/mods/sound_*_*/replaced.txt
+/mmo/mods/sound_*_*/music.txt
+
+# The operator's feed signing key. It signs every update players fetch;
+# it never enters the repository.
+feed_private.pem
+*feed_private*.pem
+
+### Stray decomp checkouts (never committed)
+# Upstream trees cloned directly under decomp/, which is where
+# mmo/tools/decomp_dir.sh looks when DECOMP_DIR is unset. They are listed
+# rather than wildcarded so a new one shows up in `git status` until
+# someone decides it is ignorable.
+/decomp/pokeemerald/
+/decomp/pokefirered/
+/decomp/pokeheartgold/
+/decomp/pokeplatinum/

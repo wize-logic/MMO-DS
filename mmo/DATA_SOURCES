@@ -1,0 +1,40 @@
+# The data trees both halves of this game read, and which generator reads each.
+#
+# Sinnoh comes from the engine, which is the engine/pokeplatinum submodule, so
+# the client's tree and the server's tree are one tree and cannot drift apart.
+#
+# The Hoenn and Kanto trees are not distributed here. $DECOMP_DIR/<name> is
+# where they are looked for, defaulting to decomp/ beside this repo, so a
+# checkout cloned there by name is found with nothing set.
+#
+# tools/decomp_dir.sh resolves one name to one path and says which kind it
+# picked; codegen/build.gradle.kts spells the same rule for Gradle and
+# `printDecompTrees` prints the answer.
+#
+# tools/data_surface.sh still runs, and there are two things it guards:
+#
+#   * when the engine tree and the codegen tree are two checkouts, a machine
+#     with no maintained tree, so both halves fall back to the submodule, or a
+#     --decomp pointed somewhere by hand, every tree below must hold the same
+#     bytes on both sides, or the client renders one world while the server
+#     computes another and each side's own checks still pass. When they resolve
+#     to one tree it says so rather than printing a comparison that cannot fail.
+#   * the generator set, always. Each row is a tree, then the generators that
+#     read it, checked against codegen/build.gradle.kts, so a new reader of the
+#     DS decomp fails here until the trees it reads are listed. An unguarded tree
+#     is the failure this file exists to prevent.
+#
+# Provenance, not a gate: engine 020d5ca5f90fb169a1d8253bba7bc6ec54ae78f9,
+# decomp 21f93dee0d5f38ef1dd5560d42065561b0826599, verified identical on all
+# five trees (14,582 files) on 2026-08-15. res/trainers joined them on
+# 2026-08-18 when the trainer generator grew a DS reader, taking the guarded
+# set to six trees and 17,480 files.
+
+readers: maps moves pokemon evolution learnset text story trainer
+
+res/field     maps story
+res/moves     moves
+res/pokemon   pokemon evolution learnset
+res/text      text
+res/trainers  trainer
+generated     maps moves pokemon evolution learnset text story trainer

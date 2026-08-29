@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The adaptive icon, for the launchers that mask their own shape (API 26+,
+  which is every device this ships to). The legacy mipmap-*/ic_launcher.png
+  beside this stays for anything older and for the places a raw icon is still
+  used; both are the same artwork, cut two ways.
+
+  The foreground's art sits inside the middle two thirds. That is the only
+  part an adaptive mask is guaranteed to show: a launcher may crop this to a
+  circle, a squircle or a teardrop, and whatever falls outside that safe zone
+  is the launcher's to cut.
+
+  No double hyphen anywhere above, and that is not a style choice. XML forbids
+  one inside a comment, and aapt2 reports it as "not well-formed (invalid
+  token)" against the line number and nothing else.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+  <background android:drawable="@mipmap/ic_launcher_bg" />
+  <foreground android:drawable="@mipmap/ic_launcher_fg" />
+</adaptive-icon>

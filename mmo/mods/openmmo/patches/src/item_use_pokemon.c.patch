@@ -1,0 +1,16 @@
+--- a/src/item_use_pokemon.c
++++ b/src/item_use_pokemon.c
+@@ -606,6 +606,13 @@
+ 
+     int monCount = Party_GetCurrentCount(party);
+ 
++    /* A full heal (the Pokemon Center's, the partner's) is party state the
++     * server must hear, or a rejoin brings the wounds back. */
++    {
++        extern void openmmo_party_mark_touched(void);
++        openmmo_party_mark_touched();
++    }
++
+     for (int i = 0; i < monCount; i++) {
+         Pokemon *mon = Party_GetPokemonBySlotIndex(party, i);
+ 

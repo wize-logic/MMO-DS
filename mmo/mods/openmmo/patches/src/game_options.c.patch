@@ -1,0 +1,47 @@
+--- a/src/game_options.c
++++ b/src/game_options.c
+@@ -9,6 +9,9 @@
+ #include "system.h"
+ #include "text.h"
+ 
++/* mods/openmmo/src/openmmo_input.c */
++extern int openmmo_button_mode(void);
++
+ Options *Options_New(enum HeapID heapID)
+ {
+     Options *options = Heap_Alloc(heapID, sizeof(Options));
+@@ -36,9 +39,10 @@
+ 
+ void Options_SetSystemButtonMode(SaveData *saveData, enum OptionsButtonMode mode)
+ {
+-    if (saveData != NULL) {
+-        mode = Options_ButtonMode(SaveData_GetOptions(saveData));
+-    }
++    /* The save no longer carries this, so neither argument is read: the mode in
++     * force is the host's, beside the key map it composes with. */
++    (void)saveData;
++    mode = (enum OptionsButtonMode)openmmo_button_mode();
+ 
+     switch (mode) {
+     case OPTIONS_BUTTON_MODE_START_IS_X:
+@@ -109,12 +113,18 @@
+ 
+ int Options_ButtonMode(const Options *options)
+ {
+-    return options->buttonMode;
++    /* What the options screen shows in the BUTTON MODE row, and what
++     * game_start.c applies at boot: the host's answer either way. */
++    (void)options;
++    return openmmo_button_mode();
+ }
+ 
+ void Options_SetButtonMode(Options *options, enum OptionsButtonMode mode)
+ {
+-    options->buttonMode = mode;
++    /* Dropped. The row is a view of a setting stored outside the save; writing
++     * the two bits back would make the save a second place it is kept. */
++    (void)options;
++    (void)mode;
+ }
+ 
+ int Options_Frame(const Options *options)

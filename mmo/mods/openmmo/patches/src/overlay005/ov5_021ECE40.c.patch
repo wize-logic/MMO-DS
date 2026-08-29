@@ -1,0 +1,58 @@
+--- a/src/overlay005/ov5_021ECE40.c
++++ b/src/overlay005/ov5_021ECE40.c
+@@ -537,6 +537,24 @@
+         }
+     }
+ 
++    /* Sequence table: a cooked body whose frames are not a person's walks on
++     * an appended member, past this table's own 0..22. The MODEL table needs
++     * no hook beside it, 32x32 and 64x64 are engine constants that already
++     * have rows, and OBJ_EVENT_GFX_REGIGIGAS is the 64x64 one walking. */
++    if (start == Unk_ov5_021FB5BC) {
++        extern int openmmo_billboard_seq_member(int seq_id);
++
++        member = openmmo_billboard_seq_member(param0);
++
++        if (member >= 0) {
++            static UnkStruct_ov5_021ED2D0 extra_seq;
++
++            extra_seq.unk_00 = param0;
++            extra_seq.unk_04 = member;
++            return &extra_seq;
++        }
++    }
++
+     return NULL;
+ }
+ 
+@@ -1313,6 +1331,30 @@
+         v0++;
+     } while (v0->unk_00 != 0xffff);
+ 
++    /* A cooked row that names its own model and frame sequence. A follower
++     * Pokemon is 8 frames and two palettes where the youngster is 16 and one,
++     * and 31 of them are 64x64, so cloning the youngster draws it out of the
++     * wrong half of a texture page at a quarter of its size.
++     *
++     * One static is enough: the three accessors below each call this and read
++     * a single field out of what comes back before anything calls it again. */
++    {
++        extern int openmmo_billboard_row(int gfx_id, int *model, int *seq,
++                                         const BillboardAnim **anims);
++        static UnkStruct_ov5_021EDD04 cooked;
++        int model, seq;
++        const BillboardAnim *anims;
++
++        if (openmmo_billboard_row(param0, &model, &seq, &anims)) {
++            cooked.unk_00 = param0;
++            cooked.unk_04 = model;
++            cooked.unk_06 = seq;
++            cooked.unk_08 = anims;
++            return &cooked;
++        }
++    }
++
++    /* Anything else cooked is a ported person, and the youngster is right. */
+     if (pc_modfs_billboard_nsbtx(param0) >= 0) {
+         return ov5_021EDD04(OBJ_EVENT_GFX_YOUNGSTER);
+     }

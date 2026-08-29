@@ -1,0 +1,14 @@
+--- a/src/heap.c
++++ b/src/heap.c
+@@ -202,6 +202,11 @@
+ 
+ static void AllocFail(void)
+ {
++    /* The body below only speaks when the DS comm stack is up, so on a host a
++     * heap running out returned NULL and said nothing at all. */
++    extern void openmmo_engine_heap_full(void);
++    openmmo_engine_heap_full();
++
+     if (CommManager_IsInitialized()) {
+         ErrorMessageReset_PrintErrorAndReset();
+     }

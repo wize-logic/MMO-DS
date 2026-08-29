@@ -1,0 +1,105 @@
+--- a/src/scrcmd.c
++++ b/src/scrcmd.c
+@@ -3812,6 +3812,55 @@
+     return TRUE;
+ }
+ 
++/* openmmo: the Contest Hall's link door.
++ *
++ * The official client's two commands here open the DS communication club, "join a group"
++ * or "become the leader", and wait for a wireless group to form. This client's
++ * group is its server and its queue, so for a contest both commands mean the
++ * same thing: ask to be put in one, and wait for a seat. Everything either side
++ * of this is the lobby's own bytecode, unchanged, including the yes/no in front
++ * of it and the branch on the code that comes back.
++ *
++ * The party slot the player already registered is in VAR_MAP_LOCAL_0x02: the
++ * lobby's script picks the Pokemon BEFORE it forms the group
++ * (Contests_OfficialContestRegisterMon runs before Contests_OfficialContestStart),
++ * so by the time either command runs there is a monster chosen.
++ * mmo/mods/openmmo/src/openmmo_contest_link.c. */
++static BOOL openmmo_contest_club_poll(ScriptContext *ctx)
++{
++    extern int openmmo_contest_club_result(void);
++
++    FieldSystem *fieldSystem = ctx->fieldSystem;
++    u16 *destVar = FieldSystem_GetVarPointer(fieldSystem, ctx->data[0]);
++    int code = openmmo_contest_club_result();
++
++    if (code == COMM_CLUB_RET_0) {
++        return FALSE;
++    }
++
++    *destVar = code;
++    return TRUE;
++}
++
++/* 1 when this client took the door, so the official comm club stays out of it. */
++static BOOL openmmo_contest_club_take(ScriptContext *ctx, int commType,
++    int contestType, int contestRank, u16 destVarID)
++{
++    extern int openmmo_contest_club_start(int commType, int contestType,
++        int contestRank, int partySlot);
++
++    u16 *slotVar = FieldSystem_GetVarPointer(ctx->fieldSystem, VAR_MAP_LOCAL_0x02);
++    int slot = slotVar != NULL ? (int)*slotVar : 0;
++
++    if (!openmmo_contest_club_start(commType, contestType, contestRank, slot)) {
++        return FALSE;
++    }
++
++    ctx->data[0] = destVarID;
++    ScriptContext_Pause(ctx, openmmo_contest_club_poll);
++    return TRUE;
++}
++
+ static BOOL ScrCmd_StartBattleClient(ScriptContext *ctx)
+ {
+     FieldSystem *fieldSystem = ctx->fieldSystem;
+@@ -3820,6 +3869,10 @@
+     u16 v3 = ScriptContext_GetVar(ctx);
+     u16 destVarID = ScriptContext_ReadHalfWord(ctx);
+ 
++    if (openmmo_contest_club_take(ctx, commType, v2, v3, destVarID)) {
++        return TRUE;
++    }
++
+     CommClub_StartBattleClient(fieldSystem, commType, v2, v3);
+     ctx->data[0] = destVarID;
+     ScriptContext_Pause(ctx, sub_02042F74);
+@@ -3850,6 +3903,10 @@
+     u16 v3 = ScriptContext_GetVar(ctx);
+     u16 destVarID = ScriptContext_ReadHalfWord(ctx);
+ 
++    if (openmmo_contest_club_take(ctx, commType, v2, v3, destVarID)) {
++        return TRUE;
++    }
++
+     CommClub_StartBattleServer(fieldSystem, commType, v2, v3);
+     ctx->data[0] = destVarID;
+     ScriptContext_Pause(ctx, sub_0204300C);
+@@ -4145,6 +4202,24 @@
+ 
+ static BOOL ScrCmd_131(ScriptContext *ctx)
+ {
++    /* openmmo: the device may already be on, and then this must not run.
++     *
++     * The official client's "the Poketch switches on" task is written for the one state its
++     * script can be in: the lower screen is the unavailable placeholder. So it
++     * leaves that screen, PoketchUnavailableScreen_Exit, which is
++     * Heap_Destroy(HEAP_ID_POKETCH_APP), unloads that overlay and builds a
++     * PoketchSystem in its place. Run it with a PoketchSystem already live and
++     * it destroys the heap that system is holding and then creates a second
++     * system over the first, which is the crash a player meets when the
++     * Poketch Co president finally hands the watch over.
++     *
++     * A running device means there is nothing to switch on, so the command is
++     * the no-op it means. The RegisterPoketchApp calls either side of it in the
++     * script are untouched and still land. */
++    if (FieldSystem_GetPoketchSystem() != NULL) {
++        return FALSE;
++    }
++
+     ov5_021DDBC8(ctx->task);
+     return TRUE;
+ }

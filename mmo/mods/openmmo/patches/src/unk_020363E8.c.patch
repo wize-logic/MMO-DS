@@ -1,0 +1,47 @@
+--- a/src/unk_020363E8.c
++++ b/src/unk_020363E8.c
+@@ -100,6 +100,22 @@
+ 
+ void CommTiming_StartSync(u8 syncNo)
+ {
++    /* openmmo: a native link battle owns its own barrier. The CommTool block
++     * is not allocated in this port, so this is a redirect rather than a
++     * fallback: the line below would be a null dereference. */
++    extern int openmmo_link_sync_start(int syncNo);
++    extern int openmmo_contest_sync_start(int syncNo);
++
++    /* A link contest's barrier is N-party rather than two, so it answers for
++     * itself rather than through the link battle's. */
++    if (openmmo_contest_sync_start(syncNo)) {
++        return;
++    }
++
++    if (openmmo_link_sync_start(syncNo)) {
++        return;
++    }
++
+     sCommTool->syncNoPersonal = syncNo;
+     sCommTool->sendTiming = TRUE;
+ }
+@@ -117,6 +133,21 @@
+ 
+ BOOL CommTiming_IsSyncState(u8 syncState)
+ {
++    /* openmmo: the other half of the same barrier. -1 means "not ours". */
++    extern int openmmo_link_sync_state(int syncState);
++    extern int openmmo_contest_sync_state(int syncState);
++    int openmmoSync = openmmo_contest_sync_state(syncState);
++
++    if (openmmoSync >= 0) {
++        return openmmoSync;
++    }
++
++    openmmoSync = openmmo_link_sync_state(syncState);
++
++    if (openmmoSync >= 0) {
++        return openmmoSync;
++    }
++
+     if (sCommTool == NULL) {
+         return TRUE;
+     }

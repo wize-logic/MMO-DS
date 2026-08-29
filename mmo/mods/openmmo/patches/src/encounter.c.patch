@@ -1,0 +1,41 @@
+--- a/src/encounter.c
++++ b/src/encounter.c
+@@ -275,6 +275,21 @@
+         break;
+ 
+     case 4:
++        /* openmmo: the DS caller of this task (the comm club script) fades
++         * the screen back in itself after the task returns; a server-opened
++         * duel has no script following it, so without this the map winds up
++         * behind a screen still faded to black. The wild path's own return
++         * (FieldTask_Encounter) does exactly this. */
++        {
++            extern int openmmo_link_battle_active(void);
++
++            if (openmmo_link_battle_active()) {
++                FieldTransition_FadeIn(task);
++            }
++        }
++        (*state)++;
++        break;
++
+     case 5:
+         FreeEncounter(encounter);
+         return TRUE;
+@@ -768,6 +783,16 @@
+     FieldTask_InitCall(task, FieldTask_LinkEncounter, encounter);
+ }
+ 
++/* openmmo: the same door Encounter_NewVsLink is, for a link battle the server
++ * opened rather than the party-order menu. NewEncounter and FieldTask_LinkEncounter
++ * are both static, and a duel has no FieldTask to call into, so the two lines are
++ * here rather than in mods/openmmo/src/openmmo_link.c. */
++void openmmo_encounter_new_vs_link(FieldSystem *fieldSystem, FieldBattleDTO *dto)
++{
++    Encounter *encounter = NewEncounter(dto, EncEffects_CutInEffect(dto), EncEffects_BGM(dto), NULL);
++    FieldSystem_CreateTask(fieldSystem, FieldTask_LinkEncounter, encounter);
++}
++
+ static int sub_020516C8(const BattleRegulation *regulation, int battleType)
+ {
+     int v0;

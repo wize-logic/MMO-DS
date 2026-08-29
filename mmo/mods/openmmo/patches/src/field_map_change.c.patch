@@ -1,0 +1,55 @@
+--- a/src/field_map_change.c
++++ b/src/field_map_change.c
+@@ -269,6 +269,11 @@
+         PersistedMapFeatures_Init(MiscSaveBlock_GetPersistedMapFeatures(fieldSystem->saveData));
+     }
+ 
++    /* The VM that wrote this save id is cut. Overlay 9 only loads if the id is
++     * set before DynamicMapFeatures_Init. */
++    extern void openmmo_prepare_dynamic_map_features(FieldSystem *fs);
++    openmmo_prepare_dynamic_map_features(fieldSystem);
++
+     VarsFlags *varsFlags = SaveData_GetVarsFlags(fieldSystem->saveData);
+     u16 weather = FieldSystem_GetWeather(fieldSystem, mapHeaderID);
+ 
+@@ -340,7 +345,9 @@
+ 
+ static void FieldMapChange_CreateObjects(FieldSystem *fieldSystem)
+ {
+-    fieldSystem->mapObjMan = MapObjectMan_New(fieldSystem, 64, 5);
++    /* How many people one map may hold; 64 was a cartridge's number. */
++    extern int openmmo_map_object_capacity(void);
++    fieldSystem->mapObjMan = MapObjectMan_New(fieldSystem, openmmo_map_object_capacity(), 5);
+ 
+     int gender = TrainerInfo_Gender(SaveData_GetTrainerInfo(fieldSystem->saveData));
+     FieldOverworldState *fieldState = SaveData_GetFieldOverworldState(fieldSystem->saveData);
+@@ -361,7 +368,8 @@
+ 
+ static void FieldMapChange_LoadObjects(FieldSystem *fieldSystem)
+ {
+-    fieldSystem->mapObjMan = MapObjectMan_New(fieldSystem, 64, 5);
++    extern int openmmo_map_object_capacity(void);
++    fieldSystem->mapObjMan = MapObjectMan_New(fieldSystem, openmmo_map_object_capacity(), 5);
+     FieldSystem_LoadObjects(fieldSystem);
+ 
+     FieldOverworldState *fieldState = SaveData_GetFieldOverworldState(fieldSystem->saveData);
+@@ -1117,6 +1125,19 @@
+ 
+ void FieldTask_SetUndergroundMapChange(FieldSystem *fieldSystem)
+ {
++    /* openmmo: the Underground's own menu answers GO UP through here, and the
++     * task it would start opens with CommManUnderground_ExitUnderground, a
++     * write through the field communication manager the DS comm boot allocates
++     * and this port never does. The same door, on the climb this build already
++     * runs. mmo/mods/openmmo/src/openmmo_underground.c. */
++    {
++        extern int openmmo_underground_menu_exit(FieldSystem *fs);
++
++        if (openmmo_underground_menu_exit(fieldSystem)) {
++            return;
++        }
++    }
++
+     MapChangeUndergroundContext *ctx = MapChangeUndergroundContext_New(fieldSystem);
+ 
+     if (ctx == NULL) {

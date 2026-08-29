@@ -1,0 +1,83 @@
+package de.fiereu.openmmo.server.login.auth
+
+import de.fiereu.openmmo.common.enums.LoginState
+import de.fiereu.openmmo.common.utils.toHex
+import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+import javax.inject.Inject
+import javax.inject.Singleton
+
+interface UserService {
+  data class AuthResult(val state: LoginState, val userId: Int? = null, val tokenEpoch: Int = 0)
+
+  /** Identity a remember me token resolves to, with the epoch that token has to still match. */
+  data class TokenUser(
+      val id: Int,
+      val username: String,
+      val displayName: String,
+      val tokenEpoch: Int,
+  )
+
+  suspend fun authenticate(username: String, password: String): AuthResult
+
+  suspend fun getUserId(username: String): Int?
+
+  suspend fun findForToken(userId: Int): TokenUser?
+
+  suspend fun hasAnyUser(): Boolean
+
+  /** Takes the plain password and hashes it the way the client would before sending. */
+  suspend fun addUser(username: String, password: String): Int
+}
+
+@Suppress("kotlin:S4790")
+internal fun sha1Hex(value: String): String =
+    MessageDigest.getInstance("SHA-1").digest(value.toByteArray()).toHex()
+
+@Singleton
+class InMemoryUserStore @Inject constructor() : UserService {
+
+  private data class UserInfo(
+      val id: Int,
+      val passwordHash: String,
+      val username: String,
+      val tokenEpoch: Int = 0,
+  )
+
+  private val users = ConcurrentHashMap<String, UserInfo>()
+  private val nextId = AtomicInteger(1)
+
+  init {
+    put("admin", "admin")
+    put("test", "test")
+  }
+
+  override suspend fun hasAnyUser(): Boolean = users.isNotEmpty()
+
+  override suspend fun addUser(username: String, password: String): Int = put(username, password)
+
+  private fun put(username: String, password: String): Int {
+    val id = nextId.getAndIncrement()
+    users[username.lowercase()] = UserInfo(id, sha1Hex(password), username)
+    return id
+  }
+
+  override suspend fun authenticate(username: String, password: String): UserService.AuthResult {
+    val user =
+        users[username.lowercase()] ?: return UserService.AuthResult(LoginState.INVALID_PASSWORD)
+    if (user.passwordHash != password) {
+      return UserService.AuthResult(LoginState.INVALID_PASSWORD)
+    }
+    return UserService.AuthResult(LoginState.AUTHED, user.id, user.tokenEpoch)
+  }
+
+  override suspend fun getUserId(username: String): Int? = users[username.lowercase()]?.id
+
+  override suspend fun findForToken(userId: Int): UserService.TokenUser? =
+      users.values
+          .firstOrNull { it.id == userId }
+          ?.let {
+            UserService.TokenUser(it.id, it.username.lowercase(), it.username, it.tokenEpoch)
+          }
+}

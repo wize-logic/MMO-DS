@@ -1,0 +1,56 @@
+plugins {
+  application
+  id("buildsrc.convention.kotlin-jvm")
+  id("buildsrc.convention.spotless")
+  id("buildsrc.convention.sonarlint")
+  id("buildsrc.common.keys")
+  id("buildsrc.convention.jooq-db")
+  alias(libs.plugins.ksp)
+}
+
+application { mainClass.set("de.fiereu.openmmo.server.login.MainKt") }
+
+jooqDb { packageName = "de.fiereu.openmmo.db.login" }
+
+dependencies {
+  api(project(":network"))
+  api(project(":protocols.login"))
+  api(project(":common"))
+
+  implementation(libs.dagger)
+  ksp(libs.dagger.compiler)
+
+  implementation(libs.typesafe.config)
+  implementation(libs.kotlinx.coroutines)
+  implementation(libs.kotlin.logging)
+  implementation(libs.logback)
+
+  testImplementation(project(":common.test"))
+  testImplementation(libs.bundles.kotest)
+  testImplementation(libs.kotlinx.coroutines.test)
+}
+
+tasks.named<JavaExec>("run") {
+  listOf(
+          "OPENMMO_SESSION_SECRET",
+          "OPENMMO_ADMIN_USERNAME",
+          "OPENMMO_ADMIN_PASSWORD",
+          "LOGIN_HOST",
+          "LOGIN_PORT",
+          "GAME_SERVER_PUBLIC_IPV4",
+          "GAME_SERVER_PUBLIC_IPV6",
+          "GAME_SERVER_PORT",
+          "GAME_SERVER_LOCAL_ADDRESS",
+          "GAME_SERVER_LOCAL_HOSTNAME",
+          "LOGIN_DB_HOST",
+          "LOGIN_DB_PORT",
+          "LOGIN_DB_NAME",
+          "LOGIN_DB_USER",
+          "LOGIN_DB_PASSWORD")
+      .forEach { key -> env.fetchOrNull(key)?.let { environment(key, it) } }
+  environment("LOGIN_DB_SEED_DEV", env.fetchOrNull("LOGIN_DB_SEED_DEV") ?: "true")
+}
+
+listOf("classes", "processResources").forEach { taskName ->
+  tasks.named(taskName) { dependsOn("copyPublicKeyGame", "copyPrivateKeyGame") }
+}

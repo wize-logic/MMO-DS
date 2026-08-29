@@ -1,0 +1,19 @@
+--- a/src/battle/battle_display.c
++++ b/src/battle/battle_display.c
+@@ -6299,6 +6299,16 @@
+ 
+     ManagedSprite *managedSprite = SpriteSystem_NewManagedSpriteTrainer(spriteSys, spriteMan, paletteData, x, y, trainerClass, face, battlerType, HEAP_ID_BATTLE);
+ 
++    /* openmmo: the player's own back never draws. Every trainer sprite a
++     * battle shows is born here, and the player side is exactly FACE_BACK;
++     * the intro, throw and slide tasks still run against the hidden sprite,
++     * so their timings hold and the thrown ball (an ov12 sprite of its own)
++     * still flies. Nothing in battle sets the draw flag back to TRUE, 
++     * BattlerData_SetTrainerVisibility is only ever called with FALSE. */
++    if (face == FACE_BACK) {
++        ManagedSprite_SetDrawFlag(managedSprite, FALSE);
++    }
++
+     return managedSprite;
+ }
+ 

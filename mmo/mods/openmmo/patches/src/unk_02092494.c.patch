@@ -1,0 +1,19 @@
+--- a/src/unk_02092494.c
++++ b/src/unk_02092494.c
+@@ -855,6 +855,16 @@
+     int v1 = TrainerInfo_Gender(trainerInfo);
+     String *v2 = TrainerInfo_NameNewString(trainerInfo, heapID);
+ 
++    /* openmmo: the wide name that is right on every screen is too wide for
++     * the record's seven-plus-terminator OT field; written whole it leaves
++     * no terminator, and the first String_Concat that prints the OT
++     * asserts (the summary screen). The record takes the seven the
++     * cartridge field can carry. */
++    {
++        extern void openmmo_trainer_name_clamp_record(String *name);
++        openmmo_trainer_name_clamp_record(v2);
++    }
++
+     BoxPokemon_SetValue(boxMon, MON_DATA_OT_ID, &v0);
+     BoxPokemon_SetValue(boxMon, MON_DATA_OT_GENDER, &v1);
+     BoxPokemon_SetValue(boxMon, MON_DATA_OT_NAME_STRING, v2);

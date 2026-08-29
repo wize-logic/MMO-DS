@@ -1,0 +1,81 @@
+[versions]
+kotlin = "2.4.10"
+kotlinx-serialization = "1.11.0"
+kotlinx-coroutines = "1.11.0"
+kotlin-logging = "8.0.4" # sl4j wrapper for Kotlin
+logback = "1.5.38"
+slf4j = "2.0.18"
+jte = "3.2.4"
+spotless = "8.8.0"
+sonarlint = "7.1.5"
+bouncycastle = "1.85"
+junit5 = "6.1.2"
+kotest = "6.2.3"
+mockk = "1.14.11"
+jooq = "3.21.6"
+postgresql = "42.7.13"
+flyway = "13.0.0"
+hikaricp = "7.0.2"
+testcontainers = "1.21.3"
+netty = "4.2.17.Final"
+typesafe-config = "1.4.9"
+dagger = "2.60.1"
+ksp = "2.3.11"
+ineter = "0.3.1"
+compose = "1.11.1"
+tomlkt = "0.5.0"
+dotenv = "4.0.0"
+
+[libraries]
+kotlinGradlePlugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+jooqCodegenGradlePlugin = { module = "org.jooq:jooq-codegen-gradle", version.ref = "jooq" }
+spotlessGradlePlugin = { module = "com.diffplug.spotless:spotless-plugin-gradle", version.ref = "spotless" }
+sonarlintGradlePlugin = { module = "name.remal.sonarlint:name.remal.sonarlint.gradle.plugin", version.ref = "sonarlint" }
+kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect", version.ref = "kotlin" }
+kotlinx-serialization-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core-jvm", version.ref = "kotlinx-serialization" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json-jvm", version.ref = "kotlinx-serialization" }
+kotlinx-coroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
+kotlin-logging = { module = "io.github.oshai:kotlin-logging-jvm", version.ref = "kotlin-logging" }
+logback = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+slf4j = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+jte = { module = "gg.jte:jte", version.ref = "jte" }
+jte-kotlin = { module = "gg.jte:jte-kotlin", version.ref = "jte" }
+bouncycastle-pkix = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref = "bouncycastle" }
+bouncycastle-provider = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
+junit5 = { module = "org.junit.jupiter:junit-jupiter-api", version.ref = "junit5" }
+kotest-core = { module = "io.kotest:kotest-runner-junit5", version.ref = "kotest" }
+kotest-assertions = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
+kotest-framework = { module = "io.kotest:kotest-framework-engine", version.ref = "kotest" }
+jooq = { module = "org.jooq:jooq", version.ref = "jooq" }
+jooq-kotlin = { module = "org.jooq:jooq-kotlin", version.ref = "jooq" }
+jooq-meta = { module = "org.jooq:jooq-meta", version.ref = "jooq" }
+jooq-codegen = { module = "org.jooq:jooq-codegen", version.ref = "jooq" }
+jooq-meta-extensions = { module = "org.jooq:jooq-meta-extensions", version.ref = "jooq" }
+postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
+flyway-core = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
+flyway-postgresql = { module = "org.flywaydb:flyway-database-postgresql", version.ref = "flyway" }
+hikaricp = { module = "com.zaxxer:HikariCP", version.ref = "hikaricp" }
+testcontainers-postgresql = { module = "org.testcontainers:postgresql", version.ref = "testcontainers" }
+testcontainers-junit = { module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
+netty = { module = "io.netty:netty-all", version.ref = "netty" }
+typesafe-config = { module = "com.typesafe:config", version.ref = "typesafe-config" }
+dagger = { module = "com.google.dagger:dagger", version.ref = "dagger" }
+dagger-compiler = { module = "com.google.dagger:dagger-compiler", version.ref = "dagger" }
+mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+ineter = { module = "com.github.maltalex:ineter", version.ref = "ineter" }
+tomlkt = { module = "net.peanuuutz.tomlkt:tomlkt-jvm", version.ref = "tomlkt" }
+
+[bundles]
+crypto = ["bouncycastle-pkix", "bouncycastle-provider"]
+jooq = ["jooq", "jooq-kotlin", "jooq-meta", "jooq-codegen"]
+kotest = ["kotest-core", "kotest-assertions", "kotest-framework"]
+
+[plugins]
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+jooq = { id = "org.jooq.jooq-codegen-gradle", version.ref = "jooq" }
+flyway = { id = "org.flywaydb.flyway", version.ref = "flyway" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+dotenv = { id = "co.uzzu.dotenv.gradle", version.ref = "dotenv" }
+compose = { id = "org.jetbrains.compose", version.ref = "compose" }
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

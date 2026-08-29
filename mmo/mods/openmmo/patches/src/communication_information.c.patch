@@ -1,0 +1,229 @@
+--- a/src/communication_information.c
++++ b/src/communication_information.c
+@@ -113,6 +113,11 @@
+ 
+ void CommInfo_SendPlayerInfo(void)
+ {
++    /* openmmo: likewise. */
++    if (sCommInfo == NULL) {
++        return;
++    }
++
+     u16 netId = CommSys_CurNetId();
+     TrainerInfo *trainerInfo;
+     const u16 *v2;
+@@ -164,6 +169,11 @@
+ 
+ BOOL CommInfo_IsDataFinishedReading(void)
+ {
++    /* openmmo: likewise. */
++    if (sCommInfo == NULL) {
++        return FALSE;
++    }
++
+     return sCommInfo->dataFinishedReading;
+ }
+ 
+@@ -215,6 +225,14 @@
+ 
+ BOOL CommInfo_ServerSendArray(void)
+ {
++    /* openmmo: the communication information block is allocated by the DS comm
++     * boot, which this port never runs, see the guard on sub_020331B4 below.
++     * The Underground reaches this one on its own frame, so it is answered
++     * rather than dereferenced. */
++    if (sCommInfo == NULL) {
++        return FALSE;
++    }
++
+     int netId;
+ 
+     if (!sCommInfo->dataRecvFlag) {
+@@ -249,37 +267,72 @@
+ 
+ void CommInfo_InitPlayer(int netId)
+ {
++    /* openmmo: likewise. */
++    if (sCommInfo == NULL) {
++        return;
++    }
++
+     TrainerInfo_Init(sCommInfo->trainerInfo[netId]);
+     sCommInfo->infoState[netId] = INFO_STATE_EMPTY;
+ }
+ 
+ BOOL sub_02032DC4(int netId)
+ {
++    /* openmmo: likewise. */
++    if (sCommInfo == NULL) {
++        return FALSE;
++    }
++
+     return sCommInfo->infoState[netId] == INFO_STATE_BEGIN_RECIEVE;
+ }
+ 
+ BOOL sub_02032DE0(int netId)
+ {
++    /* openmmo: likewise. */
++    if (sCommInfo == NULL) {
++        return FALSE;
++    }
++
+     return sCommInfo->infoState[netId] == INFO_STATE_RECIEVE || sCommInfo->infoState[netId] == INFO_STATE_BEGIN_RECIEVE;
+ }
+ 
+ BOOL sub_02032E00(int netId)
+ {
++    /* openmmo: likewise. */
++    if (sCommInfo == NULL) {
++        return FALSE;
++    }
++
+     return sCommInfo->infoState[netId] == INFO_STATE_RECIEVE;
+ }
+ 
+ void sub_02032E1C(int netId)
+ {
++    /* openmmo: likewise. */
++    if (sCommInfo == NULL) {
++        return;
++    }
++
+     sCommInfo->infoState[netId] = INFO_STATE_RECIEVE;
+ }
+ 
+ void CommInfo_SetReceiveEnd(int netId)
+ {
++    /* openmmo: likewise. */
++    if (sCommInfo == NULL) {
++        return;
++    }
++
+     sCommInfo->infoState[netId] = INFO_STATE_END_RECIEVE;
+ }
+ 
+ int CommInfo_NewNetworkId(void)
+ {
++    /* openmmo: likewise. */
++    if (sCommInfo == NULL) {
++        return NETID_NONE;
++    }
++
+     int netId;
+ 
+     for (netId = 0; netId < MAX_CONNECTED_PLAYERS; netId++) {
+@@ -334,7 +387,24 @@
+ TrainerInfo *CommInfo_TrainerInfo(int netId)
+ {
+     if (!sCommInfo) {
+-        return NULL;
++        /* openmmo: with no comm block there is still a player, and the
++         * Underground asks this to put a name in its own text, the vendors'
++         * greeting is the first line down there that does, and it hands the
++         * answer straight to StringTemplate_SetPlayerName, which reads the
++         * name off it. The block's local slot is a copy of the save's trainer
++         * info (CommInfo_SendPlayerInfo above), so answer with the original. */
++        extern TrainerInfo *openmmo_ug_trainer_info(int netId);
++        extern TrainerInfo *openmmo_contest_trainer_info(int netId);
++        TrainerInfo *contestant = openmmo_contest_trainer_info(netId);
++
++        /* A link contest asks for every seat's, before the contest starts, to
++         * read whether that player has finished the story and holds the
++         * National Dex, the two answers that pick the rival set. */
++        if (contestant != NULL) {
++            return contestant;
++        }
++
++        return openmmo_ug_trainer_info(netId);
+     }
+ 
+     switch (sCommInfo->infoState[netId]) {
+@@ -349,6 +419,13 @@
+ 
+ DWCFriendData *CommInfo_DWCFriendData(int netId)
+ {
++    /* openmmo: no comm block, no friend codes. The trade scene's cancel path
++     * asks on the way out, and a NULL here is what makes it skip the pal-pad
++     * registration screens rather than dereference the block. */
++    if (sCommInfo == NULL) {
++        return NULL;
++    }
++
+     if (sCommInfo->infoState[netId] != INFO_STATE_EMPTY) {
+         return &sCommInfo->playerInfo[netId].friendData;
+     }
+@@ -372,6 +449,12 @@
+ 
+ int CommInfo_PlayerCountry(int netId)
+ {
++    /* openmmo: the trade table flags the geonet history with the other
++     * chair's country on its first frame. No comm block, no countries. */
++    if (sCommInfo == NULL) {
++        return 0;
++    }
++
+     if (sCommInfo->infoState[netId] != 0) {
+         return sCommInfo->playerInfo[netId].country;
+     }
+@@ -381,6 +464,11 @@
+ 
+ int CommInfo_PlayerRegion(int netId)
+ {
++    /* openmmo: likewise. */
++    if (sCommInfo == NULL) {
++        return 0;
++    }
++
+     if (sCommInfo->infoState[netId] != 0) {
+         return sCommInfo->playerInfo[netId].region;
+     }
+@@ -390,6 +478,14 @@
+ 
+ BOOL CommInfo_PlayerHasGiftPenalty(int netID)
+ {
++    /* openmmo: likewise, and the Underground's gift menu is the one place
++     * that reaches it, on the frame a good is chosen. The flag it wants is the
++     * DS's own anti-abuse mark, carried in a comm block this port never
++     * allocates, so nobody down here is under one. */
++    if (sCommInfo == NULL) {
++        return FALSE;
++    }
++
+     if (sCommInfo->infoState[netID] != INFO_STATE_EMPTY) {
+         return sCommInfo->playerInfo[netID].hasGiftPenalty;
+     }
+@@ -483,6 +579,14 @@
+ 
+ void sub_020331B4(SaveData *saveData, int param1)
+ {
++    /* openmmo: a native link battle ends through here (SetLinkBattleResult),
++     * and the comm information block only exists when the DS comm stack
++     * booted, which on this port it never has. There is no record store to
++     * write the win onto, so say nothing rather than dereference NULL. */
++    if (sCommInfo == NULL) {
++        return;
++    }
++
+     if (param1 == 1) {
+         CommInfo_UpdatePlayerRecord(0, 1);
+     } else if (param1 == -1) {
+@@ -494,6 +598,19 @@
+ 
+ void CommInfo_SetTradeResult(SaveData *saveData, int val)
+ {
++    /* openmmo: the settlement's first breath, the official client calls this on the
++     * frame both confirmations land, before it touches a party. The engine's
++     * local swap is presentation; the monsters are the server's, so this is
++     * where the scene's agreed pair goes up the authority wire
++     * (mmo/mods/openmmo/src/openmmo_trade.c). With no comm block there is
++     * also no record store to write. */
++    if (sCommInfo == NULL) {
++        extern void openmmo_trade_scene_settled(void);
++
++        openmmo_trade_scene_settled();
++        return;
++    }
++
+     CommInfo_UpdatePlayerRecord(2, val);
+     CommInfo_SavePlayerRecord(saveData);
+ }

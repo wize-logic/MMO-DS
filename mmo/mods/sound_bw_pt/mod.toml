@@ -1,0 +1,6 @@
+id = "sound_bw_pt"
+name = "Black & White Soundtrack, Platinum Soundfont"
+version = "1.0.0"
+authors = ["openmmo"]
+requires = []
+load_after = []

@@ -1,0 +1,15 @@
+--- a/src/battle/battle_io_command.c
++++ b/src/battle/battle_io_command.c
+@@ -228,8 +228,12 @@
+ 
+ void BattleSystem_ExecuteBattlerCommand(BattleSystem *battleSys, BattlerData *battlerData)
+ {
++    /* The presenting half of the seam: the message the scene acted on. */
++    extern void openmmo_battle_present(int battler, const void *data);
++
+     if (battlerData->data[0]) {
+         battlerData->msgPending = 0;
++        openmmo_battle_present(battlerData->battler, battlerData->data);
+         sBattleCommands[battlerData->data[0]](battleSys, battlerData);
+     }
+ }

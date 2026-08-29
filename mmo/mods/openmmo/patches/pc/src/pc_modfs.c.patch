@@ -1,0 +1,264 @@
+--- a/pc/src/pc_modfs.c
++++ b/pc/src/pc_modfs.c
+@@ -81,18 +81,43 @@
+ static int sNMembers;
+ static int sCapMembers;
+ 
+-#define PC_MODFS_MAX_GFX 64
++/* Raised from 64 for followers. A filled package carries one cooked row per
++ * follower sprite AND one per shiny coat, the same art with the sequence that
++ * selects the second palette, which is 1,132 before a ported map's people are
++ * counted. The table is host-side static, four ints a row, so 2048 costs 32 KB
++ * of the port's own image and nothing of the DS heaps. */
++#define PC_MODFS_MAX_GFX 2048
++
++/* Cooked frame sequences. One is a whole species set's walk, so this is
++ * headroom for a second and a third rather than a number anything approaches. */
++#define PC_MODFS_MAX_SEQS 16
+ #define PC_MODFS_MAX_PROPS 64
+ #define PC_MODFS_MAX_MAPS 16
+ 
+ struct gfx_claim {
+     int gfx;
+     int nsbtx;
++    int model; /* -1: the youngster's */
++    int seq;   /* -1: the youngster's */
+ };
+ 
++/* Kept sorted by gfx after boot (sort_gfx), because this is read on the
++ * billboard miss path, three call sites, per object, per frame, and a
++ * linear walk of 64 rows that became a linear walk of 1024 would be a
++ * measurable cost in the one place nobody would look for one. */
+ static struct gfx_claim sGfx[PC_MODFS_MAX_GFX];
+ static int sNGfx;
+ 
++struct seq_claim {
++    int seq;
++    int member;
++    int facings;
++    int frames;
++};
++
++static struct seq_claim sSeqs[PC_MODFS_MAX_SEQS];
++static int sNSeqs;
++
+ static int sExtraProps[PC_MODFS_MAX_PROPS];
+ static int sNExtraProps;
+ 
+@@ -822,15 +847,28 @@
+     }
+     while (fgets(line, sizeof line, f) != NULL) {
+         char *hash = strchr(line, '#');
+-        int gfx, nsbtx;
++        int gfx, nsbtx, model, seq;
++        int got;
+         int i;
+ 
+         if (hash != NULL) {
+             *hash = '\0';
+         }
+-        if (sscanf(line, "%d %d", &gfx, &nsbtx) != 2) {
++        /* Two columns is the row every package written before the renderer
++         * columns existed carries, and it still means what it meant: clone the
++         * youngster and use this texture. */
++        model = -1;
++        seq = -1;
++        got = sscanf(line, "%d %d %d %d", &gfx, &nsbtx, &model, &seq);
++        if (got < 2) {
+             continue;
+         }
++        if (got == 3) {
++            fclose(f);
++            die("billboard row in %s names a model and no sequence (%d %d %d);"
++                " a renderer row needs both or neither",
++                pk->dir, gfx, nsbtx, model);
++        }
+         if (gfx < 0 || nsbtx < 0 || nsbtx >= 65535) {
+             fclose(f);
+             die("bad billboard row in %s: %d %d", pk->dir, gfx, nsbtx);
+@@ -838,23 +876,118 @@
+         for (i = 0; i < sNGfx; i++) {
+             if (sGfx[i].gfx == gfx) {
+                 sGfx[i].nsbtx = nsbtx;
++                sGfx[i].model = model;
++                sGfx[i].seq = seq;
+                 break;
+             }
+         }
+         if (i == sNGfx) {
+             if (sNGfx >= PC_MODFS_MAX_GFX) {
+                 fclose(f);
+-                die("too many cooked billboard people (max %d)",
++                die("too many cooked billboard rows (max %d)",
+                     PC_MODFS_MAX_GFX);
+             }
+             sGfx[sNGfx].gfx = gfx;
+             sGfx[sNGfx].nsbtx = nsbtx;
++            sGfx[sNGfx].model = model;
++            sGfx[sNGfx].seq = seq;
+             sNGfx++;
+         }
+     }
+     fclose(f);
+ }
+ 
++static void load_billboard_seq(const struct pkg *pk)
++{
++    char path[PC_MODFS_PATH];
++    FILE *f;
++    char line[128];
++
++    join_path(path, sizeof path, pk->path,
++              ".cooked/generated/billboard_seq.txt");
++    if (!is_file(path)) {
++        return;
++    }
++    f = fopen(path, "r");
++    if (f == NULL) {
++        die("cannot read %s", path);
++    }
++    while (fgets(line, sizeof line, f) != NULL) {
++        char *hash = strchr(line, '#');
++        int seq, member, facings, frames;
++        int i;
++
++        if (hash != NULL) {
++            *hash = '\0';
++        }
++        if (sscanf(line, "%d %d %d %d", &seq, &member, &facings, &frames)
++            != 4) {
++            continue;
++        }
++        if (seq < 0 || member < 0 || member >= 65535 || facings < 1
++            || frames < 1) {
++            fclose(f);
++            die("bad billboard sequence row in %s: %d %d %d %d",
++                pk->dir, seq, member, facings, frames);
++        }
++        for (i = 0; i < sNSeqs; i++) {
++            if (sSeqs[i].seq == seq) {
++                break;
++            }
++        }
++        if (i == sNSeqs) {
++            if (sNSeqs >= PC_MODFS_MAX_SEQS) {
++                fclose(f);
++                die("too many cooked billboard sequences (max %d)",
++                    PC_MODFS_MAX_SEQS);
++            }
++            sNSeqs++;
++        }
++        sSeqs[i].seq = seq;
++        sSeqs[i].member = member;
++        sSeqs[i].facings = facings;
++        sSeqs[i].frames = frames;
++    }
++    fclose(f);
++}
++
++static int gfx_claim_cmp(const void *a, const void *b)
++{
++    const struct gfx_claim *x = a;
++    const struct gfx_claim *y = b;
++
++    return (x->gfx > y->gfx) - (x->gfx < y->gfx);
++}
++
++/* Sorted once, after every package has had its say, so a later package
++ * overriding an earlier one's row still happens in load order. */
++static void sort_gfx(void)
++{
++    if (sNGfx > 1) {
++        qsort(sGfx, (size_t)sNGfx, sizeof sGfx[0], gfx_claim_cmp);
++    }
++}
++
++static const struct gfx_claim *find_gfx(int gfx_id)
++{
++    int lo = 0;
++    int hi = sNGfx - 1;
++
++    while (lo <= hi) {
++        int mid = lo + (hi - lo) / 2;
++
++        if (sGfx[mid].gfx == gfx_id) {
++            return &sGfx[mid];
++        }
++        if (sGfx[mid].gfx < gfx_id) {
++            lo = mid + 1;
++        } else {
++            hi = mid - 1;
++        }
++    }
++    return NULL;
++}
++
+ static void load_extra_props(const struct pkg *pk)
+ {
+     char path[PC_MODFS_PATH];
+@@ -1186,6 +1319,7 @@
+     sNFiles = 0;
+     sNMembers = 0;
+     sNGfx = 0;
++    sNSeqs = 0;
+ 
+     mods_dir = getenv("PC_MODS_DIR");
+     if (mods_dir == NULL || mods_dir[0] == '\0') {
+@@ -1280,9 +1414,11 @@
+     for (i = 0; i < sNPkgs; i++) {
+         scan_pkg_files(&sPkgs[i]);
+         load_billboard_gfx(&sPkgs[i]);
++        load_billboard_seq(&sPkgs[i]);
+         load_extra_props(&sPkgs[i]);
+         load_cooked_maps(&sPkgs[i]);
+     }
++    sort_gfx();
+     for (i = 0; i < nroots; i++) {
+         scan_modfs_root(roots[i]);
+     }
+@@ -1579,14 +1715,41 @@
+ 
+ int pc_modfs_billboard_nsbtx(int gfx_id)
+ {
++    const struct gfx_claim *row = find_gfx(gfx_id);
++
++    return row != NULL ? row->nsbtx : -1;
++}
++
++int pc_modfs_billboard(int gfx_id, struct pc_modfs_billboard *out)
++{
++    const struct gfx_claim *row = find_gfx(gfx_id);
++
++    if (row == NULL) {
++        return 0;
++    }
++    if (out != NULL) {
++        out->nsbtx = row->nsbtx;
++        out->model = row->model;
++        out->seq = row->seq;
++    }
++    return 1;
++}
++
++int pc_modfs_billboard_seq(int seq_id, struct pc_modfs_billboard_seq *out)
++{
+     int i;
+ 
+-    for (i = 0; i < sNGfx; i++) {
+-        if (sGfx[i].gfx == gfx_id) {
+-            return sGfx[i].nsbtx;
++    for (i = 0; i < sNSeqs; i++) {
++        if (sSeqs[i].seq == seq_id) {
++            if (out != NULL) {
++                out->member = sSeqs[i].member;
++                out->facings = sSeqs[i].facings;
++                out->frames = sSeqs[i].frames;
++            }
++            return 1;
+         }
+     }
+-    return -1;
++    return 0;
+ }
+ 
+ int pc_modfs_extra_prop(int index)

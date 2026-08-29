@@ -1,0 +1,28 @@
+--- a/src/script_manager.c
++++ b/src/script_manager.c
+@@ -79,6 +79,12 @@
+ 
+ void ScriptManager_Set(FieldSystem *fieldSystem, u16 scriptID, MapObject *object)
+ {
++    /* A FieldTask script is a cutscene the server has never heard of. */
++    extern int openmmo_allow_local_script(unsigned scriptID);
++    if (!openmmo_allow_local_script(scriptID)) {
++        return;
++    }
++
+     ScriptManager *scriptManager = ScriptManager_New();
+ 
+     ScriptManager_Init(fieldSystem, scriptManager, scriptID, object, NULL);
+@@ -723,6 +729,12 @@
+     }
+ 
+     if (initScriptType == INIT_SCRIPT_ON_FRAME_TABLE) {
++        /* The on-frame table is how the Twinleaf TV starts. Returning TRUE
++         * here would swallow input every frame while the var stays 0. */
++        extern int openmmo_allow_on_frame_script(unsigned scriptID);
++        if (!openmmo_allow_on_frame_script(scriptID)) {
++            return FALSE;
++        }
+         ScriptManager_Set(fieldSystem, scriptID, NULL);
+     } else {
+         FieldSystem_RunScript(fieldSystem, scriptID);

@@ -1,0 +1,77 @@
+name: Native client
+
+on:
+  pull_request:
+    paths:
+      - "mmo/**"
+      - ".github/workflows/client.yml"
+  push:
+    branches: [ "master" ]
+    paths:
+      - "mmo/**"
+      - ".github/workflows/client.yml"
+
+concurrency:
+  group: client-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# The logic lives in mmo/ci.sh, which is testable in a working tree before a
+# push; every step here is one `mmo/ci.sh <stage>` call. See that file's header.
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install packages
+        run: sudo apt-get update && sudo apt-get install -y $(mmo/ci.sh packages)
+
+      - name: Build the -m32 client
+        run: mmo/ci.sh build
+
+      - name: Run the client suite
+        run: mmo/ci.sh test
+
+  windows-cross:
+    name: Cross-build for Windows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install packages
+        run: sudo apt-get update && sudo apt-get install -y $(mmo/ci.sh packages)
+
+      # Gates on the link and nothing past it: no Linux runner can execute a pe
+      # binary, so a Windows session is a person's job.
+      - name: Cross-build the client for Windows
+        run: mmo/ci.sh windows
+
+  oracle:
+    name: Live login against server.login
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Install packages
+        run: sudo apt-get update && sudo apt-get install -y $(mmo/ci.sh packages)
+
+      - name: Build the -m32 client
+        run: mmo/ci.sh build
+
+      - name: Stand up server.login and prove a real login
+        run: mmo/ci.sh server

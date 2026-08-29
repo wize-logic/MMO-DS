@@ -1,0 +1,91 @@
+--- a/src/trainer_info.c
++++ b/src/trainer_info.c
+@@ -26,7 +26,12 @@
+ 
+ void TrainerInfo_Copy(const TrainerInfo *src, TrainerInfo *dst)
+ {
++    /* A name wider than the field is held beside it, so the memcpy misses it. */
++    extern void openmmo_trainer_name_copied(const TrainerInfo *src, TrainerInfo *dst);
++
+     MI_CpuCopy8(src, dst, sizeof(TrainerInfo));
++
++    openmmo_trainer_name_copied(src, dst);
+ }
+ 
+ void TrainerInfo_Init(TrainerInfo *info)
+@@ -50,15 +55,18 @@
+ 
+ void TrainerInfo_SetName(TrainerInfo *info, const charcode_t *name)
+ {
+-    int len = CharCode_Length(name);
+-    GF_ASSERT(len < TRAINER_NAME_LEN + 1);
++    /* CharCode_Copy runs to CHAR_EOS with no bound, and info->name is eight
++     * slots. Anything longer is kept beside the field instead of past it. */
++    extern void openmmo_trainer_name_set(TrainerInfo *info, const charcode_t *name);
+ 
+-    CharCode_Copy(info->name, name);
++    openmmo_trainer_name_set(info, name);
+ }
+ 
+ void TrainerInfo_SetNameFromString(TrainerInfo *info, const String *name)
+ {
+-    String_ToChars(name, info->name, TRAINER_NAME_LEN + 1);
++    extern void openmmo_trainer_name_set_from_string(TrainerInfo *info, const String *name);
++
++    openmmo_trainer_name_set_from_string(info, name);
+ }
+ 
+ const charcode_t *TrainerInfo_Name(const TrainerInfo *info)
+@@ -73,7 +81,18 @@
+ 
+ String *TrainerInfo_NameNewString(const TrainerInfo *info, enum HeapID heapID)
+ {
+-    String *name = String_Init(TRAINER_NAME_LEN + 1, heapID);
++    /* The one accessor whose type is not a fixed field, so the one that can
++     * carry a whole name. NULL means this trainer has no name wider than the
++     * field and the engine's own path answers. */
++    extern String *openmmo_trainer_name_new_string(const TrainerInfo *info, u32 heapID);
++
++    String *name = openmmo_trainer_name_new_string(info, heapID);
++
++    if (name != NULL) {
++        return name;
++    }
++
++    name = String_Init(TRAINER_NAME_LEN + 1, heapID);
+ 
+     TrainerInfo_NameString(info, name);
+     return name;
+@@ -137,6 +156,12 @@
+ 
+ u32 TrainerInfo_SetMoney(TrainerInfo *info, u32 money)
+ {
++    /* A live session owns the cash. The mint, a shop and a script must not
++     * change it; the seat path is the one write that is allowed through. */
++    extern int openmmo_trainer_money_may_write(void);
++    if (!openmmo_trainer_money_may_write()) {
++        return info->money;
++    }
+     if (money > MONEY_MAX) {
+         money = MONEY_MAX;
+     }
+@@ -157,6 +182,10 @@
+ 
+ u32 TrainerInfo_GiveMoney(TrainerInfo *info, u32 money)
+ {
++    /* Reported to the server, which pays the same amount; the write runs so
++     * every screen shows it now and the seat reconciles. */
++    extern int openmmo_trainer_money_gate_give(u32 amount);
++    openmmo_trainer_money_gate_give(money);
+     if (money > MONEY_MAX) {
+         info->money = MONEY_MAX;
+     } else {
+@@ -172,6 +201,8 @@
+ 
+ u32 TrainerInfo_TakeMoney(TrainerInfo *info, u32 money)
+ {
++    extern int openmmo_trainer_money_gate_take(u32 amount);
++    openmmo_trainer_money_gate_take(money);
+     if (info->money < money) {
+         info->money = 0;
+     } else {

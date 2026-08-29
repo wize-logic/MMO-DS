@@ -1,0 +1,22 @@
+--- a/src/system.c
++++ b/src/system.c
+@@ -142,7 +142,18 @@
+         offset++;
+     }
+ 
+-    Heap_InitSystem(sHeapInitParams, NELEMS(sHeapInitParams), HEAP_ID_MAX, offset);
++    /* The engine's table is const because on a console there was nothing to
++     * decide: 4 MB, carved once. Here APPLICATION is where every screen's heap
++     * comes from, including the field's, and the arena has an unused tail the
++     * cartridge had no way to spend. */
++    {
++        extern void openmmo_heap_resize_templates(HeapParam *params, u32 count);
++        HeapParam heapParams[NELEMS(sHeapInitParams)];
++
++        MI_CpuCopy8(sHeapInitParams, heapParams, sizeof(heapParams));
++        openmmo_heap_resize_templates(heapParams, NELEMS(heapParams));
++        Heap_InitSystem(heapParams, NELEMS(heapParams), HEAP_ID_MAX, offset);
++    }
+ }
+ 
+ void InitSystem(void)

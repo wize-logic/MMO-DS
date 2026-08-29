@@ -1,0 +1,35 @@
+--- a/src/battle/battle_controller_player.c
++++ b/src/battle/battle_controller_player.c
+@@ -193,6 +193,13 @@
+ 
+ BOOL BattleContext_Main(BattleSystem *battleSys, BattleContext *battleCtx)
+ {
++    /* The arithmetic is optional. When it is off, this still runs once a
++     * frame so a message with no local emit can be handed to the scene. */
++    extern int openmmo_battle_compute(void *battleSys);
++    if (!openmmo_battle_compute(battleSys)) {
++        return FALSE;
++    }
++
+     if (battleCtx->battleEndFlag == FALSE
+         && BattleSystem_GetResultMask(battleSys)
+         && (BattleSystem_GetResultMask(battleSys) & BATTLE_RESULT_TRY_FLEE_WAIT) == FALSE) {
+@@ -4049,7 +4056,17 @@
+     }
+ 
+     if (battleType & BATTLE_TYPE_LINK) {
+-        CommSys_SendMessage(22);
++        /* openmmo: comm command 22 is how the computing side tells every
++         * system, itself included, over loopback, that the fight is over
++         * (sub_0207ADB4 sets commandIsEndWait). Without a comm system that
++         * broadcast goes nowhere and both scenes fade to black and wait
++         * forever, so a native link battle sends the same signal over this
++         * build's own wire instead (mmo/mods/openmmo/src/openmmo_link.c). */
++        extern int openmmo_link_battle_end_fight(void *battleSys);
++
++        if (!openmmo_link_battle_end_fight(battleSys)) {
++            CommSys_SendMessage(22);
++        }
+     }
+ 
+     battleCtx->command = BATTLE_CONTROL_END_WAIT;

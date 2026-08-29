@@ -1,0 +1,34 @@
+[Unit]
+Description=OpenMMO website (registration and status)
+Documentation=https://github.com/wize-logic/OpenMMO
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=openmmo-web
+Group=openmmo-web
+# Database credentials and ports. Written by web/deploy.sh, root readable only.
+EnvironmentFile=/etc/openmmo/web.env
+ExecStart=/opt/openmmo/web/bin/server.web
+Restart=on-failure
+RestartSec=5s
+
+# It listens on loopback, reads one directory and talks to postgres. Nothing else.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

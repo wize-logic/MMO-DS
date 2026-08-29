@@ -1,0 +1,42 @@
+--- a/src/underground/manager.c	2026-08-23 08:18:28.848103637 -0400
++++ b/src/underground/manager.c	2026-08-23 08:18:48.235788584 -0400
+@@ -615,6 +615,22 @@
+ 
+     int linkNetID = CommPlayerMan_GetLinkNetIDAtLocation(coordinates.x, coordinates.z);
+ 
++    /* openmmo: and the same question of the server, which is the only party
++     * that holds another player's position here, a peer in this cavern is one
++     * of its entities, not a comm slot. Asked in exactly the place official asks
++     * its own group, so everything above it (the cooldown, the movement timer,
++     * whether this player may move at all, whether a trap has them) has already
++     * decided the press is real. A person answers the press; the traps, the
++     * mining walls and the storage PC below only see the tiles nobody is
++     * standing on. mmo/mods/openmmo/src/openmmo_underground.c. */
++    if (linkNetID == NETID_NONE) {
++        extern int openmmo_underground_talk_interact(int x, int z);
++
++        if (openmmo_underground_talk_interact(coordinates.x, coordinates.z)) {
++            return;
++        }
++    }
++
+     if (linkNetID != NETID_NONE) {
+         if (SecretBases_IsPlayerMidBaseTransition(linkNetID)) {
+             return;
+@@ -828,6 +844,16 @@
+ 
+ BOOL UndergroundMan_GetQueuedMessage(String *dest)
+ {
++    /* openmmo: the top-screen map runs this every frame, and every branch of
++     * it asks a resource the DS comm boot allocates, the traps, the secret
++     * bases, the mining walls, the spheres. This client goes underground
++     * without that boot for now (mmo/mods/openmmo/src/openmmo_underground.c),
++     * so there is no queue to read rather than an empty one. Every other
++     * accessor beside this one already guards the same pointer. */
++    if (sUndergroundMan == NULL) {
++        return FALSE;
++    }
++
+     if (sUndergroundMan->messageRetrieved) {
+         sUndergroundMan->messageRetrieved = FALSE;
+         return FALSE;

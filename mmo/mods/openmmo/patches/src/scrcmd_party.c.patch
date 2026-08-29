@@ -1,0 +1,15 @@
+--- a/src/scrcmd_party.c
++++ b/src/scrcmd_party.c
+@@ -39,6 +39,12 @@
+     Party *unused = SaveData_GetParty(fieldSystem->saveData);
+     *success = Pokemon_GiveMonFromScript(HEAP_ID_FIELD2, fieldSystem->saveData, species, level, heldItem, metLocation, metTerrain);
+ 
++    /* On a session the party the server holds is the one that counts. */
++    if (*success) {
++        extern void openmmo_script_gave_pokemon(int species, int level);
++        openmmo_script_gave_pokemon(species, level);
++    }
++
+     return FALSE;
+ }
+ 

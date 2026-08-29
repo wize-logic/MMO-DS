@@ -1,0 +1,172 @@
+--- a/src/start_menu.c
++++ b/src/start_menu.c
+@@ -296,6 +296,99 @@
+     FieldSystem_CreateTask(fieldSystem, StartMenu_Main, menu);
+ }
+ 
++/* openmmo: the windowed client's HUD opens one application directly, the
++ * same task, the same exit handlers and their whole chain (bag item use,
++ * party to summary, evolve, mail), but no menu list on either side of it:
++ * the task starts at APP_START, and an exit path that would reopen the
++ * list (REINIT) fades the field back in and ends instead. */
++static BOOL sOpenmmoDirect;
++
++/* A summary opened as the root of a direct sequence goes back to the field,
++ * not to the party list it never came from. */
++static BOOL sOpenmmoSummaryRoot;
++static int sOpenmmoSummarySlot;
++
++static BOOL StartMenu_OpenmmoSummary(FieldTask *fieldTask)
++{
++    FieldSystem *fieldSystem = FieldTask_GetFieldSystem(fieldTask);
++    StartMenu *menu = FieldTask_GetEnv(fieldTask);
++    PokemonSummary *summary = Heap_Alloc(HEAP_ID_FIELD2, sizeof(PokemonSummary));
++
++    summary->monData = SaveData_GetParty(fieldSystem->saveData);
++    summary->options = SaveData_GetOptions(fieldSystem->saveData);
++    summary->dataType = SUMMARY_DATA_PARTY_MON;
++    summary->monIndex = sOpenmmoSummarySlot;
++    summary->monMax = Party_GetCurrentCount(summary->monData);
++    summary->move = 0;
++    summary->mode = SUMMARY_MODE_NORMAL;
++    summary->specialRibbons = SaveData_GetRibbons(fieldSystem->saveData);
++    summary->dexMode = SaveData_GetDexMode(fieldSystem->saveData);
++    summary->showContest = PokemonSummaryScreen_ShowContestData(fieldSystem->saveData);
++    summary->chatotCry = NULL;
++
++    PokemonSummaryScreen_FlagVisiblePages(summary, gAllSummaryScreenPages);
++    PokemonSummaryScreen_SetPlayerProfile(summary, SaveData_GetTrainerInfo(fieldSystem->saveData));
++    FieldSystem_OpenSummaryScreen(fieldSystem, summary);
++
++    menu->taskData = summary;
++    menu->callback = StartMenu_ExitSummary;
++
++    return FALSE;
++}
++
++void StartMenu_OpenApp(FieldSystem *fieldSystem, int app, int slot)
++{
++    StartMenu *menu = StartMenu_New();
++
++    menu->menu = NULL; /* never built; every teardown below guards on it */
++    menu->menuOptions = NULL;
++    menu->spriteCount = 0;
++    menu->hideOptionFlags = 0;
++    menu->inUnionRoom = FALSE;
++    menu->additionalTaskContext = NULL;
++
++    ItemUseContext_Init(fieldSystem, &menu->itemUseCtx);
++    FieldMoves_SetUsableMoves(fieldSystem, &menu->fieldMoveContext);
++
++    switch (app) {
++    case 0:
++        menu->callback = StartMenu_Bag;
++        break;
++    case 1:
++        menu->callback = StartMenu_OpenPartyMenu;
++        break;
++    case 2:
++        menu->callback = StartMenu_OpenPokedex;
++        break;
++    case 3:
++        menu->callback = StartMenu_TrainerCase;
++        break;
++    case 4:
++        menu->callback = StartMenu_Options;
++        break;
++    case 5:
++        sOpenmmoSummarySlot = slot;
++        sOpenmmoSummaryRoot = TRUE;
++        menu->callback = StartMenu_OpenmmoSummary;
++        break;
++    default:
++        Heap_Free(menu);
++        return;
++    }
++
++    if (PlayerAvatar_CheckForceStopMovement(fieldSystem->playerAvatar) == 1) {
++        PlayerAvatar_ForceStopMovement(fieldSystem->playerAvatar, PlayerAvatar_GetFacingDir(fieldSystem->playerAvatar));
++    }
++
++    MapObjectMan_PauseAllMovement(fieldSystem->mapObjMan);
++    FieldMap_FadeScreen(FADE_TYPE_BRIGHTNESS_OUT);
++
++    sOpenmmoDirect = TRUE;
++    menu->state = START_MENU_STATE_APP_START;
++
++    FieldSystem_CreateTask(fieldSystem, StartMenu_Main, menu);
++}
++
+ void StartMenu_OpenUnionRoom(FieldSystem *fieldSystem)
+ {
+     StartMenu *menu = StartMenu_New();
+@@ -450,6 +543,10 @@
+         StartMenu_Evolve(fieldTask);
+         break;
+     case START_MENU_STATE_REINIT:
++        if (sOpenmmoDirect) {
++            menu->state = START_MENU_STATE_8;
++            break;
++        }
+         if (FieldSystem_IsRunningFieldMap(fieldSystem)) {
+             MapObjectMan_PauseAllMovement(fieldSystem->mapObjMan);
+             StartMenu_InitMenu(fieldTask);
+@@ -469,6 +566,8 @@
+             sub_0203B2EC(menu, fieldSystem);
+             Heap_Free(menu);
+             MapObjectMan_UnpauseAllMovement(fieldSystem->mapObjMan);
++            sOpenmmoDirect = FALSE;
++            sOpenmmoSummaryRoot = FALSE;
+             return TRUE;
+         }
+         break;
+@@ -483,11 +582,13 @@
+         if (IsScreenFadeDone()) {
+             FieldTask_InitJump(fieldTask, menu->callback, menu->taskData);
+             Heap_Free(menu);
++            sOpenmmoDirect = FALSE;
+         }
+         break;
+     case START_MENU_STATE_SAVED:
+         Heap_Free(menu);
+         MapObjectMan_UnpauseAllMovement(fieldSystem->mapObjMan);
++        sOpenmmoDirect = FALSE;
+         return TRUE;
+     case START_MENU_STATE_END:
+         sub_0203B2EC(menu, fieldSystem);
+@@ -498,6 +599,7 @@
+         Bg_ScheduleTilemapTransfer(fieldSystem->bgConfig, BG_LAYER_MAIN_3);
+         Heap_Free(menu);
+         MapObjectMan_UnpauseAllMovement(fieldSystem->mapObjMan);
++        sOpenmmoDirect = FALSE;
+         return TRUE;
+     case START_MENU_STATE_REINIT_WAIT_FOR_FADE:
+         if (IsScreenFadeDone()) {
+@@ -841,9 +943,11 @@
+     FieldSystem *fieldSystem = FieldTask_GetFieldSystem(fieldTask);
+     StartMenu *menu = FieldTask_GetEnv(fieldTask);
+ 
+-    StartMenu_Close(menu);
+-    Window_Remove(&menu->primaryWindow);
+-    StartMenu_EraseBallCount(fieldTask);
++    if (menu->menu != NULL) {
++        StartMenu_Close(menu);
++        Window_Remove(&menu->primaryWindow);
++        StartMenu_EraseBallCount(fieldTask);
++    }
+ 
+     menu->callback(fieldTask);
+     menu->state = START_MENU_STATE_APP_RUN;
+@@ -1504,6 +1608,12 @@
+         StartMenu_SetCallback(menu, StartMenu_ExitPartyMenu);
+     } break;
+     default:
++        if (sOpenmmoSummaryRoot) {
++            sOpenmmoSummaryRoot = FALSE;
++            FieldSystem_StartFieldMap(fieldSystem);
++            menu->state = START_MENU_STATE_REINIT;
++            break;
++        }
+         menu->taskData = FieldSystem_OpenPartyMenu(fieldSystem, &menu->fieldMoveContext, summary->monIndex);
+         StartMenu_SetCallback(menu, StartMenu_ExitPartyMenu);
+     }

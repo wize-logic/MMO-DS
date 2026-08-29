@@ -1,0 +1,72 @@
+--- a/src/overlay005/field_control.c	2026-08-17 15:16:56.033808446 -0400
++++ b/src/overlay005/field_control.c	2026-08-17 15:16:56.048475108 -0400
+@@ -185,9 +185,15 @@
+             hasTwoAliveMons = TRUE;
+         }
+ 
+-        if (FieldSystem_CheckForTrainersWantingBattle(fieldSystem, hasTwoAliveMons) == TRUE
++        /* The scene is the engine's now, but the fight is not: a party is the
++         * server's and this one would be fought with a party the save does not
++         * hold. Its own predicate, so turning local scripts on does not turn a
++         * local battle on with them. */
++        extern int openmmo_local_trainer_battles_enabled(void);
++        if (openmmo_local_trainer_battles_enabled()
++            && (FieldSystem_CheckForTrainersWantingBattle(fieldSystem, hasTwoAliveMons) == TRUE
+             || (PersistedMapFeatures_IsCurrentDynamicMap(fieldSystem, DYNAMIC_MAP_FEATURES_HEARTHOME_GYM) == TRUE
+-                && HearthomeGym_CheckIfPlayerSeesTrainer(fieldSystem) == TRUE)) {
++                && HearthomeGym_CheckIfPlayerSeesTrainer(fieldSystem) == TRUE))) {
+ 
+             PlayerAvatar_ClearMoveState(fieldSystem->playerAvatar);
+             MapObjectMan_PauseAllMovement(fieldSystem->mapObjMan);
+@@ -222,4 +228,6 @@
+         if (ov5_021DFDE0(fieldSystem, fieldSystem->playerAvatar, direction, playerEvent) == TRUE) {
++            extern void openmmo_maybe_strength_push(void *playerAvatar, int dir, int playerEvent);
++            openmmo_maybe_strength_push(fieldSystem->playerAvatar, (int)direction, playerEvent);
+             return TRUE;
+         }
+     }
+@@ -253,6 +261,18 @@
+     }
+ 
+     if (input->interact) {
++        /* A over a remote player opens this client's own menu, whichever half
++         * is running scripts, a person is not a script. */
++        extern int openmmo_field_interact_peer(void);
++        extern int openmmo_local_field_scripts_enabled(void);
++        extern void openmmo_on_field_interact(void);
++        if (openmmo_field_interact_peer()) {
++            return TRUE;
++        }
++        if (!openmmo_local_field_scripts_enabled()) {
++            openmmo_on_field_interact();
++            return TRUE;
++        }
+         int validInteraction;
+         MapObject *object;
+ 
+@@ -555,6 +575,12 @@
+         }
+     }
+ 
++    /* The server owns whether a wild encounter happens; the client no longer rolls one, so with local encounters off this returns before the engine's own random roll is reached. */
++    extern int openmmo_local_encounters_enabled(void);
++    if (!openmmo_local_encounters_enabled()) {
++        return FALSE;
++    }
++
+     return MapHeader_HasWildEncounters(fieldSystem->location->mapHeaderID) && WildEncounters_TryWildEncounter(fieldSystem) == TRUE;
+ }
+ 
+@@ -1016,6 +1042,12 @@
+     Location *entrance = FieldOverworldState_GetEntranceLocation(SaveData_GetFieldOverworldState(fieldSystem->saveData));
+     Location_Set(entrance, fieldSystem->location->mapHeaderID, eventIndex, playerX, playerZ, PlayerAvatar_GetFacingDir(fieldSystem->playerAvatar));
+ 
++    /* The server owns the destination. A local warp table would double-warp. */
++    extern int openmmo_allow_local_warp(int header);
++    if (!openmmo_allow_local_warp((int)nextMap->mapHeaderID)) {
++        return FALSE;
++    }
++
+     return TRUE;
+ }
+ 

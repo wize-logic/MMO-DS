@@ -1,0 +1,60 @@
+--- a/src/item_use_functions.c
++++ b/src/item_use_functions.c
+@@ -342,6 +342,20 @@
+     FieldSystem *fieldSystem = FieldTask_GetFieldSystem(usageContext->fieldTask);
+     StartMenu *menu = FieldTask_GetEnv(usageContext->fieldTask);
+ 
++    /* openmmo: the official descent below asks whether communications will be
++     * launched, answers it, and saves the cartridge before it goes. This
++     * client's group is the session and its save is the server's record, so
++     * the kit lands on the same descent with those three states removed,
++     * and, underground, on the climb back out, which is the kit's second job
++     * here. mmo/mods/openmmo/src/openmmo_underground.c. */
++    {
++        extern int openmmo_underground_item_menu(FieldSystem *fs, void *menu);
++
++        if (openmmo_underground_item_menu(fieldSystem, menu)) {
++            return;
++        }
++    }
++
+     FieldSystem_StartFieldMap(fieldSystem);
+ 
+     menu->callback = FieldTask_MapChangeToUnderground;
+@@ -353,6 +367,16 @@
+ 
+ static BOOL UseExplorerKitInField(ItemFieldUseContext *usageContext)
+ {
++    /* openmmo: likewise, for the kit registered to Y and pressed in the field. */
++    {
++        extern int openmmo_underground_item_field(FieldSystem *fs);
++
++        if (openmmo_underground_item_field(usageContext->fieldSystem)) {
++            usageContext->fieldSystem->menuCursorPos = 0;
++            return FALSE;
++        }
++    }
++
+     MapChangeUndergroundContext *ctx = MapChangeUndergroundContext_New(usageContext->fieldSystem);
+ 
+     MapObjectMan_PauseAllMovement(usageContext->fieldSystem->mapObjMan);
+@@ -364,6 +388,19 @@
+ 
+ static enum ItemUseCheckResult CanUseExplorerKit(const ItemUseContext *usageContext)
+ {
++    /* openmmo: underground, this kit is the way back up, and every test below
++     * would refuse it there, the cavern is not on the main matrix. That is
++     * the one answer this client has to give; a negative return means the
++     * question was not ours and the engine's own tests decide it. */
++    {
++        extern int openmmo_underground_item_check(void);
++        int openmmoCheck = openmmo_underground_item_check();
++
++        if (openmmoCheck >= 0) {
++            return (enum ItemUseCheckResult)openmmoCheck;
++        }
++    }
++
+     if (MapHeader_GetMapLabelTextID(usageContext->mapHeaderID) == LocationNames_Text_MysteryZone) {
+         return ITEM_USE_CANNOT_USE_GENERIC;
+     }

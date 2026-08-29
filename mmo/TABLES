@@ -1,0 +1,43 @@
+# The id classes the client and the server both hold, and every place the two
+# tables disagree, with the reason each disagreement is allowed to stand.
+#
+# The client numbers species, moves, items, maps, flags and vars the way the
+# engine's generated/*.txt does, those constants are its enums. The server
+# numbers them the way codegen rendered its registries. Both halves round-trip
+# their own table, so until tools/table_diff.py walked them side by side, a class
+# the two disagreed about was invisible from inside either one. That is how the
+# item map spent four phases translating ids that were already the same number.
+#
+# Each row is <class> <kind> <ids> <reason>. The kinds:
+#
+#   missing  an id the engine has and the server's table does not
+#   extra    an id the server has and the engine's table does not
+#   named    an id both hold, under names that are not the same name
+#   absent   the class has no server-side table at all (ids: all)
+#
+# The comparison is exact in both directions. An undeclared disagreement fails,
+# and so does a row here that is no longer true, a gap that closes has to be
+# written down as closed. tools/table_diff.py runs in `make test` as
+# tests/tablediff_test.sh, and standalone as `make tablediff`.
+
+# The twelve mail slots the two worlds fill with different mail, and the item
+# Gen 5 renamed. Same id, same slot, different word: the shared item table
+# carries them deliberately and idmap_gen_test.sh names them again from the
+# other side. Renaming one of them here would be a silent content change.
+items  named  58        the engine's X_DEFENSE is the server's X Defend, one item under two generations' names
+items  named  137-148   the twelve mail slots the two worlds fill with different mail (6.8.4)
+
+# Sinnoh's flags and vars now have a server side: the story generator reads the
+# DS decomp's own list as well, so SinnohFlags and SinnohVars carry 4,390 of the
+# 4,402 entries the engine's list names. The values are a running count and not
+# line numbers, an entry written `NAME = OTHER` re-anchors it, and both
+# halves read it that way.
+#
+# What is left is names rather than ids. Nine of the twelve are block boundaries
+# (`*_START`, `*_END`, `SYSTEM_FLAGS_FIRST_ARRIVAL_TO_ZONE`), each an alias for
+# the entry beside it, so the id is held on the server under that entry's real
+# name and only the marker's own spelling is absent. The other three are the
+# `FR_VAR_*` script-local slots, which carry no `VAR_` name for the generator to
+# emit.
+flags  missing 1,730,1360,2480,2720,16384,16416,16672,32768   a block boundary alias: the server holds the id under the real entry that shares it
+flags  missing 32782-32784                                    FR_VAR_0x800E..0x8010, script-local slots with no VAR_ name

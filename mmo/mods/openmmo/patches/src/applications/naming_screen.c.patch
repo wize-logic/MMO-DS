@@ -1,0 +1,132 @@
+--- a/src/applications/naming_screen.c
++++ b/src/applications/naming_screen.c
+@@ -190,7 +190,11 @@
+     // I don't know where 14 comes from.
+     // only the first 9 elements are used. (NMS_SPRITE_COUNT)
+     Sprite *uiSprites[14];
+-    Sprite *textCursorSprites[12];
++    /* One per cell of the entry row, and the count is the ceiling on maxChars:
++     * NamingScreen_InitSprites fills [0, maxChars) and
++     * NamingScreen_UpdateTextCursors walks the same range. Twelve was enough
++     * for a nickname; a chat line is the caller that needed more. */
++    Sprite *textCursorSprites[24];
+     Sprite *entitySprite[2];
+     SysTask *spriteFollowTasks[NMS_SPRITE_OVERLAY];
+     Window windows[NMS_WINDOW_COUNT];
+@@ -314,6 +318,35 @@
+ static BOOL NamingScreen_JPFlipAlphaCase(int tableStart, int tableEnd, charcode_t *charBuf, int cursorPos);
+ static void NamingScreen_UpdateTextCursors(Sprite **textCursorSprites, int textCursorPos, int maxChars);
+ static void NamingScreen_CopyParamsFromArgs(NamingScreen *namingScreen, NamingScreenArgs *namingScreenArgs);
++
++/* The first tile column of the entry row.
++ *
++ * The official client's is always 10, which leaves 22 of the screen's 32 columns for the
++ * cells, fourteen of them at the 12-pixel pitch the row is drawn and the
++ * cursor sprites are placed at. Every caller in the cartridge asks for ten
++ * glyphs or fewer, so the ten columns to the left of the row are free for the
++ * icon and nothing ever met the ceiling.
++ *
++ * A chat line is the first caller that wants more than the row can hold, so
++ * the row slides left by exactly as much as it overruns and stops at the edge.
++ * A screen asking for twelve glyphs or fewer computes 10 and is what it always
++ * was; past that the icon's ten columns are what the extra cells are made of,
++ * which is why NamingScreen_InitIconSprite stops drawing one.
++ *
++ * The hard ceiling is not here, it is nameInputRaw[20] in the args struct
++ * every caller allocates, so at most nineteen glyphs and a terminator. */
++static int NamingScreen_EntryColumn(int maxChars)
++{
++    int width = ((maxChars * 12) / 8) + 1;
++    int x = 32 - width;
++
++    if (x > 10) {
++        x = 10;
++    }
++
++    return x < 0 ? 0 : x;
++}
++
+ static void NamingScreen_InitializeCharsGraphics(
+     Window *param0,
+     u16 param1,
+@@ -2075,7 +2108,8 @@
+     }
+ 
+     for (i = 0; i < namingScreen->maxChars; i++) {
+-        spriteTemplate.position.x = FX32_ONE * ((10 * 8) + i * 12);
++        spriteTemplate.position.x = FX32_ONE
++            * ((NamingScreen_EntryColumn(namingScreen->maxChars) * 8) + i * 12);
+         spriteTemplate.position.y = FX32_ONE * (4 * 8 + 7);
+ 
+         namingScreen->textCursorSprites[i] = SpriteList_AddAffine(&spriteTemplate);
+@@ -2102,6 +2136,14 @@
+ 
+     Sprite_SetAnimateFlag(namingScreen->entitySprite[0], TRUE);
+ 
++    /* The icon sits in the columns the entry row starts after. A row that had
++     * to slide left to fit its cells is standing on them, so the icon goes,
++     * built and then hidden rather than never built, because the animation
++     * below sets one on it whatever the type is. */
++    if (NamingScreen_EntryColumn(namingScreen->maxChars) < 10) {
++        Sprite_SetDrawFlag(namingScreen->entitySprite[0], FALSE);
++    }
++
+     switch (namingScreen->type) {
+     case NAMING_SCREEN_TYPE_PLAYER:
+         if (namingScreen->playerGenderOrMonSpecies == GENDER_MALE) {
+@@ -2361,12 +2403,22 @@
+         ((32 * 8) + (26 * 12)) + (26 * 12));
+ 
+     int width = ((namingScreen->maxChars * 12) / 8) + 1;
++    int entryX = NamingScreen_EntryColumn(namingScreen->maxChars);
++    /* The group caption follows the row, and a row that reaches the right edge
++     * leaves it nowhere: seven columns past 32 wrap into the next tilemap row
++     * and draw across the keyboard. Only the group screen prints into it, and
++     * that screen is nowhere near the edge. */
++    int groupX = entryX + width - 1;
++
++    if (groupX + 7 > 32) {
++        groupX = 32 - 7;
++    }
+ 
+     Window_Add(
+         namingScreen->bgConfig,
+         &namingScreen->windows[NMS_WINDOW_ENTERED_TEXT],
+         BG_LAYER_MAIN_2,
+-        10,
++        entryX,
+         3,
+         width,
+         2,
+@@ -2377,7 +2429,7 @@
+         namingScreen->bgConfig,
+         &namingScreen->windows[NMS_WINDOW_GROUP_TEXT],
+         BG_LAYER_MAIN_2,
+-        10 + width - 1,
++        groupX,
+         3,
+         7,
+         2,
+@@ -2404,10 +2456,18 @@
+         12,
+         120 + (2 * 2 * 3));
+     Window_FillTilemap(&namingScreen->windows[NMS_WINDOW_PROMPT], 15);
+-    NamingScreen_PrintMessageOnWindowLeftAlign(
+-        &namingScreen->windows[NMS_WINDOW_PROMPT],
+-        namingScreen->type,
+-        namingScreen->promptString);
++
++    /* The prompt is one of eight strings in the message archive, chosen by
++     * type, and each of them asks for a name. A caller past the official ceiling
++     * is not naming anything, there is no ninth string to add without
++     * rebuilding the cartridge's text, so the box is left empty rather than
++     * asking a player typing a chat line for a box name. */
++    if (NamingScreen_EntryColumn(namingScreen->maxChars) == 10) {
++        NamingScreen_PrintMessageOnWindowLeftAlign(
++            &namingScreen->windows[NMS_WINDOW_PROMPT],
++            namingScreen->type,
++            namingScreen->promptString);
++    }
+ 
+     ApplicationManager_Args(appMan);
+ 

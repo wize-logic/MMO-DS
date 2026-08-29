@@ -1,0 +1,37 @@
+bg.png
+    Albert Bierstadt, Rocky Mountain Landscape, 1870.
+    Public domain. The artist died in 1902.
+    Scan: Wikimedia Commons, Google Art Project
+    https://commons.wikimedia.org/wiki/File:Albert_Bierstadt_-_Rocky_Mountain_Landscape_-_Google_Art_Project.jpg
+
+wordmark.png
+    Drawn here. The letters are DejaVu Sans Bold (Bitstream Vera
+    license, no extra credit required for use).
+
+openmmo-launch (interactive window)
+    raylib and raygui, zlib License. raygui: Ramon Santamaria
+    (@raysan5), 2014-2026. The notice is mmo/third_party/raygui.LICENSE.
+
+the Android app (the same window, in the handheld build)
+    FreeType 2.13.3, FreeType License (BSD-style, with credit).
+    Portions of this software are copyright (C) 2026 The FreeType
+    Project (www.freetype.org). All rights reserved.
+    Statically linked into the handheld library only; the desktop
+    builds use the machine's own FreeType and ship nothing.
+
+openmmo-view (the game's window)
+    SDL2 2.32.10, zlib License.
+    Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
+    On Linux this is the machine's own SDL2 and nothing is shipped. A
+    Windows release carries bin/SDL2.dll beside the window, so SDL's
+    own request travels with it, in SDL's words:
+
+        The Simple DirectMedia Layer (SDL for short) is a cross-platform
+        library designed to make it easy to write multi-media software,
+        such as games and emulators.
+
+        The Simple DirectMedia Layer library source code is available
+        from: https://www.libsdl.org/
+
+        This library is distributed under the terms of the zlib license:
+        http://www.zlib.net/zlib_license.html

@@ -1,0 +1,322 @@
+# Makefile.arm, the same client, built for 32-bit ARM.
+#
+#   make -f Makefile.arm status      # build build/arm/openmmo-client
+#   make -f Makefile.arm programs    # build it and read its ABI back out
+#   make -f Makefile.arm run ARGS='--help'   # run it here, under qemu-arm
+#   make -f Makefile.arm fused       # the game itself, on this toolchain
+#   make -f Makefile.arm qemu        # shims the shell suites can be aimed at
+#   make -f Makefile.arm neon        # what the vector unit took, read off it
+#
+# This is mmo/Makefile retargeted at arm-linux-gnueabihf, exactly the way
+# Makefile.win retargets it at i686-w64-mingw32, ONE pipeline, now three
+# toolchains. Everything in the base file is `?=`, so this file sets what
+# genuinely differs and nothing else. The engine's own pc/Makefile.arm is the
+# same arrangement one level down, and its header is where the ABI reasoning
+# was measured; what is below is this client's half of it.
+#
+# WHY AN ARM BUILD AT ALL. The handhelds. Both of the devices this client is
+# headed for execute AArch32 at EL0, and everything else, an app, a second
+# screen, a card a player prepares, is downstream of a client that compiles
+# and links for that instruction set at all.
+#
+# armhf, NEVER aarch64. `long` and a pointer are four bytes or every guest
+# struct offset moves and the save format with them. The client's structs are
+# the console's for the same reason the -m32 build's are, so a 64-bit build of
+# this tree is not a faster version of it, it is a different program that
+# cannot read a save. A change here reaching for aarch64 has misread the port.
+#
+# WHAT IS THE SAME AND MUST STAY SO:
+#
+#   * 32-bit, and the four ABI flags below are that promise kept on a
+#     toolchain whose defaults differ from i386's in four separate places.
+#     `abicheck` reads them back out of the engine's own build, so this file
+#     cannot drift from the thing it has to lay memory out like.
+#
+#   * The frame page is untouched. It is all uint32_t and already spans a
+#     -m32 publisher and a 64-bit viewer on the desktop, so an armhf publisher
+#     is one more reader of a format that was never anybody's native layout.
+#
+#   * Nothing endian. Both ends are little.
+#
+# WHAT IS NOT HERE. The window and the front door: SDL2 and raylib are the
+# host's here, built for x86-64, and no distribution puts an armhf pair on a
+# cross prefix. The window on these devices is not a port of the desktop one
+# anyway, one of them wants a surface from the Android framework and the
+# other wants two DRM connectors, so this file builds the client and the
+# game, and the two programs a player looks at arrive with the device work.
+# SDL2_CONFIG below is named for the cross prefix on purpose, so the base
+# file's probe for it fails honestly rather than finding the host's.
+
+AROOT := $(abspath $(dir $(firstword $(MAKEFILE_LIST))))
+
+# THE COMPILER IS NOT WHICHEVER ONE IS FIRST ON $PATH, and on this host that
+# is a trap rather than a preference: brew puts arm-none-eabi-gcc there, which
+# is a BARE-METAL compiler with no Linux libc. It compiles this tree happily
+# and fails at the link with missing libc symbols, a failure that reads
+# exactly like one of ours. So the triple is spelled out, and an unpacked
+# prefix is preferred over PATH because that is where the engine tree's
+# pc/install_arm_toolchain.sh puts a toolchain when apt could not be used.
+# Same names and same defaults as that file, so one installed toolchain
+# serves the engine and the client and neither has to be told where it is.
+ARM        ?= arm-linux-gnueabihf
+ARM_PREFIX ?= $(HOME)/.local/opt/cross-armhf
+ARM_TOOLS  ?= $(if $(wildcard $(ARM_PREFIX)/usr/bin/$(ARM)-gcc),$(ARM_PREFIX)/usr/bin/$(ARM),$(ARM))
+ARM_CC     ?= $(ARM_TOOLS)-gcc
+CC      := $(ARM_CC)
+AR      := $(ARM_TOOLS)-ar
+READELF ?= $(ARM_TOOLS)-readelf
+OBJDUMP ?= $(ARM_TOOLS)-objdump
+
+ifeq ($(shell command -v $(ARM_CC) 2>/dev/null),)
+$(error no $(ARM_CC); run $(ENGINE)/pc/install_arm_toolchain.sh, or install \
+ gcc-arm-linux-gnueabihf and qemu-user)
+endif
+
+# The emulator, and the sysroot it needs for a dynamic binary's loader. The
+# build itself never emulates anything; `run`, `wrapper` and the suites that
+# drive them are the only users. Same defaults as the engine's file.
+QEMU_ARM  ?= $(if $(wildcard $(ARM_PREFIX)/usr/bin/qemu-arm-static),$(ARM_PREFIX)/usr/bin/qemu-arm-static,qemu-arm)
+QEMU_ROOT ?= $(if $(wildcard $(ARM_PREFIX)/usr/$(ARM)),$(ARM_PREFIX)/usr/$(ARM),/usr/$(ARM))
+
+BUILD ?= $(AROOT)/build/arm$(if $(filter 1,$(RELEASE)),-release)
+
+# No -m32: it is not an ARM flag, the toolchain has no other width, and
+# passing it is an error rather than a no-op. These four are what replace it,
+# and each one is a place where the ARM default and i386's disagree:
+#
+#   -fno-short-enums   the ARM EABI shrinks an enum to the smallest type that
+#                      holds it and the DS's is always four bytes. Ubuntu's
+#                      armhf gcc already defaults to 32-bit enums so it
+#                      changes nothing here, it is set because it changes
+#                      147 structs on a toolchain that does not (bare-metal
+#                      EABI, and the NDK, which is where this client is going).
+#
+#   -fsigned-char      a bare `char` is signed on x86 and unsigned on ARM, and
+#                      gcc follows the target. The cartridge is built with
+#                      mwcc's `-char signed`, so signed is what this source
+#                      means everywhere a char is compared or sign-extended.
+#                      The 3DS port measured the other way on hardware: same
+#                      polygon count every frame, different pixels from the
+#                      moment anything was drawn.
+#
+#   -fno-pie           the guest map wants fixed low addresses. It is free
+#                      here and it is not what the Android build will do,
+#                      because an app is a shared library the framework
+#                      places, that build gets the slab instead.
+#
+#   -D_TIME_BITS=32    Ubuntu 24.04 armhf gives time_t eight bytes (the 64-bit
+#                      time transition) against four on i386. The legacy
+#                      32-bit entry points are still exported and a build with
+#                      this links and runs.
+#
+#   -D_FILE_OFFSET_BITS=64
+#                      THE ONE THE LINE ABOVE BREAKS, AND IT IS NOT OPTIONAL.
+#                      This compiler predefines BOTH _TIME_BITS=64 and
+#                      _FILE_OFFSET_BITS=64; asking for 32-bit time takes the
+#                      large-file interface down with it, because glibc's
+#                      features.h ties them together. off_t and ino_t then
+#                      become four bytes, and on ARM the kernel's getdents
+#                      hands back 64-bit directory cookies, so readdir()
+#                      returns EOVERFLOW ON THE FIRST ENTRY and EVERY
+#                      DIRECTORY ON THE MACHINE READS AS EMPTY. Measured here:
+#                      three entries and errno 0 without the flag, zero
+#                      entries and errno 75 with only the time flag, three
+#                      again with both.
+#
+#                      i386 does not show it, off_t is four bytes there and
+#                      always was, and that kernel's cookies fit, so this is
+#                      a trap that only exists on the target, created by a
+#                      flag chosen for something else entirely. It costs the
+#                      guest ABI nothing: off_t, ino_t and struct stat are the
+#                      host's file interface and appear in no DS structure.
+#
+# NOT -fpack-struct=4, which would also fix the u64 alignment and is the wrong
+# tool: it repacks bitfields too, moving nine structures, seven of them save
+# data. The alignment is handled where it belongs, on the u64/s64 typedefs in
+# the engine's own headers, which this client includes.
+ABI := -fno-short-enums -fsigned-char -fno-pie -D_TIME_BITS=32 \
+       -D_FILE_OFFSET_BITS=64
+
+# What this build calls itself, in every line `abicheck` prints. Three
+# makefiles build this client for three ABIs; the verdict has to say which.
+ABI_NAME := linux-armhf
+
+# -static so the device's libc does not have to be this one. armhf glibc 2.39
+# folds pthread into libc, so it costs nothing, and one binary runs from a
+# shell on a stock Android over adb, on ROCKNIX, and under qemu here without
+# being asked which. It is also what makes the emulator's -L sysroot optional.
+#
+# THE ONE THING -static COSTS THIS CLIENT and does not cost the engine: glibc
+# resolves a hostname through NSS modules it dlopens at runtime, so a static
+# getaddrinfo answers a numeric address and cannot answer a name unless a
+# matching libnss_dns is on the device. Every address this client is built
+# with today is numeric and the suites all dial 127.0.0.1, so nothing is
+# blocked, but a release pinned to a hostname would need this reconsidered,
+# and the Android build does not inherit the problem at all because bionic
+# resolves names in-process.
+LDFLAGS := $(ABI) -static -no-pie
+LDLIBS  := -lm
+
+# The window is not built on this toolchain (see the header). The base file
+# probes for sdl2-config by name and would find the host's x86-64 one; naming
+# the cross prefix makes that probe answer "no" for the right reason, and the
+# viewer, the launcher and the drive harness drop out of `test` by themselves.
+SDL2_CONFIG := $(ARM)-sdl2-config
+
+# ------------------------------------------------------------------- fused
+#
+# The game itself, on the other toolchain-of-three: the engine's own armhf
+# build with this client stacked into it as a mod, exactly as `fused` does on
+# Linux and Windows.
+ENGINE_MAKEFILE = $(ENGINE)/pc/Makefile.arm
+FUSED          := $(BUILD)/fused
+
+include $(AROOT)/Makefile
+
+# THE DIVIDE-BY-ZERO WRAPPER USED TO BE NAMED HERE, and it no longer has to
+# be. EXTRA_OBJS is how this file hands the engine our archive, and a variable
+# set on make's command line beats a `+=` in the makefile, so naming only the
+# archive silently dropped pc_div0_wrap.o, and a division by zero would raise
+# SIGFPE in the middle of a battle instead of answering a/0 == a the way the
+# cartridge does. This file used to work around that by naming the object
+# itself. The engine's pc/Makefile.arm now says `override EXTRA_OBJS +=`, which
+# is the fix rather than the workaround: naming it here as well would put the
+# same object on the link twice. The -Wl,--wrap flags that make it reachable
+# are in the engine's LDFLAGS and nothing passed from here replaces them.
+
+# ---------------------------------------------------------- the stack walk
+#
+# WITHOUT THIS EVERY CRASH REPORT FROM AN ARM BUILD HAS NO STACK IN IT.
+# glibc's backtrace() walks unwind tables, and on x86 gcc emits DWARF CFI for
+# every function whether or not anything asked; on ARM it emits .ARM.exidx
+# only when told, so backtrace() answers 0 frames and answers it silently.
+# Measured with a three-deep call: 0 frames without the flag on armhf, 5 with
+# it, and 6 on the i386 build that never needed it. Not static-versus-dynamic,
+# a dynamic armhf build says 0 too.
+#
+# It is worth a small section per function: a crash log is the only channel a
+# player on a handheld has, and one with no addresses in it is a report that
+# cannot be acted on. src/platform.c's mmo_plat_backtrace is the caller and
+# tests/logdir_test.c is what notices.
+#
+# Appended after the include and not assigned, the way Makefile.win adds its
+# frame pointer: RELEASE picks the optimisation level in the base file and
+# this is the same flag either way.
+OPTFLAGS += -funwind-tables
+
+# --------------------------------------------------------------- the gate
+#
+# What "it built for ARM" means, read off the finished binary rather than
+# claimed by the flags above. Every line of this is a property of the product:
+# a flag that stopped being passed, a link that quietly went dynamic or a
+# toolchain swapped for a bare-metal one all show up here and cannot show up
+# in a variable assignment nobody re-read.
+.PHONY: programs armabi
+programs: $(TARGET) armabi
+	@echo "arm: ok -- $(TARGET)"
+
+armabi: $(TARGET)
+	@ec=0; \
+	 h="$$($(READELF) -h $(TARGET))"; \
+	 case "$$h" in *"ELF32"*) ;; *) echo "armabi: NOT 32-bit"; ec=1;; esac; \
+	 case "$$h" in *"Machine:"*"ARM"*) ;; *) echo "armabi: not an ARM machine"; ec=1;; esac; \
+	 case "$$h" in *"EXEC (Executable file)"*) ;; \
+	   *) echo "armabi: not EXEC, the link went position-independent"; ec=1;; esac; \
+	 if $(READELF) -l $(TARGET) | grep -q INTERP; then \
+	   echo "armabi: dynamically linked, there is an INTERP segment"; ec=1; fi; \
+	 a="$$($(READELF) -A $(TARGET))"; \
+	 case "$$a" in *"Tag_ABI_enum_size: int"*) ;; \
+	   *) echo "armabi: enums are not four bytes, -fno-short-enums did not reach the link"; ec=1;; esac; \
+	 case "$$a" in *"Tag_ABI_VFP_args: VFP registers"*) ;; \
+	   *) echo "armabi: not hard-float, this is not the armhf ABI"; ec=1;; esac; \
+	 if [ $$ec -eq 0 ]; then \
+	   echo "armabi: ok, ELF32 ARM EXEC, static, 4-byte enums, hard-float"; \
+	 fi; \
+	 exit $$ec
+
+# ------------------------------------------------------------------- run
+#
+# There is no ARM hardware on this host, so `run` means qemu-user. Fine for
+# the short gates; a long soak belongs on a device, and the emulator's own
+# number for this engine was 2.1x SLOWER than the silicon, so nothing measured
+# here is a measurement of anything but this host.
+.PHONY: run
+run: $(TARGET)
+	$(QEMU_ARM) -L $(QEMU_ROOT) $(TARGET) $(ARGS)
+
+# --------------------------------------------- driven from here, under qemu
+#
+# The shell suites take a build DIRECTORY and run $(BUILD)/openmmo-client or
+# $(BUILD)/fused/pokeplatinum as one executable path, with no interpreter in
+# front of it and nowhere to put one. There is no ARM hardware on this host
+# and qemu is not registered with binfmt_misc, so the emulator has to be on
+# the inside: a directory beside the real build holding shims under the same
+# names.
+#
+#   make -f Makefile.arm qemu
+#   sh tests/play_test.sh    $(ROOT) $(QBUILD)
+#   sh tests/boot_test.sh    $(ROOT) $(QBUILD) $(ENGINE)
+#   sh tests/realbin_test.sh $(QBUILD)/openmmo-client traces/login-admin.trace
+#
+# A second directory rather than renamed binaries, because the next link would
+# overwrite a shim that sat where a binary belongs, and because the suites
+# resolve saves and frame dumps from the same root either way.
+#
+# Nothing here says anything about a device. The emulator's own number for
+# this engine was 2.1x SLOWER than the silicon it is emulating, so what these
+# runs establish is that the program is correct on this instruction set, not
+# what it costs on one.
+QBUILD := $(BUILD)-qemu
+
+define ARM_SHIM
+@mkdir -p $(dir $(1))
+@printf '#!/bin/sh\nexec %s -L %s %s "$$@"\n' '$(QEMU_ARM)' '$(QEMU_ROOT)' '$(2)' > $(1)
+@chmod +x $(1)
+@echo "  WRAP    $(1)"
+endef
+
+.PHONY: qemu qemu-client qemu-fused
+qemu: qemu-client qemu-fused
+
+qemu-client: $(TARGET)
+	$(call ARM_SHIM,$(QBUILD)/openmmo-client,$(TARGET))
+
+qemu-fused: fused
+	$(call ARM_SHIM,$(QBUILD)/fused/pokeplatinum,$(FUSED)/pokeplatinum)
+
+# --------------------------------------------- the suite, on the instruction set
+#
+# The in-process suite, cross-built and run under the emulator. Nine seconds,
+# and it is what found every ARM-only fault this port has had: a socket layer
+# that read the wrong errno, a readdir that failed on every directory, a
+# backtrace with no frames in it. None of those is visible to a link, to a
+# struct survey or to anything the x86 build can be asked.
+.PHONY: qemu-suite
+qemu-suite: $(TESTBIN)
+	@$(QEMU_ARM) -L $(QEMU_ROOT) $(TESTBIN)
+
+# ------------------------------------------------- did the vector unit take it
+#
+# The per-pixel loops are the ENGINE's, pc/hw, two hardware models composing
+# two screens a scanline at a time and rasterizing the DS's polygons, and
+# this client contributes none of its own. What is worth checking from this
+# side is that they survived into the binary a device actually runs, because
+# the fused link is ours and the flags reaching it are ours to get wrong.
+#
+# Reads the finished ARM binary rather than the compiler's opinion of it:
+# `make -f pc/Makefile.arm vec` next door counts loops the optimiser SAYS it
+# vectorized, and this counts SIMD instructions that are really there.
+#
+# A q REGISTER IS THE TEST, not a `v` mnemonic. This is a hard-float build, so
+# VFP scalar arithmetic, vmov, vldr, vcvt on s0..s31, is in every function
+# in the program and has nothing to do with the vector unit. Only NEON has
+# q0..q15, so an operand naming one is SIMD and nothing else is.
+.PHONY: neon
+neon: fused
+	@$(ARM_TOOLS)-objdump -d --no-show-raw-insn $(FUSED)/pokeplatinum | \
+	  awk -F'\t' '/^[0-9a-f]+ </ { fn = $$0; sub(/^[0-9a-f]+ </, "", fn); \
+	                               sub(/>:.*/, "", fn) } \
+	              NF > 2 && $$3 ~ /q[0-9]/ { n[fn]++; t++ } \
+	              END { for (f in n) printf "  NEON  %6d  %s\n", n[f], f; \
+	                    printf " NEON %6d , in the whole binary --\n", t }' | \
+	  sort -k2 -rn | head -20

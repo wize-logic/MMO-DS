@@ -1,0 +1,6 @@
+id = "sound_bw_hg"
+name = "Black & White Soundtrack, Heart Gold Soundfont"
+version = "1.0.0"
+authors = ["openmmo"]
+requires = []
+load_after = []

@@ -1,0 +1,105 @@
+--- a/src/applications/title_screen.c
++++ b/src/applications/title_screen.c
+@@ -212,6 +212,11 @@
+ extern const ApplicationManagerTemplate Unk_020F8A48;
+ extern const ApplicationManagerTemplate Unk_020F8AB4;
+ extern const ApplicationManagerTemplate gOpeningCutsceneAppTemplate;
++void openmmo_title_name(void *string); /* mods/openmmo/src/openmmo_boot.c */
++int openmmo_title_hold(void);
++int openmmo_title_present(void);
++int openmmo_title_leave(void);
++int openmmo_title_exit(int nextApp, void *saveData);
+ 
+ static BOOL TitleScreen_Init(ApplicationManager *appMan, int *state);
+ static BOOL TitleScreen_Main(ApplicationManager *appMan, int *state);
+@@ -380,7 +385,22 @@
+ 
+         appData->titleScreenTimer++;
+ 
++        if (openmmo_title_leave()) {
++            /* This jumps the normal exit, which is the only place the title's
++             * own theme is ever stopped. Left running it follows the lobby in,
++             * and the lobby cannot tell: Sound_IsSequencePlaying asks the
++             * PLAYER, not the sequence, so any BGM at all reads as "mine is
++             * already playing". */
++            Sound_StopBGM(SEQ_TITLE01_sseq, 0);
++            StartScreenFade(FADE_BOTH_SCREENS, FADE_TYPE_BRIGHTNESS_OUT, FADE_TYPE_BRIGHTNESS_OUT, COLOR_BLACK, 6, 1, appData->heapID);
++            *state = TITLE_SCREEN_APP_STATE_CLEANUP;
++            break;
++        }
++
+         if (JOY_NEW_ONLY(PAD_BUTTON_A) || JOY_NEW_ONLY(PAD_BUTTON_START)) {
++            if (openmmo_title_hold()) {
++                break;
++            }
+             appData->nextApp = NEXT_APP_START_MENU;
+             Sound_FadeOutBGM(0, 60);
+             Sound_PlayPokemonCry(SPECIES_GIRATINA, 1);
+@@ -390,6 +410,9 @@
+         }
+ 
+         if (JOY_HELD_ONLY(PAD_BUTTON_B | PAD_KEY_UP | PAD_BUTTON_SELECT)) {
++            if (openmmo_title_hold()) {
++                break;
++            }
+             appData->nextApp = NEXT_APP_CLEAR_SAVE_FILE;
+             StartScreenFade(FADE_BOTH_SCREENS, FADE_TYPE_BRIGHTNESS_OUT, FADE_TYPE_BRIGHTNESS_OUT, COLOR_BLACK, 6, 1, appData->heapID);
+             *state = TITLE_SCREEN_APP_STATE_CLEANUP;
+@@ -397,6 +420,9 @@
+         }
+ 
+         if (appData->titleScreenTimer > TITLE_SCREEN_REPLAY_OPENING_FRAMES) {
++            if (openmmo_title_hold()) {
++                break;
++            }
+             appData->nextApp = NEXT_APP_REPLAY_OPENING;
+             gSystem.showTitleScreenIntro = TRUE;
+ 
+@@ -450,6 +476,7 @@
+     TitleScreenAppData *appData = ApplicationManager_Data(appMan);
+     enum HeapID heapID = appData->heapID;
+     enum TitleScreenNextApp nextApp = appData->nextApp;
++    void *saveData = ((ApplicationArgs *)ApplicationManager_Args(appMan))->saveData;
+ 
+     SetVBlankCallback(NULL, NULL);
+ 
+@@ -459,6 +486,9 @@
+     ApplicationManager_FreeData(appMan);
+     Heap_Destroy(heapID);
+ 
++    if (openmmo_title_exit(nextApp, saveData)) {
++        return TRUE;
++    }
+     switch (nextApp) {
+     default:
+     case NEXT_APP_START_MENU:
+@@ -1234,6 +1264,11 @@
+         ToggleLogoBgLayer(TRUE);
+         ToggleLogoLayer(TRUE);
+         ToggleCopyrightLayer(TRUE);
++        if (openmmo_title_present()) {
++            ToggleLogoLayer(FALSE);
++            ToggleLogoBg2Layer(FALSE);
++            ToggleCopyrightLayer(FALSE);
++        }
+ 
+         ResetScreenMasterBrightness(DS_SCREEN_MAIN);
+         ResetScreenMasterBrightness(DS_SCREEN_SUB);
+@@ -1257,6 +1292,9 @@
+ 
+         titleScreen->blinkCounter++;
+         titleScreen->blinkCounter &= 31;
++        if (openmmo_title_present()) {
++            TogglePressStartLayer(TRUE);
++        }
+ 
+         result = TRUE;
+         break;
+@@ -1325,6 +1363,7 @@
+     Window_AddFromTemplate(bgConfig, &titleScreen->pressStartWindow, &sPressStartWindowTemplate);
+     Window_FillRectWithColor(&titleScreen->pressStartWindow, 0, 0, 0, TILES_TO_PIXELS(28), TILES_TO_PIXELS(2));
+     MessageLoader_GetString(msgLoader, TitleScreen_Text_PressStart, buffer);
++    openmmo_title_name(buffer);
+ 
+     u32 xpos = Font_CalcCenterAlignment(FONT_SYSTEM, buffer, 1, titleScreen->pressStartWindow.width * TILE_HEIGHT_PIXELS);
+ 
