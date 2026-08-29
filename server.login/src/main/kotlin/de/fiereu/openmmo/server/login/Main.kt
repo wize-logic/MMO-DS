@@ -31,6 +31,8 @@ private const val REVOKE_TOKENS = "revoke-tokens"
 private const val SHOW_ROLES = "roles"
 private const val GRANT_ROLE = "grant-role"
 private const val REVOKE_ROLE = "revoke-role"
+private const val RESET_DB = "reset-db"
+private const val CONFIRM = "--yes"
 
 /** How many words each verb takes, itself included. A verb that is not here is not a verb. */
 private val ARG_COUNT =
@@ -40,19 +42,25 @@ private val ARG_COUNT =
         SHOW_ROLES to 2,
         GRANT_ROLE to 3,
         REVOKE_ROLE to 3,
+        RESET_DB to 2,
     )
 
 private fun runCommand(args: Array<String>) {
   val roles = AccountRole.names()
   val usage =
       "usage: server.login [$CREATE_USER <name> <password> | $REVOKE_TOKENS <name> |" +
-          " $SHOW_ROLES <name> | $GRANT_ROLE <name> <$roles> | $REVOKE_ROLE <name> <$roles>]"
+          " $SHOW_ROLES <name> | $GRANT_ROLE <name> <$roles> | $REVOKE_ROLE <name> <$roles> |" +
+          " $RESET_DB $CONFIRM]"
   if (ARG_COUNT[args[0]] != args.size) {
     System.err.println(usage)
     exitProcess(2)
   }
   val config = ConfigLoader.load()
   val component = DaggerLoginServerComponent.factory().create(config)
+  if (args[0] == RESET_DB) {
+    resetDatabase(component, args[1], config.db.name)
+    return
+  }
   component.databaseBootstrap().migrate()
   when (args[0]) {
     REVOKE_TOKENS -> revokeTokens(component, args[1])
@@ -104,6 +112,23 @@ private fun changeRole(
     exitProcess(1)
   }
   println("'$username' is now: $roles")
+}
+
+/**
+ * Empty this server's database and build the schema again, which is the state a fresh install is
+ * in: no accounts, so the next one created is a developer again.
+ *
+ * Asks for [CONFIRM] in as many words rather than prompting, because reset-db.sh runs this too and
+ * a script that has to answer a prompt answers it wrongly one day. The caller checks nothing is
+ * connected.
+ */
+private fun resetDatabase(component: LoginServerComponent, confirm: String, dbName: String) {
+  if (confirm != CONFIRM) {
+    System.err.println("$RESET_DB deletes every account in '$dbName'. Add $CONFIRM if you mean it.")
+    exitProcess(2)
+  }
+  component.databaseBootstrap().reset()
+  println("'$dbName' is empty. The next account created will be a developer.")
 }
 
 /** What one account may do. */

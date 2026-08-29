@@ -17,17 +17,33 @@ constructor(
     private val config: LoginServerConfig,
 ) {
 
-  fun migrate() {
+  private fun flyway(cleanAllowed: Boolean = false): Flyway {
     val locations = buildList {
       add("classpath:db/migration")
       if (config.db.seedDev) add("classpath:db/dev")
     }
-    val result =
-        Flyway.configure()
-            .dataSource(dataSource)
-            .locations(*locations.toTypedArray())
-            .load()
-            .migrate()
+    return Flyway.configure()
+        .dataSource(dataSource)
+        .locations(*locations.toTypedArray())
+        .cleanDisabled(!cleanAllowed)
+        .load()
+  }
+
+  fun migrate() {
+    val result = flyway().migrate()
     log.info { "Applied ${result.migrationsExecuted} database migrations" }
+  }
+
+  /**
+   * Drops every object in the schema and builds it again from the migrations. There is no undo, and
+   * nothing may be connected: the game server writes cached characters back on a timer, so cleaning
+   * underneath a live one puts the rows straight back.
+   */
+  fun reset() {
+    val flyway = flyway(cleanAllowed = true)
+    flyway.clean()
+    log.warn { "Dropped every object in the database" }
+    val result = flyway.migrate()
+    log.info { "Rebuilt the schema from ${result.migrationsExecuted} migrations" }
   }
 }
