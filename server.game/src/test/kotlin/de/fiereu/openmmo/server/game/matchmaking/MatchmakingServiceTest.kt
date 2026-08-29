@@ -21,6 +21,7 @@ import de.fiereu.openmmo.net.game.packets.matchmaking.QueueSignup
 import de.fiereu.openmmo.net.game.packets.matchmaking.QueueSlotSelection
 import de.fiereu.openmmo.net.game.packets.matchmaking.TournamentSignup
 import de.fiereu.openmmo.pokemon.EvolutionRegistry
+import de.fiereu.openmmo.server.game.battle.BattleRegistry
 import de.fiereu.openmmo.server.game.services.DuelService
 import de.fiereu.openmmo.server.game.session.SessionRegistry
 import de.fiereu.openmmo.server.game.storage.CharacterStore
@@ -69,7 +70,13 @@ private class Fixture(scope: CoroutineScope) {
   val sessions = SessionRegistry()
   val duels = DuelService(sessions, store, battleService(store, InterestManager()))
   val service =
-      MatchmakingService(store, TeamValidator(TierRegistry(), EvolutionRegistry()), sessions, duels)
+      MatchmakingService(
+          store,
+          TeamValidator(TierRegistry(), EvolutionRegistry()),
+          sessions,
+          duels,
+          BattleRegistry(),
+      )
   private var users = 0
 
   suspend fun seated(

@@ -21,7 +21,7 @@ class BattleRegistry @Inject constructor() {
       rng: BattleRng,
       rules: BattleRules = BattleRules(),
       pvp: PvpFoe? = null,
-  ): BattleInstance {
+  ): BattleInstance? {
     val battle =
         BattleInstance(
             ids.getAndIncrement(),
@@ -35,8 +35,13 @@ class BattleRegistry @Inject constructor() {
             rules.trainer,
             pvp,
         )
-    byChar[charId] = battle
-    if (battle.foeCharId != 0L) byChar[battle.foeCharId] = battle
+    // Take both seats or neither. Every caller checks "already fighting" and then writes, with
+    // suspension points in between, so two starts could both pass and orphan one instance.
+    if (byChar.putIfAbsent(charId, battle) != null) return null
+    if (battle.foeCharId != 0L && byChar.putIfAbsent(battle.foeCharId, battle) != null) {
+      byChar.remove(charId, battle)
+      return null
+    }
     return battle
   }
 

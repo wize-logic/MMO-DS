@@ -66,7 +66,7 @@ class InMemoryUserStore @Inject constructor() : UserService {
   override suspend fun authenticate(username: String, password: String): UserService.AuthResult {
     val user =
         users[username.lowercase()] ?: return UserService.AuthResult(LoginState.INVALID_PASSWORD)
-    if (user.passwordHash != password) {
+    if (!samePassword(user.passwordHash, password)) {
       return UserService.AuthResult(LoginState.INVALID_PASSWORD)
     }
     return UserService.AuthResult(LoginState.AUTHED, user.id, user.tokenEpoch)
@@ -81,3 +81,13 @@ class InMemoryUserStore @Inject constructor() : UserService {
             UserService.TokenUser(it.id, it.username.lowercase(), it.username, it.tokenEpoch)
           }
 }
+
+/**
+ * Whether the stored credential matches the one that arrived, compared in constant time. Kotlin's
+ * == on a String returns as soon as it differs, and this is the one comparison guarding every
+ * account.
+ */
+internal fun samePassword(stored: String?, offered: String): Boolean =
+    stored != null &&
+        MessageDigest.isEqual(
+            stored.toByteArray(Charsets.UTF_8), offered.toByteArray(Charsets.UTF_8))

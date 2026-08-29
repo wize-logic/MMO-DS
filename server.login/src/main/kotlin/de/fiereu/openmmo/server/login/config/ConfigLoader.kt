@@ -5,6 +5,7 @@ import com.github.maltalex.ineter.base.IPv4Address
 import com.github.maltalex.ineter.base.IPv6Address
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigFactory
+import io.github.oshai.kotlinlogging.KotlinLogging
 
 private fun Config.stringOrNull(path: String): String? =
     if (hasPath(path)) getString(path) else null
@@ -18,11 +19,26 @@ private fun adminAccount(config: Config): AdminAccountConfig? {
   return AdminAccountConfig(username, password)
 }
 
+private val log = KotlinLogging.logger {}
+
+/**
+ * The secret this repository ships with. This server signs both token types with it, so anyone who
+ * knows it can mint either for any account. It is a default so a checkout runs.
+ */
+private const val DEV_SESSION_SECRET = "dev-only-secret-do-not-use-in-production"
+
 object ConfigLoader {
   fun load(): LoginServerConfig {
     val config = ConfigFactory.load()
     val secret = config.getString("server.sessionSecret")
     require(secret.isNotEmpty()) { "server.sessionSecret must not be empty" }
+    if (secret == DEV_SESSION_SECRET) {
+      log.warn {
+        "server.sessionSecret is the one this repository ships with. This server signs both the" +
+            " join ticket and the remember me token with it, so anyone holding it can mint either" +
+            " for any account. Set OPENMMO_SESSION_SECRET before this server faces a network."
+      }
+    }
     val rememberMeMaxAge = config.getDuration("server.rememberMeMaxAge")
     require(!rememberMeMaxAge.isNegative && !rememberMeMaxAge.isZero) {
       "server.rememberMeMaxAge must be positive"

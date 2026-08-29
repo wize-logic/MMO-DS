@@ -9,6 +9,11 @@ data class DbConfig(
     val poolSize: Int = 4,
     val seedDev: Boolean = false,
 ) {
+  // Without this the generated one puts the password in any log line that prints the config.
+  override fun toString(): String =
+      "DbConfig(host=$host, port=$port, name=$name, user=$user, password=***, poolSize=$poolSize," +
+          " seedDev=$seedDev)"
+
   val jdbcUrl: String
     get() = "jdbc:postgresql://$host:$port/$name"
 }

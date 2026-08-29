@@ -34,6 +34,14 @@ class BattleMonState(
 
   fun stage(stat: BattleStat): Int = stages[stat] ?: 0
 
+  /**
+   * Forget every stat change, which is what leaving the field does. Nothing cleared these, so a
+   * monster could raise itself to +6, switch out, and come back still at +6.
+   */
+  fun clearStages() {
+    stages.clear()
+  }
+
   /** Clamp to the stage limits and return the delta that was actually applied. */
   fun changeStage(stat: BattleStat, delta: Int): Int {
     val old = stage(stat)

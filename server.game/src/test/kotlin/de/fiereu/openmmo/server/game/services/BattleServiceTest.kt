@@ -60,6 +60,7 @@ import de.fiereu.openmmo.trainer.TrainerRegistry
 import de.fiereu.openmmo.typechart.TypeChart
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.booleans.shouldBeTrue
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.nulls.shouldBeNull
@@ -148,9 +149,15 @@ private class Fixture(scope: CoroutineScope) {
   ): Pair<FakeSession, Long> {
     val created = store.createCharacter(userId, name, CharacterGender.MALE, Region.HOENN)
     store.addPokemon(created.info.id, bulbasaur(created.info.id, level, hp, xp, moveIds))
+    // Balls to throw. A throw needs one in the bag and spends it, so a fixture with an empty bag
+    // catches nothing; these tests passed because neither was asked.
+    store.addItem(created.info.id, POKE_BALL_ITEM_ID, 10)
     return FakeSession(created.info.id) to created.info.id
   }
 }
+
+/** The Poke Ball's id in this build, which is what the catch tests throw. */
+private const val POKE_BALL_ITEM_ID = 5004
 
 private fun FakeSession.startBattle(service: BattleService, dexId: Int = 19, level: Int = 2) {
   service.startWildBattle(this, dexId, level)
@@ -558,6 +565,47 @@ class BattleServiceTest :
               .filterIsInstance<BattleListEventPacket>()
               .single { it.subKind == 4.toByte() }
               .value shouldBe 5004.toShort()
+        }
+      }
+
+      /**
+       * The engine looks a move up in the whole move table, so the id on the wire was the choice.
+       */
+      test("a monster cannot use a move it does not know") {
+        runTest {
+          val fx = Fixture(this)
+          val (session, _) = fx.playerWithParty(moveIds = listOf(TACKLE, 0, 0, 0))
+          session.startBattle(fx.service)
+          session.sent.clear()
+
+          // 153 is Explosion, which nothing in this party knows.
+          session.act(fx.service, BattleAction.MOVE, 153)
+
+          session.sent.filterIsInstance<BattleListEventPacket>() shouldBe emptyList()
+          session.sent
+              .filterIsInstance<ChatMessagePacket>()
+              .map { it.message }
+              .shouldContain("You can't use that now.")
+        }
+      }
+
+      /** A ball has to be in the bag, and it leaves the bag when it is thrown. */
+      test("a ball cannot be thrown from an empty bag, and a thrown one is spent") {
+        runTest {
+          val fx = Fixture(this)
+          val (session, charId) = fx.playerWithParty()
+          fx.store.addItem(charId, POKE_BALL_ITEM_ID, -10)
+          session.startBattle(fx.service)
+
+          session.act(fx.service, BattleAction.ITEM, POKE_BALL_ITEM_ID.toShort())
+
+          val stored = fx.store.getCharacter(charId).shouldNotBeNull()
+          stored.pcStorage.size shouldBe 0
+          stored.pokemon.size shouldBe 1
+
+          fx.store.addItem(charId, POKE_BALL_ITEM_ID, 2)
+          session.act(fx.service, BattleAction.ITEM, POKE_BALL_ITEM_ID.toShort())
+          fx.store.getCharacter(charId)!!.items[POKE_BALL_ITEM_ID] shouldBe 1
         }
       }
 

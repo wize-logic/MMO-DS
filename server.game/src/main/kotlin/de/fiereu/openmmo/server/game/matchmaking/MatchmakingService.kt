@@ -14,6 +14,7 @@ import de.fiereu.openmmo.net.game.packets.matchmaking.MatchmakingWindowPacket
 import de.fiereu.openmmo.net.game.packets.matchmaking.QueueAvailability
 import de.fiereu.openmmo.net.game.packets.matchmaking.QueueSignup
 import de.fiereu.openmmo.net.game.packets.matchmaking.TournamentSignup
+import de.fiereu.openmmo.server.game.battle.BattleRegistry
 import de.fiereu.openmmo.server.game.services.DuelService
 import de.fiereu.openmmo.server.game.services.notice
 import de.fiereu.openmmo.server.game.session.PLAYER_STATE
@@ -35,6 +36,7 @@ constructor(
     private val validator: TeamValidator,
     private val sessions: SessionRegistry,
     private val duels: DuelService,
+    private val battles: BattleRegistry,
 ) {
   private val standing = LinkedHashMap<Long, Set<MatchmakingQueue>>()
   private val languages = ConcurrentHashMap<Long, List<Byte>>()
@@ -99,7 +101,7 @@ constructor(
    * pair. An odd one out keeps their place and is told the round could not place them.
    */
   fun runRound(queue: MatchmakingQueue): Int {
-    val waiting = waitingIn(queue).filter { canStillFight(it) }
+    val waiting = waitingIn(queue).filter { canStillFight(it) && stillLegalFor(queue, it) }
     if (waiting.size < 2) {
       waiting.forEach { tellUnpaired(it) }
       return 0
@@ -155,8 +157,27 @@ constructor(
   private fun canStillFight(charId: Long): Boolean {
     if (sessions.getByCharacterId(charId) == null) return false
     if (duels.inLinkBattle(charId)) return false
+    if (battles.byChar(charId) != null) return false
     val character = store.getCharacter(charId) ?: return false
     return character.pokemon.any { it.container == PokemonContainer.PARTY && !it.isEgg }
+  }
+
+  /**
+   * Whether the party this character holds now still passes the queue it signed up for. The team
+   * was checked once, at signup, and nothing looked again, so a player could pass a capped tier
+   * with a legal six and swap in level 100s before the round. The fight is run by the two clients,
+   * so nothing downstream ever sees the team either.
+   */
+  private fun stillLegalFor(queue: MatchmakingQueue, charId: Long): Boolean {
+    val rules = QueueRules.of(queue) ?: return true
+    val character = store.getCharacter(charId) ?: return false
+    val party = character.pokemon.filter { it.container == PokemonContainer.PARTY }
+    if (validator.validate(party, rules, character.info.name) is TeamVerdict.Refused) {
+      log.warn { "char=$charId leaves the $queue queue: its team no longer passes" }
+      sessions.getByCharacterId(charId)?.let { withdraw(it, charId) }
+      return false
+    }
+    return true
   }
 
   private fun tellUnpaired(charId: Long) {

@@ -210,8 +210,15 @@ constructor(
    */
   suspend fun onCreateListing(event: PacketEvent<CreateMarketListingPacket>) {
     val session = event.session
-    val charId = session.attributes[PLAYER_STATE]?.characterId ?: return
+    val state = session.attributes[PLAYER_STATE] ?: return
+    val charId = state.characterId ?: return
     val self = store.getCharacter(charId) ?: return
+    // Listing takes a monster out of the party, the same gesture a box move is, and is refused for
+    // the same reason: it lands between the two writes of a settlement.
+    if (state.atTradeTable) {
+      session.send(notice("You cannot list a monster while trading."))
+      return
+    }
     val kind = event.packet.entryKind.toInt()
     val price = event.packet.price
     val quantity = if (kind == GTL_KIND_POKEMON) 1 else event.packet.quantity.toInt()
@@ -543,15 +550,21 @@ constructor(
       if (!quiet) session.send(GtlResultPacket(GtlResultPacket.CODE_GONE, listingId, 0))
       return false
     }
-    if (!deliverUnits(session, charId, listing, units)) {
-      shelf.revertUnits(listing.id, units)
-      if (!quiet) session.send(GtlResultPacket(GtlResultPacket.CODE_NO_ROOM, listingId, 0))
-      return false
-    }
-    if (!store.addMoney(charId, -listing.price * units)) {
-      takeBackUnits(charId, listing, units)
+    // The money moves before the goods do, because the undo in the other order cannot be relied
+    // on: a monster goes back through a release that refuses to empty a party, so a buyer with an
+    // empty party and too little money kept it for nothing and the listing went back on the shelf.
+    val cost = listing.price * units
+    if (!store.addMoney(charId, -cost)) {
       shelf.revertUnits(listing.id, units)
       if (!quiet) session.send(GtlResultPacket(GtlResultPacket.CODE_NO_FUNDS, listingId, 0))
+      return false
+    }
+    if (!deliverUnits(session, charId, listing, units)) {
+      if (!store.addMoney(charId, cost)) {
+        log.error { "gtl listing=${listing.id} char=$charId: undelivered $cost was not refunded" }
+      }
+      shelf.revertUnits(listing.id, units)
+      if (!quiet) session.send(GtlResultPacket(GtlResultPacket.CODE_NO_ROOM, listingId, 0))
       return false
     }
     shelf.recordSale(
@@ -607,16 +620,6 @@ constructor(
     if (!store.addItem(charId, itemId, units)) return false
     session.send(itemStackUpdatePacket(itemId, store.getCharacter(charId)?.items?.get(itemId) ?: 0))
     return true
-  }
-
-  /** Undo a delivery whose payment then refused. */
-  private suspend fun takeBackUnits(charId: Long, listing: GtlListing, units: Int) {
-    val undone =
-        if (listing.pokemon != null) store.releasePokemon(charId, listing.pokemon.id)
-        else listing.itemId?.let { store.addItem(charId, it, -units) } ?: false
-    if (!undone) {
-      log.error { "gtl listing=${listing.id} char=$charId: unpaid delivery could not be undone" }
-    }
   }
 
   private fun feeFor(price: Int): Int =

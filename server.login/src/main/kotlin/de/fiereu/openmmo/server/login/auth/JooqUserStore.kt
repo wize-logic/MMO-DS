@@ -20,7 +20,7 @@ constructor(
   override suspend fun authenticate(username: String, password: String): UserService.AuthResult =
       withContext(dispatcher) {
         val user = dsl.selectFrom(USERS).where(USERS.USERNAME.eq(username.lowercase())).fetchOne()
-        if (user == null || user.passwordHash != password) {
+        if (user == null || !samePassword(user.passwordHash, password)) {
           UserService.AuthResult(LoginState.INVALID_PASSWORD)
         } else {
           UserService.AuthResult(LoginState.AUTHED, user.id, user.tokenEpoch ?: 0)

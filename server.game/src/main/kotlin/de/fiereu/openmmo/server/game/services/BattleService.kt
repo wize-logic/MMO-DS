@@ -58,6 +58,8 @@ private val log = KotlinLogging.logger {}
 
 private const val CANT_USE_NOW = "You can't use that now."
 
+private const val ALREADY_IN_BATTLE = "You are already in a battle."
+
 /**
  * The moves one monster has been offered and not yet answered for, kept after the battle ends. Only
  * the head has been prompted: the client answers one move at a time, so the rest wait their turn.
@@ -138,6 +140,18 @@ constructor(
     val active = if (isFoe) battle.opponentMon() else battle.activeMon()
     // While the active mon is fainted the player owes a replacement and may only switch.
     if (active.fainted && action.action != BattleAction.SWITCH) return
+    // The move id is the client's, and the engine looked it up in the whole move table rather than
+    // in the monster's four, so any monster could use any move in the game. A move it does not
+    // know also costs no pp, because there is no slot to take it from.
+    if (action.action == BattleAction.MOVE && !knowsMove(active, action.moveOrItemId)) {
+      log.warn {
+        "char=$charId picked move ${action.moveOrItemId} for ${active.entityId}," +
+            " which knows ${active.moves.joinToString(",") { "${it.id}/${it.pp}pp" }}"
+      }
+      emitter.sendNotice(battle, CANT_USE_NOW)
+      emitter.sendPrompt(battle)
+      return
+    }
     if (battle.isPvp) {
       onPvpAction(battle, isFoe, action)
       return
@@ -259,7 +273,7 @@ constructor(
     val charId = session.attributes[PLAYER_STATE]?.characterId ?: return
     val foeId = foe.attributes[PLAYER_STATE]?.characterId ?: return
     if (battles.byChar(charId) != null) {
-      session.send(notice("You are already in a battle."))
+      session.send(notice(ALREADY_IN_BATTLE))
       return
     }
     if (battles.byChar(foeId) != null) {
@@ -290,6 +304,10 @@ constructor(
             BattleRules(catchable = false, escapable = true),
             PvpFoe(foe, foeId, foeStored.info.name),
         )
+            ?: run {
+              session.send(notice(ALREADY_IN_BATTLE))
+              return
+            }
     battle.activeSlot = firstAlive
     battle.seenActive.clear()
     battle.seenActive.add(firstAlive)
@@ -399,7 +417,7 @@ constructor(
   ): BattleInstance? {
     val charId = session.attributes[PLAYER_STATE]?.characterId ?: return null
     if (battles.byChar(charId) != null) {
-      session.send(notice("You are already in a battle."))
+      session.send(notice(ALREADY_IN_BATTLE))
       return null
     }
     val stored = characterStore.getCharacter(charId) ?: return null
@@ -450,6 +468,10 @@ constructor(
     val battle =
         battles.create(
             charId, session, party, enemies, rng, BattleRules(catchable, escapable, trainer))
+            ?: run {
+              session.send(notice(ALREADY_IN_BATTLE))
+              return null
+            }
     val firstAlive = party.indexOfFirst { !it.fainted }
     battle.activeSlot = firstAlive
     battle.seenActive.clear()
@@ -464,6 +486,14 @@ constructor(
     return battle
   }
 
+  /**
+   * Whether this monster may use the move the client picked: one of its own four, with pp left. Pp
+   * is checked here rather than in the engine, whose own fallback for a monster with nothing left
+   * is to swing anyway, which is the game's behaviour and not something a client asked for.
+   */
+  private fun knowsMove(mon: BattleMonState, moveId: Short): Boolean =
+      mon.moves.any { it.id == moveId && it.id.toInt() != 0 && it.pp > 0 }
+
   private suspend fun useItem(battle: BattleInstance, action: BattleActionSelectPacket) {
     val item = items.get(action.moveOrItemId.toInt())
     if (item == null) {
@@ -473,6 +503,23 @@ constructor(
       return
     }
     if (item.isBall) {
+      // A ball has to be in the bag and leaves it when thrown. Neither was asked, so one packet
+      // naming a ball id caught anything from an empty bag, as often as you liked.
+      val ballId = action.moveOrItemId.toInt()
+      val held = characterStore.getCharacter(battle.charId)?.items?.get(ballId) ?: 0
+      if (held < 1) {
+        log.warn { "char=${battle.charId} threw a ${item.name} it does not have" }
+        emitter.sendNotice(battle, CANT_USE_NOW)
+        emitter.sendPrompt(battle)
+        return
+      }
+      if (!characterStore.addItem(battle.charId, ballId, -1)) {
+        emitter.sendPrompt(battle)
+        return
+      }
+      battle.session.send(
+          itemStackUpdatePacket(
+              ballId, characterStore.getCharacter(battle.charId)?.items?.get(ballId) ?: 0))
       catchWild(battle)
       return
     }
@@ -647,10 +694,11 @@ constructor(
     val forced = battle.activeMon().fainted
     if (mon == null || mon.fainted || target == battle.activeSlot) {
       // Reopen the switch screen on an invalid forced choice, otherwise re-prompt for an action.
+      // The turn does not move: naming the slot already out used to advance it and skip the
+      // opponent's attack, so repeating that was an endless free stall.
       if (forced) {
         emitter.sendSwitchPrompt(battle)
       } else {
-        battle.turn += 1
         emitter.sendPrompt(battle)
       }
       return
@@ -684,6 +732,8 @@ constructor(
     if (forced) emitter.sendSwitchConfirm(battle)
     val oldSlot = battle.opponentSlot
     val fullBlock = target !in battle.opponentSeen
+    battle.opponent.getOrNull(oldSlot)?.clearStages()
+    battle.opponent.getOrNull(target)?.clearStages()
     battle.opponentSlot = target
     battle.opponentSeen.add(target)
     log.info {
@@ -699,6 +749,7 @@ constructor(
   private fun sendOutNextOpponent(battle: BattleInstance) {
     val next = battle.opponent.indexOfFirst { !it.fainted }
     if (next < 0) return
+    battle.opponent.getOrNull(next)?.clearStages()
     val fullBlock = next !in battle.opponentSeen
     val oldSlot = battle.opponentSlot
     battle.opponentSlot = next
@@ -710,6 +761,9 @@ constructor(
   private fun performSwitch(battle: BattleInstance, target: Int) {
     val oldSlot = battle.activeSlot
     val fullBlock = target !in battle.seenActive
+    // Stat changes belong to the time on the field, not to the monster.
+    battle.party.getOrNull(oldSlot)?.clearStages()
+    battle.party.getOrNull(target)?.clearStages()
     battle.activeSlot = target
     battle.seenActive.add(target)
     log.info { "Switch char=${battle.charId} slot $oldSlot -> $target (fullBlock=$fullBlock)" }

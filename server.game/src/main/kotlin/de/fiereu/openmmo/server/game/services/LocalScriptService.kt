@@ -166,6 +166,9 @@ constructor(
    */
   fun onScriptWarpArrived(event: PacketEvent<ScriptWarpArrivedPacket>) {
     val session = event.session
+    // Only a session that said it runs the scenes may report having walked itself somewhere. This
+    // was the one handler in the file without the check every other one opens with.
+    if (session.attributes[CLIENT_RUNS_SCRIPTS] != true) return
     val state = session.attributes[PLAYER_STATE] ?: return
     val characterId = state.characterId ?: return
     val stored = characterStore.getCharacter(characterId) ?: return
@@ -186,6 +189,15 @@ constructor(
       log.warn {
         "Character $characterId reports a local warp to (${msg.x}, ${msg.y}) on" +
             " $regionId:$bank:$map, which is ${target.width}x${target.height}"
+      }
+      return
+    }
+    // Inside the map is not the same as somewhere a player can be, and the position is stored, so
+    // a tile that blocks movement is one nobody can walk back out of.
+    if (target.tileAt(msg.x.toInt(), msg.y.toInt())?.blocksMovement() == true) {
+      log.warn {
+        "Character $characterId reports a local warp onto (${msg.x}, ${msg.y}) of" +
+            " $regionId:$bank:$map, which nothing can stand on"
       }
       return
     }
