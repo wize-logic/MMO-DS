@@ -1,5 +1,7 @@
 package de.fiereu.openmmo.server.login.auth
 
+import de.fiereu.openmmo.common.auth.AccountRole
+import de.fiereu.openmmo.common.auth.AccountRoles
 import de.fiereu.openmmo.common.enums.LoginState
 import de.fiereu.openmmo.server.login.config.AdminAccountConfig
 import de.fiereu.openmmo.server.login.config.LoginServerConfig
@@ -11,6 +13,7 @@ import kotlinx.coroutines.test.runTest
 private class EmptyUserStore : UserService {
   val added = mutableListOf<Pair<String, String>>()
   private var users = 0
+  private val roles = mutableMapOf<Int, AccountRoles>()
 
   override suspend fun authenticate(username: String, password: String) =
       UserService.AuthResult(LoginState.INVALID_PASSWORD)
@@ -23,7 +26,17 @@ private class EmptyUserStore : UserService {
 
   override suspend fun addUser(username: String, password: String): Int {
     added += username to password
-    return ++users
+    val id = ++users
+    roles[id] = if (id == 1) UserService.FIRST_ACCOUNT_ROLES else AccountRoles.NONE
+    return id
+  }
+
+  override suspend fun rolesOf(userId: Int): AccountRoles = roles[userId] ?: AccountRoles.NONE
+
+  override suspend fun setRoles(userId: Int, roles: AccountRoles): Boolean {
+    if (userId !in this.roles) return false
+    this.roles[userId] = roles
+    return true
   }
 }
 
@@ -101,6 +114,16 @@ class AdminAccountBootstrapTest :
         runCatching { AdminAccountConfig("", "pw") }.isFailure shouldBe true
         runCatching { AdminAccountConfig("a".repeat(33), "pw") }.isFailure shouldBe true
         runCatching { AdminAccountConfig("root", " ") }.isFailure shouldBe true
+      }
+
+      test("the account it creates is a developer, because it is the first one") {
+        runTest {
+          val users = EmptyUserStore()
+
+          AdminAccountBootstrap(users, config(AdminAccountConfig("root", "hunter2"))).ensureAdmin()
+
+          users.rolesOf(1).has(AccountRole.DEVELOPER) shouldBe true
+        }
       }
 
       test("the password stays out of the string form that would reach a log") {

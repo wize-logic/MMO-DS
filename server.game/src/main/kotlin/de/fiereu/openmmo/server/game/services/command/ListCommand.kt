@@ -1,6 +1,6 @@
 package de.fiereu.openmmo.server.game.services.command
 
-import de.fiereu.openmmo.common.CharacterPermissions
+import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.dialog.generated.sinnoh.JubilifeCity
 import de.fiereu.openmmo.dialog.generated.sinnoh.MenuEntries
 import de.fiereu.openmmo.server.game.services.DialogService
@@ -12,7 +12,7 @@ class ListCommand @Inject constructor(private val dialogService: DialogService) 
   override val name = "list"
   override val usage = "/list"
   override val description = "shows Jubilife's type-preference list"
-  override val permission = CharacterPermissions.DEVELOPER
+  override val role = AccountRole.DEVELOPER
 
   override suspend fun run(ctx: CommandContext) {
     /* Lock and send. Do not wait here: this runs on the chat handler,

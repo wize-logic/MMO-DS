@@ -1,6 +1,6 @@
 package de.fiereu.openmmo.server.game.services.command
 
-import de.fiereu.openmmo.common.CharacterPermissions
+import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.items.generated.Items
 import de.fiereu.openmmo.server.game.services.StoryPlayerService
 import javax.inject.Inject
@@ -12,7 +12,7 @@ class KitCommand @Inject constructor(private val storyPlayer: StoryPlayerService
   override val name = "kit"
   override val usage = "/kit [on|off]"
   override val description = "gives or takes the Explorer Kit (no argument toggles)"
-  override val permission = CharacterPermissions.DEVELOPER
+  override val role = AccountRole.DEVELOPER
 
   override suspend fun run(ctx: CommandContext) {
     val had = storyPlayer.hasItem(ctx.state, Items.EXPLORER_KIT, 1)

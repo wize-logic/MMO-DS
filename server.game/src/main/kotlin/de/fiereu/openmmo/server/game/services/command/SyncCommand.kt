@@ -1,6 +1,6 @@
 package de.fiereu.openmmo.server.game.services.command
 
-import de.fiereu.openmmo.common.CharacterPermissions
+import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.net.game.packets.ChunkedImagePacket
 import de.fiereu.openmmo.net.game.packets.ChunkedTransferAppendPacket
 import de.fiereu.openmmo.net.game.packets.ChunkedTransferBeginPacket
@@ -17,7 +17,7 @@ class SyncCommand @Inject constructor() : ChatCommand {
   override val name = "sync"
   override val usage = "/sync"
   override val description = "sends a digest, a chunked transfer, a stream and an image"
-  override val permission = CharacterPermissions.DEVELOPER
+  override val role = AccountRole.DEVELOPER
 
   override suspend fun run(ctx: CommandContext) {
     val wired = xorTn1(gzip("sync-ok".toByteArray(Charsets.US_ASCII)))

@@ -1,6 +1,6 @@
 package de.fiereu.openmmo.server.game.services.command
 
-import de.fiereu.openmmo.common.CharacterPermissions
+import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.net.game.packets.GmAccountInfo
 import de.fiereu.openmmo.net.game.packets.GmCharacterListing
 import de.fiereu.openmmo.net.game.packets.GmCharacterSession
@@ -23,7 +23,7 @@ class GmCommand @Inject constructor() : ChatCommand {
   override val name = "gm"
   override val usage = "/gm"
   override val description = "sends a player lookup, a panel body and a panel row"
-  override val permission = CharacterPermissions.DEVELOPER
+  override val role = AccountRole.DEVELOPER
 
   override suspend fun run(ctx: CommandContext) {
     ctx.session.send(

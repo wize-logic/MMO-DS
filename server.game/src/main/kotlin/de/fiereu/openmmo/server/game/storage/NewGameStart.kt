@@ -35,8 +35,8 @@ internal data class NewGameStart(
      */
     val money: Int = 30000,
     /**
-     * Low eight bits of CharacterInfo.permissions as the list capture writes them. 0x100
-     * (developer) is or-ed on afterwards by the seeder, not here.
+     * Low eight bits of CharacterInfo.permissions as the list capture writes them. What an account
+     * may do lives on the account, in AccountRole.
      */
     val permissions: Int = 8,
 )

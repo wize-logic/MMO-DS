@@ -1,6 +1,6 @@
 package de.fiereu.openmmo.server.game.services.command
 
-import de.fiereu.openmmo.common.CharacterPermissions
+import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.common.dialog.TextId
 import de.fiereu.openmmo.common.enums.Region
 import de.fiereu.openmmo.server.game.services.DialogService
@@ -12,7 +12,7 @@ class DialogCommand @Inject constructor(private val dialogService: DialogService
   override val name = "dialog"
   override val usage = "/dialog"
   override val description = "shows the Twinleaf town sign"
-  override val permission = CharacterPermissions.DEVELOPER
+  override val role = AccountRole.DEVELOPER
 
   override suspend fun run(ctx: CommandContext) {
     /* Lock and send. Do not wait here: this runs on the chat handler,

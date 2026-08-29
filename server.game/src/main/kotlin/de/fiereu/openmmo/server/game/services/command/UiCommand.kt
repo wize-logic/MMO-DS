@@ -1,6 +1,6 @@
 package de.fiereu.openmmo.server.game.services.command
 
-import de.fiereu.openmmo.common.CharacterPermissions
+import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.net.game.packets.ListWindowPagePacket
 import de.fiereu.openmmo.net.game.packets.ListWindowRow
 import de.fiereu.openmmo.net.game.packets.OptionListWindowPacket
@@ -14,7 +14,7 @@ class UiCommand @Inject constructor() : ChatCommand {
   override val name = "ui"
   override val usage = "/ui"
   override val description = "sends a confirm, an option list and a labelled page"
-  override val permission = CharacterPermissions.DEVELOPER
+  override val role = AccountRole.DEVELOPER
 
   override suspend fun run(ctx: CommandContext) {
     ctx.session.send(

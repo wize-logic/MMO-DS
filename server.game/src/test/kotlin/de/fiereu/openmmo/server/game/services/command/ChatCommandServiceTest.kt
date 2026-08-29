@@ -1,6 +1,7 @@
 package de.fiereu.openmmo.server.game.services.command
 
-import de.fiereu.openmmo.common.CharacterPermissions
+import de.fiereu.openmmo.common.auth.AccountRole
+import de.fiereu.openmmo.common.auth.AccountRoles
 import de.fiereu.openmmo.common.enums.CharacterGender
 import de.fiereu.openmmo.common.enums.Region
 import de.fiereu.openmmo.net.game.packets.ChatMessagePacket
@@ -15,7 +16,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 
 private class RecordingCommand(
-    override val permission: Int = 0,
+    override val role: AccountRole? = null,
     private val fail: Boolean = false,
 ) : ChatCommand {
   override val name = "secret"
@@ -77,7 +78,7 @@ class ChatCommandServiceTest :
           val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
           val charId = store.createCharacter(1, "Red", CharacterGender.MALE, Region.KANTO).info.id
           val session = FakeSession(characterId = charId)
-          val gated = RecordingCommand(CharacterPermissions.DEVELOPER)
+          val gated = RecordingCommand(AccountRole.DEVELOPER)
           val service = ChatCommandService(store, setOf(HelpCommand(), PosCommand(), gated))
 
           service.tryHandle(session, "/help") shouldBe true
@@ -102,26 +103,53 @@ class ChatCommandServiceTest :
         }
       }
 
-      test("a gated command needs its permission bit") {
+      test("a gated command needs the account role, not anything on the character") {
         runTest {
           val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
           val charId = store.createCharacter(1, "Red", CharacterGender.MALE, Region.KANTO).info.id
-          val session = FakeSession(characterId = charId)
-          val gated = RecordingCommand(CharacterPermissions.DEVELOPER)
+          val gated = RecordingCommand(AccountRole.DEVELOPER)
           val service = ChatCommandService(store, setOf(HelpCommand(), PosCommand(), gated))
 
-          service.tryHandle(session, "/secret") shouldBe true
+          val plain = FakeSession(characterId = charId)
+          service.tryHandle(plain, "/secret") shouldBe true
           gated.ran shouldBe false
-          session.replies().single() shouldContain "Unknown command"
+          plain.replies().single() shouldContain "Unknown command"
 
-          val info = store.getCharacter(charId)!!.info
-          store.updateCharacter(
-              info.copy(permissions = info.permissions or CharacterPermissions.DEVELOPER))
-          session.sent.clear()
+          val developer =
+              FakeSession(characterId = charId, roles = AccountRoles.of(AccountRole.DEVELOPER))
+          service.tryHandle(developer, "/secret") shouldBe true
+          gated.ran shouldBe true
+          developer.sent shouldBe emptyList()
+        }
+      }
+
+      test("a role that outranks the one a command asks for still runs it") {
+        runTest {
+          val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+          val charId = store.createCharacter(1, "Red", CharacterGender.MALE, Region.KANTO).info.id
+          val gated = RecordingCommand(AccountRole.MODERATOR)
+          val service = ChatCommandService(store, setOf(gated))
+          val session =
+              FakeSession(characterId = charId, roles = AccountRoles.of(AccountRole.DEVELOPER))
 
           service.tryHandle(session, "/secret") shouldBe true
+
           gated.ran shouldBe true
-          session.sent shouldBe emptyList()
+        }
+      }
+
+      test("a role below the one a command asks for does not run it") {
+        runTest {
+          val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+          val charId = store.createCharacter(1, "Red", CharacterGender.MALE, Region.KANTO).info.id
+          val gated = RecordingCommand(AccountRole.DEVELOPER)
+          val service = ChatCommandService(store, setOf(gated))
+          val session =
+              FakeSession(characterId = charId, roles = AccountRoles.of(AccountRole.MODERATOR))
+
+          service.tryHandle(session, "/secret") shouldBe true
+
+          gated.ran shouldBe false
         }
       }
 
@@ -130,8 +158,7 @@ class ChatCommandServiceTest :
           val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
           val charId = store.createCharacter(1, "Red", CharacterGender.MALE, Region.KANTO).info.id
           val session = FakeSession(characterId = charId)
-          val service =
-              ChatCommandService(store, setOf(RecordingCommand(permission = 0, fail = true)))
+          val service = ChatCommandService(store, setOf(RecordingCommand(role = null, fail = true)))
 
           service.tryHandle(session, "/secret") shouldBe true
 

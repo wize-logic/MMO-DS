@@ -28,13 +28,6 @@ object ConfigLoader {
       }
     }
     val seedDev = config.getBoolean("db.seedDev")
-    if (seedDev) {
-      log.warn {
-        "db.seedDev is on, so every character created on this server is given the developer" +
-            " commands, permanently and with no way to take them back. It is meant for a local" +
-            " workbench. Unset GAME_DB_SEED_DEV before anyone else can reach this server."
-      }
-    }
     val tokenMaxAge = config.getDuration("server.sessionTokenMaxAge")
     require(!tokenMaxAge.isNegative && !tokenMaxAge.isZero) {
       "server.sessionTokenMaxAge must be positive"

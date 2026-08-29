@@ -8,20 +8,29 @@ import java.time.Instant
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
-/** Opaque token issued by the login server and validated by the game server. */
+/**
+ * Opaque token issued by the login server and validated by the game server.
+ *
+ * It carries the account's roles as well as its id. The login server owns accounts, so it is the
+ * one that knows what an account may do; the game server holds no user table to look it up in.
+ * Signing them in makes them as forgeable as the id beside them, which is to say not at all.
+ */
 data class SessionToken(
     val userId: Long,
+    val roles: AccountRoles,
     val issuedAt: Instant,
     val bytes: ByteArray,
 ) {
   override fun equals(other: Any?): Boolean =
       other is SessionToken &&
           userId == other.userId &&
+          roles == other.roles &&
           issuedAt == other.issuedAt &&
           bytes.contentEquals(other.bytes)
 
   override fun hashCode(): Int =
-      (userId.hashCode() * 31 + issuedAt.hashCode()) * 31 + bytes.contentHashCode()
+      ((userId.hashCode() * 31 + roles.hashCode()) * 31 + issuedAt.hashCode()) * 31 +
+          bytes.contentHashCode()
 }
 
 class SessionTokenIssuer(secret: ByteArray, private val clock: Clock = Clock.systemUTC()) {
@@ -31,12 +40,15 @@ class SessionTokenIssuer(secret: ByteArray, private val clock: Clock = Clock.sys
 
   private val secretKey = SecretKeySpec(secret, MAC_ALGORITHM)
 
-  fun issue(userId: Long): SessionToken {
+  fun issue(userId: Long, roles: AccountRoles = AccountRoles.NONE): SessionToken {
     val issuedAt = clock.instant()
     val bytes = ByteArray(TOKEN_SIZE)
-    ByteBuffer.wrap(bytes, 0, PREFIX_SIZE).putLong(userId).putLong(issuedAt.epochSecond)
+    ByteBuffer.wrap(bytes, 0, PREFIX_SIZE)
+        .putLong(userId)
+        .putLong(issuedAt.epochSecond)
+        .putInt(roles.mask)
     sign(bytes, secretKey)
-    return SessionToken(userId, issuedAt, bytes)
+    return SessionToken(userId, roles, issuedAt, bytes)
   }
 }
 
@@ -60,8 +72,9 @@ class SessionTokenVerifier(
     val buf = ByteBuffer.wrap(bytes)
     val userId = buf.long
     val issuedAt = Instant.ofEpochSecond(buf.long)
+    val roles = AccountRoles.ofMask(buf.int)
     if (isExpired(issuedAt)) return null
-    return SessionToken(userId, issuedAt, bytes)
+    return SessionToken(userId, roles, issuedAt, bytes)
   }
 
   private fun isExpired(issuedAt: Instant): Boolean {
@@ -72,7 +85,8 @@ class SessionTokenVerifier(
 }
 
 private const val MAC_ALGORITHM = "HmacSHA256"
-private const val PREFIX_SIZE = 16
+// userId, issuedAt, then the role bits.
+private const val PREFIX_SIZE = 8 + 8 + 4
 private const val MAC_SIZE = 16
 private const val TOKEN_SIZE = PREFIX_SIZE + MAC_SIZE
 

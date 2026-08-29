@@ -62,7 +62,8 @@ class RegistrationServiceTest :
       }
 
       test("a name already in the database is refused however it is capitalised") {
-        val (_, service) = service()
+        val (store, service) = service()
+        store.addUser("admin", "correct-horse")
 
         service.register("ADMIN", "correct-horse", "correct-horse", "203.0.113.5") shouldBe
             RegistrationService.Outcome.Taken

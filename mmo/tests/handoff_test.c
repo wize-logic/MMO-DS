@@ -68,15 +68,15 @@ static void test_serverlist(void)
 static void test_nodes(void)
 {
     printf("GameServerNodes decode (AUTHED ticket):\n");
-    u8 token[32];
-    for (int i = 0; i < 32; i++)
+    u8 token[MMO_SESSION_TOKEN_LEN];
+    for (int i = 0; i < MMO_SESSION_TOKEN_LEN; i++)
         token[i] = (u8)(0x40 + i);
 
     mmo_wbuf b;
     mmo_wbuf_init(&b);
     mmo_put_u8(&b, 0x00);            /* loginState AUTHED */
     mmo_put_s32le(&b, 4242);         /* userId */
-    mmo_put_bytes_u8(&b, token, 32); /* sessionToken */
+    mmo_put_bytes_u8(&b, token, MMO_SESSION_TOKEN_LEN); /* sessionToken */
     mmo_put_u8(&b, 0);               /* gameServerId */
     u8 addr[4] = { 127, 0, 0, 1 };
     mmo_put_bytes_u8(&b, addr, 4);   /* localAddress */
@@ -96,8 +96,9 @@ static void test_nodes(void)
     int rc = mmo_handoff_read_nodes(b.data, b.len, &nodes);
     CHECK(rc == 0 && nodes.login_state == 0x00, "AUTHED state parsed");
     CHECK(nodes.user_id == 4242, "decoded the userId");
-    CHECK(nodes.token_len == 32 && memcmp(nodes.token, token, 32) == 0,
-          "decoded the 32-byte session token");
+    CHECK(nodes.token_len == MMO_SESSION_TOKEN_LEN
+              && memcmp(nodes.token, token, MMO_SESSION_TOKEN_LEN) == 0,
+          "decoded the session token whole");
     CHECK(nodes.port == 7777, "decoded the GameServerData port 7777");
     CHECK(nodes.node_count == 1, "read one advertised node");
     CHECK(strcmp(nodes.host, "203.0.113.5") == 0,

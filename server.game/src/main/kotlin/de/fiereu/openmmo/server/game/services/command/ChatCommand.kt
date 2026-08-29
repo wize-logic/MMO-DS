@@ -1,6 +1,7 @@
 package de.fiereu.openmmo.server.game.services.command
 
 import de.fiereu.network.SessionContext
+import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.server.game.services.notice
 import de.fiereu.openmmo.server.game.session.PlayerState
 import de.fiereu.openmmo.server.game.storage.StoredCharacter
@@ -11,8 +12,9 @@ interface ChatCommand {
   val usage: String
   val description: String
 
-  val permission: Int
-    get() = 0
+  /** The least an account must be to run this. Null when anybody may. */
+  val role: AccountRole?
+    get() = null
 
   // Runs on the thread the packet arrived on. Anything that waits for the client needs its own
   // scope first.

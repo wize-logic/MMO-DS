@@ -3,7 +3,6 @@ package de.fiereu.openmmo.server.game.services
 import de.fiereu.network.PacketEvent
 import de.fiereu.network.SessionContext
 import de.fiereu.openmmo.common.CharacterInfo
-import de.fiereu.openmmo.common.CharacterPermissions
 import de.fiereu.openmmo.common.auth.SessionTokenVerifier
 import de.fiereu.openmmo.common.enums.CharacterGender
 import de.fiereu.openmmo.common.enums.ChatType
@@ -32,7 +31,6 @@ import de.fiereu.openmmo.net.game.packets.SelectedCharacterPacket
 import de.fiereu.openmmo.net.game.packets.ViewScalePacket
 import de.fiereu.openmmo.net.game.packets.battle.BattleRatingBulkPacket
 import de.fiereu.openmmo.net.game.packets.battle.BattleStateBytePacket
-import de.fiereu.openmmo.server.game.config.GameServerConfig
 import de.fiereu.openmmo.server.game.script.Pokedex
 import de.fiereu.openmmo.server.game.session.PENDING_MAP_LOAD
 import de.fiereu.openmmo.server.game.session.PLAYER_STATE
@@ -72,7 +70,6 @@ constructor(
     private val worldStateService: WorldStateService,
     private val saveBlockRepository: SaveBlockRepository,
     private val fieldMoveService: FieldMoveService,
-    private val config: GameServerConfig,
 ) {
 
   fun onJoinGame(event: PacketEvent<JoinPacket>) {
@@ -104,10 +101,10 @@ constructor(
     }
     val userId = token.userId.toInt()
 
-    ctx.attributes[PLAYER_STATE] = PlayerState(userId = userId)
+    ctx.attributes[PLAYER_STATE] = PlayerState(userId = userId, roles = token.roles)
     sessionRegistry.register(ctx)
     displacePreviousSession(userId, ctx)
-    log.info { "Session created for user $userId" }
+    log.info { "Session created for user $userId (${token.roles})" }
 
     ctx.send(JoinResponsePacket.acceptNow(playtime = 1337, rewardPoints = 420, balance = 187))
   }
@@ -176,29 +173,19 @@ constructor(
     val appearance = event.packet.appearance
     // One name, one player: a name is how the world addresses somebody, so a second character
     // answering to it makes a whisper, a trade and a friend row ambiguous.
-    val created =
-        try {
-          characterStore.createCharacter(
-              state.userId,
-              name,
-              gender,
-              startingRegion,
-              skins = appearance.toMap(),
-              skinRegionSelectionIndex = appearance.regionSelectionIndex,
-          )
-        } catch (taken: CharacterNameTakenException) {
-          log.warn { "Rejected character '${taken.name}' for userId=${state.userId}: name taken" }
-          ctx.send(buildCharacterList(state.userId))
-          return
-        }
-    // A dev-seeded server is a workbench: every character made on one carries the developer
-    // commands, because the person testing recreates their character many times an hour and a
-    // permission that dies with each one is no permission at all.
-    if (config.db.seedDev) {
-      characterStore.updateCharacter(
-          created.info.copy(
-              permissions = created.info.permissions or CharacterPermissions.DEVELOPER))
-      characterStore.flushCharacterAsync(created.info.id)
+    try {
+      characterStore.createCharacter(
+          state.userId,
+          name,
+          gender,
+          startingRegion,
+          skins = appearance.toMap(),
+          skinRegionSelectionIndex = appearance.regionSelectionIndex,
+      )
+    } catch (taken: CharacterNameTakenException) {
+      log.warn { "Rejected character '${taken.name}' for userId=${state.userId}: name taken" }
+      ctx.send(buildCharacterList(state.userId))
+      return
     }
     ctx.send(buildCharacterList(state.userId))
   }

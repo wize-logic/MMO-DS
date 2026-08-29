@@ -1,5 +1,6 @@
 package de.fiereu.openmmo.server.login.auth
 
+import de.fiereu.openmmo.common.auth.AccountRoles
 import de.fiereu.openmmo.common.enums.LoginState
 import de.fiereu.openmmo.db.login.tables.references.USERS
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -9,6 +10,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import org.jooq.DSLContext
+import org.jooq.impl.DSL
 
 private val log = KotlinLogging.logger {}
 
@@ -84,12 +86,48 @@ constructor(
 
   override suspend fun addUser(username: String, password: String): Int =
       withContext(dispatcher) {
-        dsl.insertInto(USERS)
-            .set(USERS.USERNAME, username.lowercase())
-            .set(USERS.DISPLAY_NAME, username)
-            .set(USERS.PASSWORD_HASH, PasswordHash.hash(sha1Hex(password)))
-            .returning(USERS.ID)
-            .fetchSingle()
-            .id!!
+        val id =
+            dsl.insertInto(USERS)
+                .set(USERS.USERNAME, username.lowercase())
+                .set(USERS.DISPLAY_NAME, username)
+                .set(USERS.PASSWORD_HASH, PasswordHash.hash(sha1Hex(password)))
+                .returning(USERS.ID)
+                .fetchSingle()
+                .id!!
+        grantFirstAccountRoles(id)
+        id
+      }
+
+  /**
+   * Gives the developer role to the account that is the only one on the server.
+   *
+   * The condition is "no other row exists" rather than "the table was empty a moment ago". Two
+   * accounts created at once then leave neither of them a developer, which one command puts right,
+   * where two of them would be a thing nobody was told about.
+   */
+  private fun grantFirstAccountRoles(id: Int) {
+    val granted =
+        dsl.update(USERS)
+            .set(USERS.ROLES, UserService.FIRST_ACCOUNT_ROLES.mask)
+            .where(USERS.ID.eq(id))
+            .and(DSL.notExists(dsl.selectOne().from(USERS).where(USERS.ID.ne(id))))
+            .execute()
+    if (granted > 0) {
+      log.info {
+        "User $id is the first account here, so it is a ${UserService.FIRST_ACCOUNT_ROLES}"
+      }
+    }
+  }
+
+  override suspend fun rolesOf(userId: Int): AccountRoles =
+      withContext(dispatcher) {
+        AccountRoles.ofMask(
+            dsl.select(USERS.ROLES).from(USERS).where(USERS.ID.eq(userId)).fetchOne(USERS.ROLES)
+                ?: 0)
+      }
+
+  override suspend fun setRoles(userId: Int, roles: AccountRoles): Boolean =
+      withContext(dispatcher) {
+        dsl.update(USERS).set(USERS.ROLES, roles.mask).where(USERS.ID.eq(userId)).execute() > 0
       }
 }

@@ -1,6 +1,7 @@
 package de.fiereu.openmmo.server.game.services.command
 
-import de.fiereu.openmmo.common.CharacterPermissions
+import de.fiereu.openmmo.common.auth.AccountRole
+import de.fiereu.openmmo.common.auth.AccountRoles
 import de.fiereu.openmmo.common.enums.CharacterGender
 import de.fiereu.openmmo.common.enums.PokemonContainer
 import de.fiereu.openmmo.common.enums.Region
@@ -92,13 +93,12 @@ class StoryResetTest :
         )
       }
 
-      suspend fun developer(store: CharacterStore): Long {
-        val created = store.createCharacter(1, "Red", CharacterGender.MALE, Region.KANTO)
-        store.updateCharacter(
-            created.info.copy(
-                permissions = created.info.permissions or CharacterPermissions.DEVELOPER))
-        return created.info.id
-      }
+      suspend fun developer(store: CharacterStore): Long =
+          store.createCharacter(1, "Red", CharacterGender.MALE, Region.KANTO).info.id
+
+      // The role is the account's, so it goes on the session rather than on the character.
+      fun developerSession(charId: Long) =
+          FakeSession(characterId = charId, roles = AccountRoles.of(AccountRole.DEVELOPER))
 
       test("reset puts the character back on its region's new game story state") {
         runTest {
@@ -107,7 +107,7 @@ class StoryResetTest :
           store.setStoryFlag(charId, KantoFlags.FLAG_SYS_POKEMON_GET)
           store.setStoryVar(charId, KantoVars.VAR_STARTER_MON, 2)
           store.addItem(charId, itemId = 4, amount = 5)
-          val session = FakeSession(characterId = charId)
+          val session = developerSession(charId)
           val service = ChatCommandService(store, setOf(storyCommand(store)))
 
           service.tryHandle(session, "/story reset") shouldBe true
@@ -136,7 +136,7 @@ class StoryResetTest :
                   factory
                       .create(4, 5, BattleRng(seed = 2))!!
                       .copy(container = PokemonContainer.PC, containerSlot = 0))
-          val session = FakeSession(characterId = charId)
+          val session = developerSession(charId)
           val service = ChatCommandService(store, setOf(storyCommand(store)))
 
           service.tryHandle(session, "/story reset") shouldBe true
@@ -152,7 +152,7 @@ class StoryResetTest :
           val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
           val charId = developer(store)
           store.setStoryFlag(charId, KantoFlags.FLAG_SYS_POKEMON_GET)
-          val session = FakeSession(characterId = charId)
+          val session = developerSession(charId)
           session.state().inDialog = true
           val service = ChatCommandService(store, setOf(storyCommand(store)))
 

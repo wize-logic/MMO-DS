@@ -1,6 +1,6 @@
 package de.fiereu.openmmo.server.game.services.command
 
-import de.fiereu.openmmo.common.CharacterPermissions
+import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.net.game.packets.HighScoreAppearance
 import de.fiereu.openmmo.net.game.packets.HighScoreBoardPacket
 import de.fiereu.openmmo.net.game.packets.HighScoreEntry
@@ -20,7 +20,7 @@ class CompeteCommand @Inject constructor() : ChatCommand {
   override val name = "compete"
   override val usage = "/compete"
   override val description = "sends a rental offer, a tournament page, a bracket and a score board"
-  override val permission = CharacterPermissions.DEVELOPER
+  override val role = AccountRole.DEVELOPER
 
   override suspend fun run(ctx: CommandContext) {
     ctx.session.send(

@@ -1,6 +1,6 @@
 package de.fiereu.openmmo.server.game.services.command
 
-import de.fiereu.openmmo.common.CharacterPermissions
+import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.server.game.services.StoryClientState
 import de.fiereu.openmmo.server.game.services.StoryService
 import de.fiereu.openmmo.story.generated.kanto.KantoFlags
@@ -14,7 +14,7 @@ class FlagCommand @Inject constructor(private val story: StoryService) : ChatCom
   override val name = "flag"
   override val usage = "/flag <name> [on|off], no state toggles, no name searches"
   override val description = "shows, searches or flips a story flag"
-  override val permission = CharacterPermissions.DEVELOPER
+  override val role = AccountRole.DEVELOPER
 
   override suspend fun run(ctx: CommandContext) {
     val wanted = ctx.args.firstOrNull()

@@ -48,8 +48,8 @@ tasks.named<JavaExec>("run") {
           "LOGIN_DB_USER",
           "LOGIN_DB_PASSWORD")
       .forEach { key -> env.fetchOrNull(key)?.let { environment(key, it) } }
-  // Off unless .env asks for it, the same as the game server's. setup.sh writes the flag for a
-  // fresh workbench, which is what seeds the dev accounts the test scripts log in as.
+  // Off unless .env asks for it, the same as the game server's. All db/dev holds now is the
+  // cleanup for what older checkouts seeded.
   environment("LOGIN_DB_SEED_DEV", env.fetchOrNull("LOGIN_DB_SEED_DEV") ?: "false")
 }
 

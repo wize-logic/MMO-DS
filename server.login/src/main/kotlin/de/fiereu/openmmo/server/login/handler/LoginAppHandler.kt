@@ -119,7 +119,7 @@ constructor(
     event.session.send(GameServerListPacket(catalog.list()))
   }
 
-  private fun onJoinGameServer(event: PacketEvent<JoinGameServerPacket>) {
+  private suspend fun onJoinGameServer(event: PacketEvent<JoinGameServerPacket>) {
     val entry = catalog.find(event.packet.gameServerId)
     if (entry == null) {
       log.warn { "Unknown game server id ${event.packet.gameServerId}" }
@@ -132,7 +132,11 @@ constructor(
       event.session.send(GameServerNodesPacket(LoginState.INVALID_SAVED_CREDENTIALS))
       return
     }
-    val token = tokenIssuer.issue(userId = userId.toLong())
+    // Read here rather than kept from the login, so a role granted while the player sits on the
+    // character screen lands on this join. The game server holds no user table, so this ticket is
+    // the only way it learns any of this.
+    val roles = users.rolesOf(userId)
+    val token = tokenIssuer.issue(userId = userId.toLong(), roles = roles)
     val data =
         GameServerData(
             gameServerId = entry.server.id,

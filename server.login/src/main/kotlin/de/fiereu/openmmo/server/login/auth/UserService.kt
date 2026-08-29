@@ -1,5 +1,7 @@
 package de.fiereu.openmmo.server.login.auth
 
+import de.fiereu.openmmo.common.auth.AccountRole
+import de.fiereu.openmmo.common.auth.AccountRoles
 import de.fiereu.openmmo.common.enums.LoginState
 import de.fiereu.openmmo.common.utils.toHex
 import java.security.MessageDigest
@@ -29,6 +31,21 @@ interface UserService {
 
   /** Takes the plain password and hashes it the way the client would before sending. */
   suspend fun addUser(username: String, password: String): Int
+
+  /** What this account may do. Empty for one that does not exist, same as for a plain player. */
+  suspend fun rolesOf(userId: Int): AccountRoles
+
+  /** Writes the whole set. False when there is no such account. */
+  suspend fun setRoles(userId: Int, roles: AccountRoles): Boolean
+
+  companion object {
+    /**
+     * What the first account on a server is given. Somebody has to be able to run the developer
+     * commands on a server that has nobody on it yet. Everyone after them is a plain player until
+     * an operator says otherwise.
+     */
+    val FIRST_ACCOUNT_ROLES = AccountRoles.of(AccountRole.DEVELOPER)
+  }
 }
 
 @Suppress("kotlin:S4790")
@@ -43,24 +60,29 @@ class InMemoryUserStore @Inject constructor() : UserService {
       val passwordHash: String,
       val username: String,
       val tokenEpoch: Int = 0,
+      val roles: AccountRoles = AccountRoles.NONE,
   )
 
   private val users = ConcurrentHashMap<String, UserInfo>()
   private val nextId = AtomicInteger(1)
 
-  init {
-    put("admin", "admin")
-    put("test", "test")
-  }
-
   override suspend fun hasAnyUser(): Boolean = users.isNotEmpty()
 
-  override suspend fun addUser(username: String, password: String): Int = put(username, password)
-
-  private fun put(username: String, password: String): Int {
+  override suspend fun addUser(username: String, password: String): Int {
     val id = nextId.getAndIncrement()
-    users[username.lowercase()] = UserInfo(id, PasswordHash.hash(sha1Hex(password)), username)
+    val roles = if (users.isEmpty()) UserService.FIRST_ACCOUNT_ROLES else AccountRoles.NONE
+    users[username.lowercase()] =
+        UserInfo(id, PasswordHash.hash(sha1Hex(password)), username, roles = roles)
     return id
+  }
+
+  override suspend fun rolesOf(userId: Int): AccountRoles =
+      users.values.firstOrNull { it.id == userId }?.roles ?: AccountRoles.NONE
+
+  override suspend fun setRoles(userId: Int, roles: AccountRoles): Boolean {
+    val entry = users.entries.firstOrNull { it.value.id == userId } ?: return false
+    users[entry.key] = entry.value.copy(roles = roles)
+    return true
   }
 
   override suspend fun authenticate(username: String, password: String): UserService.AuthResult {

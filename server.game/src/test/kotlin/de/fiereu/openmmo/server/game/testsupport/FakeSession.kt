@@ -5,6 +5,7 @@ import de.fiereu.network.SessionAttributes
 import de.fiereu.network.SessionContext
 import de.fiereu.network.SessionPhase
 import de.fiereu.network.Side
+import de.fiereu.openmmo.common.auth.AccountRoles
 import de.fiereu.openmmo.common.enums.Direction
 import de.fiereu.openmmo.server.game.session.PLAYER_STATE
 import de.fiereu.openmmo.server.game.session.PlayerState
@@ -41,6 +42,7 @@ class MapAttributes : SessionAttributes {
 class FakeSession(
     characterId: Long? = null,
     userId: Int = 0,
+    roles: AccountRoles = AccountRoles.NONE,
     regionId: Int = 1,
     bankId: Int = 51,
     mapId: Int = 3,
@@ -55,6 +57,7 @@ class FakeSession(
     attributes[PLAYER_STATE] =
         PlayerState(
             userId = userId,
+            roles = roles,
             characterId = characterId,
             regionId = regionId,
             bankId = bankId,

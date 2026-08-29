@@ -1,6 +1,6 @@
 package de.fiereu.openmmo.server.game.services.command
 
-import de.fiereu.openmmo.common.CharacterPermissions
+import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.server.game.services.BattleService
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -10,7 +10,7 @@ class CatchCommand @Inject constructor(private val battleService: BattleService)
   override val name = "catch"
   override val usage = "/catch"
   override val description = "throws a ball at the monster you are fighting"
-  override val permission = CharacterPermissions.DEVELOPER
+  override val role = AccountRole.DEVELOPER
 
   override suspend fun run(ctx: CommandContext) {
     if (!battleService.catchActiveWild(ctx.characterId)) {

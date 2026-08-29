@@ -19,6 +19,7 @@ class CreateAccountTest :
 
       test("a name that is already taken is refused") {
         val store = InMemoryUserStore()
+        store.addUser("admin", "hunter2")
 
         CreateAccount.create(store, "admin", "whatever") shouldBe
             CreateAccount.Outcome.Rejected("account 'admin' already exists")

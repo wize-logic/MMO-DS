@@ -13,8 +13,10 @@
 #define MMO_LOGIN_OP_GS_NODES    0x03  /* s2c */
 #define MMO_LOGIN_OP_GS_LIST     0x22  /* s2c */
 
-/* The session token is a fixed 16-byte prefix + 16-byte HMAC (SessionToken.kt). */
-#define MMO_SESSION_TOKEN_LEN 32
+/* The token is a fixed prefix plus a 16-byte HMAC (SessionToken.kt). The prefix
+ * is the userId, the time it was issued and the account's role bits, 20 bytes.
+ * The client never reads any of it; it copies the blob into JoinPacket. */
+#define MMO_SESSION_TOKEN_LEN 36
 
 /* Write the RequestGameServerList body: empty (the codec emits zero bytes). */
 void mmo_handoff_write_reqlist(mmo_wbuf *body);

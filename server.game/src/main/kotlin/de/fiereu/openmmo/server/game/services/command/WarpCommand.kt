@@ -1,6 +1,6 @@
 package de.fiereu.openmmo.server.game.services.command
 
-import de.fiereu.openmmo.common.CharacterPermissions
+import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.common.enums.Direction
 import de.fiereu.openmmo.maps.MapDef
 import de.fiereu.openmmo.maps.MapManager
@@ -22,7 +22,7 @@ constructor(
   override val name = "warp"
   override val usage = "/warp <bank> <map> [x] [y] [region]"
   override val description = "put yourself on a map by its bank and map number"
-  override val permission = CharacterPermissions.DEVELOPER
+  override val role = AccountRole.DEVELOPER
 
   override suspend fun run(ctx: CommandContext) {
     var args = ctx.args

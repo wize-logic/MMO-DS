@@ -12,7 +12,6 @@ import de.fiereu.openmmo.server.game.battle.BattleRewards
 import de.fiereu.openmmo.server.game.battle.MoveLearner
 import de.fiereu.openmmo.server.game.battle.TurnEngine
 import de.fiereu.openmmo.server.game.battle.WildMonFactory
-import de.fiereu.openmmo.server.game.config.GameServerConfig
 import de.fiereu.openmmo.server.game.script.ScriptRegistry
 import de.fiereu.openmmo.server.game.script.ScriptRunner
 import de.fiereu.openmmo.server.game.services.BattleService
@@ -156,13 +155,6 @@ fun loginService(
       WorldStateService(),
       InMemorySaveBlockRepository(),
       fieldMoveService(store, mapManager, presence),
-      GameServerConfig(
-          host = "127.0.0.1",
-          port = 0,
-          checksumSize = 2,
-          rootKeyResource = "game.private.pem",
-          sessionSecret = "a test secret".toByteArray(),
-      ),
   )
 }
 

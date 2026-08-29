@@ -1,6 +1,6 @@
 package de.fiereu.openmmo.server.game.services.command
 
-import de.fiereu.openmmo.common.CharacterPermissions
+import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.server.game.matchmaking.MatchmakingService
 import de.fiereu.openmmo.server.game.matchmaking.QueueRules
 import de.fiereu.openmmo.server.game.storage.CharacterStore
@@ -18,7 +18,7 @@ constructor(
   override val name = "queue"
   override val usage = "/queue [round|window]"
   override val description = "shows who is waiting, runs a round, or sends the window"
-  override val permission = CharacterPermissions.DEVELOPER
+  override val role = AccountRole.DEVELOPER
 
   override suspend fun run(ctx: CommandContext) {
     when (ctx.args.firstOrNull()?.lowercase()) {

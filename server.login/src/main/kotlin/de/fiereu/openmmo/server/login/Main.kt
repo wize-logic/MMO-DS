@@ -1,5 +1,7 @@
 package de.fiereu.openmmo.server.login
 
+import de.fiereu.openmmo.common.auth.AccountRole
+import de.fiereu.openmmo.common.auth.AccountRoles
 import de.fiereu.openmmo.server.login.auth.CreateAccount
 import de.fiereu.openmmo.server.login.config.ConfigLoader
 import de.fiereu.openmmo.server.login.di.DaggerLoginServerComponent
@@ -24,32 +26,95 @@ fun main(args: Array<String>) {
   component.server().start()
 }
 
+private const val CREATE_USER = "create-user"
+private const val REVOKE_TOKENS = "revoke-tokens"
+private const val SHOW_ROLES = "roles"
+private const val GRANT_ROLE = "grant-role"
+private const val REVOKE_ROLE = "revoke-role"
+
+/** How many words each verb takes, itself included. A verb that is not here is not a verb. */
+private val ARG_COUNT =
+    mapOf(
+        CREATE_USER to 3,
+        REVOKE_TOKENS to 2,
+        SHOW_ROLES to 2,
+        GRANT_ROLE to 3,
+        REVOKE_ROLE to 3,
+    )
+
 private fun runCommand(args: Array<String>) {
-  val usage = "usage: server.login [create-user <name> <password> | revoke-tokens <name>]"
-  if (args[0] !in setOf("create-user", "revoke-tokens")) {
-    System.err.println(usage)
-    exitProcess(2)
-  }
-  if ((args[0] == "create-user" && args.size != 3) ||
-      (args[0] == "revoke-tokens" && args.size != 2)) {
+  val roles = AccountRole.names()
+  val usage =
+      "usage: server.login [$CREATE_USER <name> <password> | $REVOKE_TOKENS <name> |" +
+          " $SHOW_ROLES <name> | $GRANT_ROLE <name> <$roles> | $REVOKE_ROLE <name> <$roles>]"
+  if (ARG_COUNT[args[0]] != args.size) {
     System.err.println(usage)
     exitProcess(2)
   }
   val config = ConfigLoader.load()
   val component = DaggerLoginServerComponent.factory().create(config)
   component.databaseBootstrap().migrate()
-  if (args[0] == "revoke-tokens") {
-    revokeTokens(component, args[1])
-    return
+  when (args[0]) {
+    REVOKE_TOKENS -> revokeTokens(component, args[1])
+    SHOW_ROLES -> showRoles(component, args[1])
+    GRANT_ROLE -> changeRole(component, args[1], args[2], granting = true)
+    REVOKE_ROLE -> changeRole(component, args[1], args[2], granting = false)
+    else -> createUser(component, args[1], args[2])
   }
-  when (val outcome = runBlocking { CreateAccount.create(component.users(), args[1], args[2]) }) {
+}
+
+private fun createUser(component: LoginServerComponent, username: String, password: String) {
+  when (val outcome = runBlocking { CreateAccount.create(component.users(), username, password) }) {
     is CreateAccount.Outcome.Created ->
         println("created account '${outcome.username}' as user ${outcome.userId}")
     is CreateAccount.Outcome.Rejected -> {
-      System.err.println("create-user: ${outcome.reason}")
+      System.err.println("$CREATE_USER: ${outcome.reason}")
       exitProcess(1)
     }
   }
+}
+
+/**
+ * Hand a role out, or take it back. The first account on a server is a developer; every one after
+ * it is a plain player until this is used.
+ *
+ * It takes effect on that account's next join, because the game server learns roles from the join
+ * ticket and that is signed at the moment it is asked for.
+ */
+private fun changeRole(
+    component: LoginServerComponent,
+    username: String,
+    roleName: String,
+    granting: Boolean,
+) {
+  val role = AccountRole.parse(roleName)
+  if (role == null) {
+    System.err.println("not a role: '$roleName'. One of ${AccountRole.names()}")
+    exitProcess(2)
+  }
+  val users = component.users()
+  val roles = runBlocking {
+    val id = users.getUserId(username) ?: return@runBlocking null
+    val updated = if (granting) users.rolesOf(id) + role else users.rolesOf(id) - role
+    users.setRoles(id, updated)
+    updated
+  }
+  if (roles == null) {
+    System.err.println("${if (granting) GRANT_ROLE else REVOKE_ROLE}: no account '$username'")
+    exitProcess(1)
+  }
+  println("'$username' is now: $roles")
+}
+
+/** What one account may do. */
+private fun showRoles(component: LoginServerComponent, username: String) {
+  val users = component.users()
+  val roles: AccountRoles? = runBlocking { users.getUserId(username)?.let { users.rolesOf(it) } }
+  if (roles == null) {
+    System.err.println("$SHOW_ROLES: no account called '$username'")
+    exitProcess(1)
+  }
+  println("'$username': $roles")
 }
 
 /** Sign one account out everywhere, which until the tokens became rows could not be done at all. */
@@ -59,7 +124,7 @@ private fun revokeTokens(component: LoginServerComponent, username: String) {
     if (id == null) null else component.rememberMeTokens().revokeAll(id)
   }
   if (gone == null) {
-    System.err.println("revoke-tokens: no account called '$username'")
+    System.err.println("$REVOKE_TOKENS: no account called '$username'")
     exitProcess(1)
   }
   println("revoked $gone remembered login(s) for '$username'")

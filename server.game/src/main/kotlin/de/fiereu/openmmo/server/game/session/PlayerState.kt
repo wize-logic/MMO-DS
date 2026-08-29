@@ -1,5 +1,6 @@
 package de.fiereu.openmmo.server.game.session
 
+import de.fiereu.openmmo.common.auth.AccountRoles
 import de.fiereu.openmmo.common.enums.Direction
 import de.fiereu.openmmo.maps.NpcDef
 import de.fiereu.openmmo.server.game.world.UndergroundExit
@@ -11,6 +12,11 @@ import java.util.concurrent.ConcurrentHashMap
  */
 data class PlayerState(
     val userId: Int,
+    /**
+     * What this account may do, as its join ticket stated it. Roles belong to the account, and this
+     * server has no user table of its own to ask.
+     */
+    val roles: AccountRoles = AccountRoles.NONE,
     @field:Volatile var characterId: Long? = null,
     @field:Volatile var justWarped: Boolean = false,
     @field:Volatile var facingDirection: Direction = Direction.DOWN,

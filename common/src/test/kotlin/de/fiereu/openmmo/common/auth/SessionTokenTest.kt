@@ -37,9 +37,49 @@ class SessionTokenTest :
       }
 
       test("wrong length fails verification fast") {
+        val size = SessionTokenIssuer(secret).issue(1L).bytes.size
         SessionTokenVerifier(secret).verify(ByteArray(0)) shouldBe null
-        SessionTokenVerifier(secret).verify(ByteArray(31)) shouldBe null
-        SessionTokenVerifier(secret).verify(ByteArray(33)) shouldBe null
+        SessionTokenVerifier(secret).verify(ByteArray(size - 1)) shouldBe null
+        SessionTokenVerifier(secret).verify(ByteArray(size + 1)) shouldBe null
+      }
+
+      /** The ticket is the only thing that tells the game server what an account may do. */
+      test("the roles the login server signed are the roles that come back") {
+        val roles = AccountRoles.of(AccountRole.DEVELOPER)
+
+        val token = SessionTokenIssuer(secret).issue(userId = 9L, roles = roles)
+        val verified = SessionTokenVerifier(secret).verify(token.bytes)
+
+        verified.shouldNotBeNull()
+        verified.roles shouldBe roles
+        verified.userId shouldBe 9L
+      }
+
+      test("a token issued without roles carries none") {
+        val verified =
+            SessionTokenVerifier(secret).verify(SessionTokenIssuer(secret).issue(9L).bytes)
+
+        verified.shouldNotBeNull()
+        verified.roles shouldBe AccountRoles.NONE
+      }
+
+      test("raising the role bits by hand breaks the token") {
+        val token = SessionTokenIssuer(secret).issue(userId = 9L, roles = AccountRoles.NONE)
+        val forged = token.bytes.copyOf()
+        // The role bits are the last four of the signed prefix.
+        forged[19] = (forged[19].toInt() or AccountRole.DEVELOPER.bit).toByte()
+
+        SessionTokenVerifier(secret).verify(forged) shouldBe null
+      }
+
+      test("bits no role uses do not survive a token") {
+        val token = SessionTokenIssuer(secret).issue(userId = 9L, roles = AccountRoles(-1))
+
+        val verified = SessionTokenVerifier(secret).verify(token.bytes)
+
+        verified.shouldNotBeNull()
+        verified.roles shouldBe
+            AccountRoles.of(AccountRole.MODERATOR, AccountRole.ADMIN, AccountRole.DEVELOPER)
       }
 
       test("empty secret rejected") {
@@ -100,7 +140,7 @@ class SessionTokenTest :
       }
 
       test("an unauthentic token with an out of range timestamp is rejected, not thrown") {
-        val bytes = ByteArray(32)
+        val bytes = ByteArray(SessionTokenIssuer(secret).issue(1L).bytes.size)
         java.nio.ByteBuffer.wrap(bytes).putLong(1L).putLong(Long.MAX_VALUE)
 
         SessionTokenVerifier(secret).verify(bytes) shouldBe null

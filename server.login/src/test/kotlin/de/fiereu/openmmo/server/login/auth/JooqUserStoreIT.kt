@@ -1,5 +1,7 @@
 package de.fiereu.openmmo.server.login.auth
 
+import de.fiereu.openmmo.common.auth.AccountRole
+import de.fiereu.openmmo.common.auth.AccountRoles
 import de.fiereu.openmmo.common.enums.LoginState
 import de.fiereu.openmmo.common.test.DockerAvailable
 import de.fiereu.openmmo.db.login.tables.references.USERS
@@ -59,6 +61,31 @@ class JooqUserStoreIT :
       test("the dev migration seeds no account") {
         store.getUserId("admin") shouldBe null
         store.getUserId("test") shouldBe null
+      }
+
+      /** Runs before anything else adds a row, which is the whole point. */
+      test("the first account on the server is a developer and the next one is not") {
+        val first = store.addUser("Aaron", "first")
+        val second = store.addUser("Amber", "second")
+
+        store.rolesOf(first).has(AccountRole.DEVELOPER) shouldBe true
+        store.rolesOf(second) shouldBe AccountRoles.NONE
+      }
+
+      test("a role is handed out and taken back on a live row") {
+        val id = store.addUser("Roxanne", "pw")
+
+        store.setRoles(id, AccountRoles.of(AccountRole.MODERATOR)) shouldBe true
+        store.rolesOf(id).has(AccountRole.MODERATOR) shouldBe true
+        store.rolesOf(id).has(AccountRole.ADMIN) shouldBe false
+
+        store.setRoles(id, AccountRoles.NONE) shouldBe true
+        store.rolesOf(id) shouldBe AccountRoles.NONE
+      }
+
+      test("writing roles for an account that is not there says so") {
+        store.setRoles(999_999, AccountRoles.of(AccountRole.ADMIN)) shouldBe false
+        store.rolesOf(999_999) shouldBe AccountRoles.NONE
       }
 
       test("authenticate succeeds with the hashed password") {

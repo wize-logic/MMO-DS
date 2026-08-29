@@ -1,6 +1,6 @@
 package de.fiereu.openmmo.server.game.services.command
 
-import de.fiereu.openmmo.common.CharacterPermissions
+import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.items.ItemDef
 import de.fiereu.openmmo.items.generated.Items
 import de.fiereu.openmmo.server.game.services.StoryPlayerService
@@ -12,7 +12,7 @@ class GiftCommand @Inject constructor(private val storyPlayer: StoryPlayerServic
   override val name = "gift"
   override val usage = "/gift [item] [count]"
   override val description = "gives an item by name (default: one Potion)"
-  override val permission = CharacterPermissions.DEVELOPER
+  override val role = AccountRole.DEVELOPER
 
   override suspend fun run(ctx: CommandContext) {
     val wanted = ctx.args.firstOrNull() ?: "potion"

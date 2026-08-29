@@ -41,6 +41,10 @@ class WebServerTest :
         root = Files.createTempDirectory("openmmo-web")
         Files.writeString(root.resolve("index.html"), "<h1>front page</h1>")
         store = InMemoryUserStore()
+        // Two accounts already here, so the one a test registers is neither the first id nor the
+        // first account, which is the one the server makes a developer.
+        store.addUser("admin", "an-admin-password")
+        store.addUser("test", "a-test-password")
         server =
             WebServer(
                 WebConfig(port = 0, staticRoot = root),

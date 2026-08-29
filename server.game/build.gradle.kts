@@ -43,9 +43,8 @@ tasks.named<JavaExec>("run") {
           "GAME_DB_USER",
           "GAME_DB_PASSWORD")
       .forEach { key -> env.fetchOrNull(key)?.let { environment(key, it) } }
-  // Off unless .env asks for it. This used to default on, so `gradlew :server.game:run` handed
-  // every character it created the developer commands, permanently and with no way to take them
-  // back. setup.sh writes the flag for a fresh workbench; nothing else turns it on by itself.
+  // Off unless .env asks for it. All db/dev holds now is the cleanup for what older checkouts
+  // seeded, so this creates nothing and grants nothing.
   environment("GAME_DB_SEED_DEV", env.fetchOrNull("GAME_DB_SEED_DEV") ?: "false")
 }
 

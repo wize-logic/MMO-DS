@@ -1,6 +1,6 @@
 package de.fiereu.openmmo.server.game.services.command
 
-import de.fiereu.openmmo.common.CharacterPermissions
+import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.server.game.services.BattleService
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -16,7 +16,7 @@ class TestBattleCommand @Inject constructor(private val battleService: BattleSer
   override val name = "testbattle"
   override val usage = "/testbattle [dexId] [level]"
   override val description = "starts a wild battle against the given species"
-  override val permission = CharacterPermissions.DEVELOPER
+  override val role = AccountRole.DEVELOPER
 
   override suspend fun run(ctx: CommandContext) {
     val dexId = ctx.args.getOrNull(0)?.toIntOrNull() ?: DEFAULT_WILD_DEX

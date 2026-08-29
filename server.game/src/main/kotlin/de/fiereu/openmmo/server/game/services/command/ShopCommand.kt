@@ -1,6 +1,6 @@
 package de.fiereu.openmmo.server.game.services.command
 
-import de.fiereu.openmmo.common.CharacterPermissions
+import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.items.generated.Items
 import de.fiereu.openmmo.server.game.services.ShopService
 import javax.inject.Inject
@@ -11,7 +11,7 @@ class ShopCommand @Inject constructor(private val shopService: ShopService) : Ch
   override val name = "shop"
   override val usage = "/shop"
   override val description = "opens a mart on this tile"
-  override val permission = CharacterPermissions.DEVELOPER
+  override val role = AccountRole.DEVELOPER
 
   override suspend fun run(ctx: CommandContext) {
     shopService.open(

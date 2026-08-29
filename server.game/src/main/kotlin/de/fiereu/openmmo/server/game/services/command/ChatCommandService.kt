@@ -1,7 +1,7 @@
 package de.fiereu.openmmo.server.game.services.command
 
 import de.fiereu.network.SessionContext
-import de.fiereu.openmmo.common.hasPermission
+import de.fiereu.openmmo.common.auth.AccountRoles
 import de.fiereu.openmmo.server.game.services.notice
 import de.fiereu.openmmo.server.game.session.PLAYER_STATE
 import de.fiereu.openmmo.server.game.storage.CharacterStore
@@ -42,11 +42,14 @@ constructor(
       return true
     }
 
+    // Answered by the account's roles, which arrived signed in the join ticket, not by anything
+    // the character carries.
     val command = commands[name]
-    if (command == null || !character.info.hasPermission(command.permission)) {
+    if (command == null || !state.roles.allow(command)) {
       if (command != null) {
-        log.info { "char=${character.info.id} may not run /$name" }
+        log.info { "user=${state.userId} (${state.roles}) may not run /$name" }
       }
+      // The same answer either way, so nobody can map out the commands they do not have.
       session.send(notice("Unknown command: $name. Try /help."))
       return true
     }
@@ -57,7 +60,7 @@ constructor(
             state = state,
             character = character,
             args = parts.drop(1),
-            commands = commands.values.filter { character.info.hasPermission(it.permission) },
+            commands = commands.values.filter { state.roles.allow(it) },
         )
     try {
       command.run(ctx)
@@ -67,4 +70,9 @@ constructor(
     }
     return true
   }
+}
+
+private fun AccountRoles.allow(command: ChatCommand): Boolean {
+  val needed = command.role ?: return true
+  return has(needed)
 }

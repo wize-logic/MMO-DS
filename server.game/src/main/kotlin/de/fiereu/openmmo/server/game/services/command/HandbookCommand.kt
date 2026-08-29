@@ -1,6 +1,6 @@
 package de.fiereu.openmmo.server.game.services.command
 
-import de.fiereu.openmmo.common.CharacterPermissions
+import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.maps.MapDef
 import de.fiereu.openmmo.maps.MapManager
 import javax.inject.Inject
@@ -12,7 +12,7 @@ class HandbookCommand @Inject constructor(private val mapManager: MapManager) : 
   override val name = "handbook"
   override val usage = "/handbook [what], try a place name, or 'commands'"
   override val description = "the GM handbook: search every map by name, or list what you can run"
-  override val permission = CharacterPermissions.DEVELOPER
+  override val role = AccountRole.DEVELOPER
 
   override suspend fun run(ctx: CommandContext) {
     when (val what = ctx.args.firstOrNull()?.lowercase()) {

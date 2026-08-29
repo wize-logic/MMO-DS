@@ -1,22 +1,25 @@
 package de.fiereu.openmmo.server.login.auth
 
+import de.fiereu.openmmo.common.auth.AccountRole
+import de.fiereu.openmmo.common.auth.AccountRoles
 import de.fiereu.openmmo.common.enums.LoginState
 import de.fiereu.openmmo.common.utils.toHex
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
-import io.kotest.matchers.shouldNotBe
 import java.time.Duration
 
 class InMemoryUserStoreTest :
     FunSpec({
-      test("seeds the admin and test users") {
+      test("a new store holds no account at all") {
         val store = InMemoryUserStore()
-        store.getUserId("admin") shouldNotBe null
-        store.getUserId("test") shouldNotBe null
+        store.hasAnyUser() shouldBe false
+        store.getUserId("admin") shouldBe null
+        store.getUserId("test") shouldBe null
       }
 
       test("authenticate succeeds when password hash matches SHA-1 hex") {
         val store = InMemoryUserStore()
+        store.addUser("admin", "admin")
         val sha1Hex = sha1HexOf("admin")
         val result = store.authenticate("admin", sha1Hex)
         result.state shouldBe LoginState.AUTHED
@@ -25,6 +28,7 @@ class InMemoryUserStoreTest :
 
       test("authenticate is case-insensitive on username") {
         val store = InMemoryUserStore()
+        store.addUser("test", "test")
         val sha1Hex = sha1HexOf("test")
         val result = store.authenticate("TEST", sha1Hex)
         result.state shouldBe LoginState.AUTHED
@@ -37,6 +41,7 @@ class InMemoryUserStoreTest :
 
       test("authenticate fails for wrong password") {
         val store = InMemoryUserStore()
+        store.addUser("admin", "admin")
         store.authenticate("admin", "wrong").state shouldBe LoginState.INVALID_PASSWORD
       }
 
@@ -45,6 +50,47 @@ class InMemoryUserStoreTest :
         val a = store.addUser("alice", "pw")
         val b = store.addUser("bob", "pw")
         (b > a) shouldBe true
+      }
+
+      test("the first account is a developer and every one after it is not") {
+        val store = InMemoryUserStore()
+
+        val first = store.addUser("alice", "pw")
+        val second = store.addUser("bob", "pw")
+
+        store.rolesOf(first).has(AccountRole.DEVELOPER) shouldBe true
+        store.rolesOf(second) shouldBe AccountRoles.NONE
+      }
+
+      test("a developer reaches every role below it") {
+        val store = InMemoryUserStore()
+        val first = store.addUser("alice", "pw")
+
+        val roles = store.rolesOf(first)
+
+        roles.has(AccountRole.ADMIN) shouldBe true
+        roles.has(AccountRole.MODERATOR) shouldBe true
+      }
+
+      test("roles are handed out and taken back one at a time") {
+        val store = InMemoryUserStore()
+        store.addUser("alice", "pw")
+        val id = store.addUser("bob", "pw")
+
+        store.setRoles(id, AccountRoles.of(AccountRole.MODERATOR)) shouldBe true
+        store.rolesOf(id).has(AccountRole.MODERATOR) shouldBe true
+        store.rolesOf(id).has(AccountRole.ADMIN) shouldBe false
+
+        store.setRoles(id, store.rolesOf(id) - AccountRole.MODERATOR) shouldBe true
+        store.rolesOf(id) shouldBe AccountRoles.NONE
+      }
+
+      test("setRoles reports that an account it cannot find was not written") {
+        InMemoryUserStore().setRoles(404, AccountRoles.of(AccountRole.ADMIN)) shouldBe false
+      }
+
+      test("an account nobody has heard of has no roles rather than failing") {
+        InMemoryUserStore().rolesOf(404) shouldBe AccountRoles.NONE
       }
     })
 
