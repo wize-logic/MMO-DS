@@ -123,6 +123,47 @@ Then, with the servers up:
 ./play.sh --menu       # open the front door instead
 ```
 
+### The other three toolchains
+
+The same client, retargeted. Each is `mmo/Makefile` with only what genuinely
+differs set, and each drives the engine's matching makefile for its fused half.
+
+**Android**, `armeabi-v7a`, for a handheld running stock Android:
+
+```bash
+make -f Makefile.android status     # build/android/libopenmmo.so
+make -f Makefile.android programs   # build it and read its ABI back out
+make -f Makefile.android apk        # package it
+make -f Makefile.android apk-live   # package it pinned to a live server
+```
+
+It wants an NDK, r27c by default under `~/.local/opt/android-ndk-r27c`; set
+`NDK=` for another. `ANDROID_API` is a floor, 26. The makefile itself compiles
+only C, no Java and no Gradle; packaging an APK additionally needs `aapt2`,
+`zipalign` and `apksigner` from an SDK. `apk-live` reads the release pin out of
+`mmo/dist.sh`, so it refuses rather than shipping an APK that dials nowhere.
+`mmo/android` holds the app around it: the manifest, the activity, the launcher
+icons, the SDL shim and the front door. The engine's own Android build is
+`pc/Makefile.android` in the engine submodule.
+
+**Windows**, via mingw:
+
+```bash
+make -f Makefile.win winlibs        # fetch and build SDL2, raylib, freetype, once
+make -f Makefile.win programs
+```
+
+Wants `i686-w64-mingw32`.
+
+**32-bit ARM**, for a device or for qemu:
+
+```bash
+make -f Makefile.arm status
+make -f Makefile.arm run ARGS='--help'   # run it here, under qemu-arm
+```
+
+Wants `arm-linux-gnueabihf`.
+
 You supply your own game image. The launcher looks for one and says so when
 it cannot find it. Nothing here ships game data.
 
@@ -147,6 +188,7 @@ first if you want those covered.
 | `keys` | key generation for signing |
 | `launcher` | the launcher that provisions a client |
 | `mmo` | the C client, viewer and front door |
+| `mmo/android` | the Android app around it |
 | `engine` | the engine the client is fused with |
 | `decomp` | where the upstream data trees go |
 | `web` | the public site and the registration form |
