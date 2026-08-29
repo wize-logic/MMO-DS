@@ -14,7 +14,12 @@ fun main(args: Array<String>) {
   val config = ConfigLoader.load()
   val component = DaggerLoginServerComponent.factory().create(config)
   component.databaseBootstrap().migrate()
-  runBlocking { component.adminAccountBootstrap().ensureAdmin() }
+  runBlocking {
+    // After the migrations, so the dev seed's cleanup still matches the rows it names by their old
+    // hash, and before the port opens, so nothing serves a table that is still its own credential.
+    component.userUpgrade().upgradeLegacyHashes()
+    component.adminAccountBootstrap().ensureAdmin()
+  }
   component.server().start()
 }
 

@@ -2,9 +2,12 @@ package de.fiereu.openmmo.server.login.auth
 
 import de.fiereu.openmmo.common.enums.LoginState
 import de.fiereu.openmmo.common.test.DockerAvailable
+import de.fiereu.openmmo.db.login.tables.references.USERS
 import io.kotest.core.annotation.EnabledIf
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import kotlinx.coroutines.Dispatchers
 import org.flywaydb.core.Flyway
 import org.jooq.impl.DSL
@@ -15,6 +18,22 @@ class JooqUserStoreIT :
     FunSpec({
       val container = PostgreSQLContainer<Nothing>("postgres:18")
       lateinit var store: JooqUserStore
+      lateinit var db: org.jooq.DSLContext
+
+      /** What is actually in the column, which is the thing these tests are about. */
+      fun storedHashOf(username: String): String =
+          db.select(USERS.PASSWORD_HASH)
+              .from(USERS)
+              .where(USERS.USERNAME.eq(username))
+              .fetchSingle(USERS.PASSWORD_HASH)!!
+
+      /** Put a row back into the shape this server used to write, to test the way out of it. */
+      fun setStoredHash(username: String, value: String) {
+        db.update(USERS)
+            .set(USERS.PASSWORD_HASH, value)
+            .where(USERS.USERNAME.eq(username))
+            .execute()
+      }
 
       beforeSpec {
         container.start()
@@ -23,8 +42,8 @@ class JooqUserStoreIT :
             .locations("classpath:db/migration", "classpath:db/dev")
             .load()
             .migrate()
-        val dsl = DSL.using(container.jdbcUrl, container.username, container.password)
-        store = JooqUserStore(dsl, Dispatchers.IO)
+        db = DSL.using(container.jdbcUrl, container.username, container.password)
+        store = JooqUserStore(db, Dispatchers.IO)
       }
 
       afterSpec { container.stop() }
@@ -53,6 +72,49 @@ class JooqUserStoreIT :
 
       test("authenticate fails for an unknown user") {
         store.authenticate("nobody", sha1Hex("pw")).state shouldBe LoginState.INVALID_PASSWORD
+      }
+
+      /**
+       * The point of the change. The client sends a SHA-1 and this used to be what the row held, so
+       * the column was the credential and reading the table was logging in as everybody.
+       */
+      test("the stored row is not the value the client sends") {
+        store.addUser("Erika", "grass")
+        val stored = storedHashOf("erika")
+
+        stored shouldNotBe sha1Hex("grass")
+        stored.startsWith("pbkdf2-sha256$") shouldBe true
+        store.authenticate("erika", sha1Hex("grass")).state shouldBe LoginState.AUTHED
+      }
+
+      test("two accounts with the same password do not share a row") {
+        store.addUser("Falkner", "same")
+        store.addUser("Bugsy", "same")
+
+        storedHashOf("falkner") shouldNotBe storedHashOf("bugsy")
+      }
+
+      /** An account written before this still works, and is rewritten the moment it is used. */
+      test("a row left in the old shape authenticates once and is upgraded") {
+        val id = store.addUser("Giovanni", "rockets")
+        setStoredHash("giovanni", sha1Hex("rockets"))
+
+        val result = store.authenticate("giovanni", sha1Hex("rockets"))
+
+        result.state shouldBe LoginState.AUTHED
+        result.userId shouldBe id
+        storedHashOf("giovanni") shouldNotBe sha1Hex("rockets")
+      }
+
+      /** The rows nobody signs into are the ones a dump is read from. */
+      test("the startup sweep rewrites accounts nobody has logged into") {
+        store.addUser("Sabrina", "psychic")
+        setStoredHash("sabrina", sha1Hex("psychic"))
+
+        store.upgradeLegacyHashes() shouldBeGreaterThan 0
+
+        storedHashOf("sabrina") shouldNotBe sha1Hex("psychic")
+        store.authenticate("sabrina", sha1Hex("psychic")).state shouldBe LoginState.AUTHED
       }
 
       test("addUser returns the generated id and getUserId finds it") {

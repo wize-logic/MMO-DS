@@ -59,14 +59,14 @@ class InMemoryUserStore @Inject constructor() : UserService {
 
   private fun put(username: String, password: String): Int {
     val id = nextId.getAndIncrement()
-    users[username.lowercase()] = UserInfo(id, sha1Hex(password), username)
+    users[username.lowercase()] = UserInfo(id, PasswordHash.hash(sha1Hex(password)), username)
     return id
   }
 
   override suspend fun authenticate(username: String, password: String): UserService.AuthResult {
     val user =
         users[username.lowercase()] ?: return UserService.AuthResult(LoginState.INVALID_PASSWORD)
-    if (!samePassword(user.passwordHash, password)) {
+    if (!PasswordHash.verify(user.passwordHash, password)) {
       return UserService.AuthResult(LoginState.INVALID_PASSWORD)
     }
     return UserService.AuthResult(LoginState.AUTHED, user.id, user.tokenEpoch)
