@@ -253,10 +253,11 @@ else
     # Local databases nobody else reaches, but changeMe! should not outlive setup.
     sed -i "s|^LOGIN_DB_PASSWORD=.*|LOGIN_DB_PASSWORD=$(openssl rand -hex 16)|" .env
     sed -i "s|^GAME_DB_PASSWORD=.*|GAME_DB_PASSWORD=$(openssl rand -hex 16)|" .env
-    # start-server.sh runs login through the gradle run task, which forces the
-    # dev seed on, but game from its installed distribution, which reads this
-    # and nothing else. Without it one side has accounts and the other has no
-    # characters to log into.
+    # A fresh checkout is a workbench, so both sides get the dev seed: login for the accounts the
+    # test scripts log in as, game for the developer commands. Neither is on anywhere else, so
+    # this file is the only thing that turns them on and a deployment that never runs setup.sh
+    # never has them. Comment them out again before letting anyone else reach this machine.
+    sed -i "s|^#LOGIN_DB_SEED_DEV=true|LOGIN_DB_SEED_DEV=true|" .env
     sed -i "s|^#GAME_DB_SEED_DEV=true|GAME_DB_SEED_DEV=true|" .env
 fi
 

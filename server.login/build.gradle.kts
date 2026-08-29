@@ -48,7 +48,9 @@ tasks.named<JavaExec>("run") {
           "LOGIN_DB_USER",
           "LOGIN_DB_PASSWORD")
       .forEach { key -> env.fetchOrNull(key)?.let { environment(key, it) } }
-  environment("LOGIN_DB_SEED_DEV", env.fetchOrNull("LOGIN_DB_SEED_DEV") ?: "true")
+  // Off unless .env asks for it, the same as the game server's. setup.sh writes the flag for a
+  // fresh workbench, which is what seeds the dev accounts the test scripts log in as.
+  environment("LOGIN_DB_SEED_DEV", env.fetchOrNull("LOGIN_DB_SEED_DEV") ?: "false")
 }
 
 listOf("classes", "processResources").forEach { taskName ->
