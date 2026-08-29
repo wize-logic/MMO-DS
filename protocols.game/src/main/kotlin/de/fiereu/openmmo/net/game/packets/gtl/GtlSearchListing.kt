@@ -20,9 +20,9 @@ sealed interface GtlSearchListing {
 }
 
 /**
- * The tail an OWN_LISTINGS row carries (ours; no captures of a non-empty own page
- * exists, and the write path always self-described, the design notes): where the listing stands,
- * how many units are still up, and how many sold units await Claim.
+ * The tail an OWN_LISTINGS row carries (ours; no captures of a non-empty own page exists, and the
+ * write path always self-described, the design notes): where the listing stands, how many units are
+ * still up, and how many sold units await Claim.
  */
 data class GtlOwnInfo(val state: Byte, val remaining: Short, val unclaimedUnits: Short)
 

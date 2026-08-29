@@ -19,8 +19,8 @@ class ItemDef(
     get() = useClass == USE_CLASS_BALL
 
   /**
-   * Restores hp outside and inside battle. `amount` is the table's heal; 255 means the whole
-   * bar (Max Potion, Full Restore).
+   * Restores hp outside and inside battle. `amount` is the table's heal; 255 means the whole bar
+   * (Max Potion, Full Restore).
    */
   val healsHp: Boolean
     get() = fieldUse == FIELD_USE_MEDICINE && amount > 0
@@ -34,9 +34,9 @@ class ItemDef(
     const val HOLD_EFFECT_NONE = 0
 
     /**
-     * The DS decomp names its hold effects and the Gen 5 table the item catalogue is built
-     * from numbers them, and the two are the same numbering: over the 445 items both tables
-     * carry, every one of them agrees.
+     * The DS decomp names its hold effects and the Gen 5 table the item catalogue is built from
+     * numbers them, and the two are the same numbering: over the 445 items both tables carry, every
+     * one of them agrees.
      */
     const val HOLD_EFFECT_NO_EVOLVE = 64
 

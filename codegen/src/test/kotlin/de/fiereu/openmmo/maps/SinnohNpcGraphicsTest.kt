@@ -5,8 +5,8 @@ import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 
 /**
- * A Sinnoh object event names its sprite as an `OBJ_EVENT_GFX_*` constant, and the client
- * indexes its own table by the number behind it.
+ * A Sinnoh object event names its sprite as an `OBJ_EVENT_GFX_*` constant, and the client indexes
+ * its own table by the number behind it.
  */
 class SinnohNpcGraphicsTest :
     FunSpec({
@@ -24,9 +24,9 @@ class SinnohNpcGraphicsTest :
       }
 
       /**
-       * The generator resolves every name it reads or fails, so the sweep is the claim that
-       * nothing fell back. A player graphic belongs to the avatar the client draws itself, so
-       * an object event carrying one is a name that did not resolve.
+       * The generator resolves every name it reads or fails, so the sweep is the claim that nothing
+       * fell back. A player graphic belongs to the avatar the client draws itself, so an object
+       * event carrying one is a name that did not resolve.
        */
       test("Sinnoh draws its people with 172 sprites and none of them a player") {
         drawn.size shouldBe 172

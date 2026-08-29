@@ -32,9 +32,7 @@ class TierRegistry @Inject constructor() {
   fun groupsOf(dexId: Int, form: Int = 0): Set<TierGroup> =
       rows[TierKey(dexId, form)] ?: rows[TierKey(dexId, ANY_FORM)] ?: UNTIERED
 
-  /**
-   * The strictest group this species sits in, which is the one that decides what it may enter.
-   */
+  /** The strictest group this species sits in, which is the one that decides what it may enter. */
   fun strictestGroup(dexId: Int, form: Int = 0): TierGroup =
       groupsOf(dexId, form).minByOrNull { it.id.toInt() } ?: TierGroup.UNTIERED
 

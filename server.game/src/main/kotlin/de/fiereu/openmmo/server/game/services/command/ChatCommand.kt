@@ -31,9 +31,9 @@ class CommandContext(
     get() = character.info.id
 
   /**
-   * A notice, in as many messages as it needs. The client keeps 128 bytes of a chat line and
-   * drops the rest on the floor, so one long answer used to arrive cut mid-word with no sign
-   * anything was missing.
+   * A notice, in as many messages as it needs. The client keeps 128 bytes of a chat line and drops
+   * the rest on the floor, so one long answer used to arrive cut mid-word with no sign anything was
+   * missing.
    */
   fun reply(message: String) {
     var rest = message

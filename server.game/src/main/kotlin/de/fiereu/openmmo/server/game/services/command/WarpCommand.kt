@@ -183,8 +183,8 @@ constructor(
   }
 
   /**
-   * A tile to land on when none was named: the one nearest the middle of the map that is part
-   * of the largest place a player can walk.
+   * A tile to land on when none was named: the one nearest the middle of the map that is part of
+   * the largest place a player can walk.
    */
   private fun middleOfTheLargestWalkableRegion(map: MapDef): Pair<Int, Int>? {
     val terrain = map.terrain ?: return null

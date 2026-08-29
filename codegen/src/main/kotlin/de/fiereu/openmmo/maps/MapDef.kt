@@ -13,9 +13,9 @@ import java.util.Base64
 
 class MapDef(
     /**
-     * What the decomp calls this map, lowercased: `jubilife_city_pokecenter_1f`. It is the
-     * only human name a map has here, the wire carries a bank and a map number and nothing
-     * else, so it is what /handbook searches and what /warp accepts instead of two numbers.
+     * What the decomp calls this map, lowercased: `jubilife_city_pokecenter_1f`. It is the only
+     * human name a map has here, the wire carries a bank and a map number and nothing else, so it
+     * is what /handbook searches and what /warp accepts instead of two numbers.
      */
     val name: String = "",
     val regionId: Byte,

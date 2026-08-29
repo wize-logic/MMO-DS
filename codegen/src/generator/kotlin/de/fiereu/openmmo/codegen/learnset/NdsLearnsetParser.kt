@@ -9,8 +9,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * Reads the level up learnsets out of the DS decomp's per species data, beside the species
- * table itself.
+ * Reads the level up learnsets out of the DS decomp's per species data, beside the species table
+ * itself.
  */
 class NdsLearnsetParser(private val rootDir: File) {
 

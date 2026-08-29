@@ -4,7 +4,9 @@ import com.github.maltalex.ineter.base.IPAddress
 import com.github.maltalex.ineter.base.IPv4Address
 import com.github.maltalex.ineter.base.IPv6Address
 
-/** The official client sends loopback for [localAddress] and [localHostname] whatever the nodes are. */
+/**
+ * The official client sends loopback for [localAddress] and [localHostname] whatever the nodes are.
+ */
 data class GameServerEndpointConfig(
     val ipv4Address: IPv4Address = IPv4Address.of("127.0.0.1"),
     val ipv6Address: IPv6Address = IPv6Address.of("::1"),

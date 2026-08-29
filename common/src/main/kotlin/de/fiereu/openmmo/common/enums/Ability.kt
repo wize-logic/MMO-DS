@@ -1,8 +1,8 @@
 package de.fiereu.openmmo.common.enums
 
 /**
- * The abilities of the generation this server hosts, in the game's own order: an ability's
- * ordinal here is its id there.
+ * The abilities of the generation this server hosts, in the game's own order: an ability's ordinal
+ * here is its id there.
  */
 enum class Ability {
   NONE,

@@ -14,9 +14,9 @@ import de.fiereu.bytecodec.Utf16LeNullTerminated
 import de.fiereu.bytecodec.WriteBuffer
 
 /**
- * the official client `the official client`: a present byte, then the sent-box flag, then `the official client(sent, true)`, the
- * list row plus the body and a U8 attachment count. Attachments are not seated; a non-zero
- * count is refused rather than guessed.
+ * the official client `the official client`: a present byte, then the sent-box flag, then `the
+ * official client(sent, true)`, the list row plus the body and a U8 attachment count. Attachments
+ * are not seated; a non-zero count is refused rather than guessed.
  */
 data class MailDetail(
     val mailId: Long,

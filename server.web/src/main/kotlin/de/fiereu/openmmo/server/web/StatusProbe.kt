@@ -6,9 +6,8 @@ import java.net.Socket
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Whether the login and game servers are accepting connections, for the panel on the front
- * page. A TCP handshake is the whole test: neither protocol says anything before the client
- * does.
+ * Whether the login and game servers are accepting connections, for the panel on the front page. A
+ * TCP handshake is the whole test: neither protocol says anything before the client does.
  */
 class StatusProbe(
     private val loginHost: String,

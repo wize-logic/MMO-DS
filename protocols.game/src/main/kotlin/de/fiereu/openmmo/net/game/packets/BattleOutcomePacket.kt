@@ -14,9 +14,9 @@ data class BattleOutcomeMon(
     val hp: Int,
     val moves: List<BattleOutcomeMove>,
     /**
-     * What a contest or a Poffin left on this monster. A battle leaves all three exactly as
-     * they were seated, so the client sends what the engine currently holds on every report
-     * rather than trying to say which scene ran.
+     * What a contest or a Poffin left on this monster. A battle leaves all three exactly as they
+     * were seated, so the client sends what the engine currently holds on every report rather than
+     * trying to say which scene ran.
      */
     val conditions: ContestConditions = ContestConditions.NONE,
     val sheen: Int = 0,

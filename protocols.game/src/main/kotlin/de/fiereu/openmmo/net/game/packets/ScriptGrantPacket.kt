@@ -2,10 +2,7 @@ package de.fiereu.openmmo.net.game.packets
 
 import de.fiereu.bytecodec.*
 
-/**
- * A local script gave the player a Pokemon, or a ball caught one, and this is the record of
- * it.
- */
+/** A local script gave the player a Pokemon, or a ball caught one, and this is the record of it. */
 data class ScriptGrantPacket(
     val dexId: Int,
     val level: Int,

@@ -1,9 +1,9 @@
 package de.fiereu.openmmo.server.game.services.command
 
 /**
- * Splits a command line into arguments. Runs of whitespace separate arguments, double quotes
- * group words into one argument (`give "Great Ball" 5` -> `give`, `Great Ball`, `5`), and a
- * backslash escapes the next character inside quotes.
+ * Splits a command line into arguments. Runs of whitespace separate arguments, double quotes group
+ * words into one argument (`give "Great Ball" 5` -> `give`, `Great Ball`, `5`), and a backslash
+ * escapes the next character inside quotes.
  */
 internal fun tokenizeCommandLine(line: String): List<String> {
   val args = mutableListOf<String>()

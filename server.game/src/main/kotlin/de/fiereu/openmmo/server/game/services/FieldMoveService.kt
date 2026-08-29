@@ -31,8 +31,8 @@ constructor(
 
   /**
    * Mount or dismount, telling the player and everyone watching them. Both need it: the packet
-   * carries an entity id, and the client that receives it about itself is the one that changes
-   * its own avatar (`tS1.D40` branches on whether the id is the session's own).
+   * carries an entity id, and the client that receives it about itself is the one that changes its
+   * own avatar (`tS1.D40` branches on whether the id is the session's own).
    */
   fun setSurfing(session: SessionContext, state: PlayerState, surfing: Boolean) {
     if (state.isSurfing == surfing) return
@@ -48,8 +48,7 @@ constructor(
   }
 
   /**
-   * What the player is riding where they are standing, which is whatever the tile under them
-   * says.
+   * What the player is riding where they are standing, which is whatever the tile under them says.
    */
   fun restoreFromTile(state: PlayerState) {
     val map = currentMap(state) ?: return
@@ -68,9 +67,9 @@ constructor(
       setStrength(session, state, true)
 
   /**
-   * Forget Strength and this visit's boulder positions. The decomp clears
-   * `FLAG_STRENGTH_ACTIVE` on every map change (`field_map_change_flags.c`) and reloads
-   * objects from the map, so a push never survives a door.
+   * Forget Strength and this visit's boulder positions. The decomp clears `FLAG_STRENGTH_ACTIVE` on
+   * every map change (`field_map_change_flags.c`) and reloads objects from the map, so a push never
+   * survives a door.
    */
   fun onMapChange(session: SessionContext, state: PlayerState) {
     if (state.strengthActive) setStrength(session, state, false)
@@ -84,9 +83,8 @@ constructor(
       }
 
   /**
-   * Slide the boulder on [toX], [toY] one tile along [into] if Strength is on and that tile
-   * can hold it. The player stays put: the decomp's push is walk-on-spot, not a step onto the
-   * rock.
+   * Slide the boulder on [toX], [toY] one tile along [into] if Strength is on and that tile can
+   * hold it. The player stays put: the decomp's push is walk-on-spot, not a step onto the rock.
    */
   fun tryPushBoulder(
       session: SessionContext,
@@ -134,8 +132,8 @@ constructor(
   }
 
   /**
-   * The decomp's `UseWaterfall`: the player climbs the run of waterfall tiles ahead and lands
-   * on the water above it.
+   * The decomp's `UseWaterfall`: the player climbs the run of waterfall tiles ahead and lands on
+   * the water above it.
    */
   suspend fun useWaterfall(session: SessionContext, state: PlayerState) =
       ride(session, state, TileBehavior.WATERFALL)
@@ -144,9 +142,7 @@ constructor(
   suspend fun useRockClimb(session: SessionContext, state: PlayerState) =
       ride(session, state, TileBehavior.ROCK_CLIMB_NORTH_SOUTH, TileBehavior.ROCK_CLIMB_EAST_WEST)
 
-  /**
-   * Walk the whole run of [over] tiles ahead of the player and one more onto what follows it.
-   */
+  /** Walk the whole run of [over] tiles ahead of the player and one more onto what follows it. */
   private suspend fun ride(
       session: SessionContext,
       state: PlayerState,

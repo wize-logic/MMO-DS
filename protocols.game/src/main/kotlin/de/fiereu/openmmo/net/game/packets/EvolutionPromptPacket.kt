@@ -7,9 +7,9 @@ import de.fiereu.bytecodec.S16LE
 import de.fiereu.bytecodec.S64LE
 
 /**
- * A monster the server has decided is evolving. [species] is the National Dex id it becomes,
- * and [cancelable] is whether the player is allowed to stop it, the client hides its cancel
- * button without it, and closing the screen on one then counts as accepting.
+ * A monster the server has decided is evolving. [species] is the National Dex id it becomes, and
+ * [cancelable] is whether the player is allowed to stop it, the client hides its cancel button
+ * without it, and closing the screen on one then counts as accepting.
  */
 data class EvolutionPromptPacket(
     val pokemonEntityId: Long,

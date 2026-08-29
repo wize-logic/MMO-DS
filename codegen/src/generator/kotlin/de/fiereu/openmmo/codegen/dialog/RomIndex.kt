@@ -3,9 +3,9 @@ package de.fiereu.openmmo.codegen.dialog
 import java.io.File
 
 /**
- * A GBA ROM located by its header game code, used to resolve a text's file offset. The
- * ROM is byte-identical to the pret decomp, so the offset of an encoded string is the value
- * the official client packs into a dialog textId.
+ * A GBA ROM located by its header game code, used to resolve a text's file offset. The ROM is
+ * byte-identical to the pret decomp, so the offset of an encoded string is the value the official
+ * client packs into a dialog textId.
  */
 class RomIndex private constructor(private val latin1: String) {
 

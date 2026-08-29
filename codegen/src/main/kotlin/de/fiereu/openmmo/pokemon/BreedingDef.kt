@@ -4,9 +4,9 @@ import de.fiereu.openmmo.common.enums.EggGroup
 import de.fiereu.openmmo.common.enums.MonsterGender
 
 /**
- * What a species contributes to breeding. [offspringSpeciesId] is the species its egg hatches
- * into before any of the special cases, which for most of them is itself; [hatchCycles] is the
- * number of egg cycles, not steps.
+ * What a species contributes to breeding. [offspringSpeciesId] is the species its egg hatches into
+ * before any of the special cases, which for most of them is itself; [hatchCycles] is the number of
+ * egg cycles, not steps.
  */
 data class BreedingDef(
     val offspringSpeciesId: Int,

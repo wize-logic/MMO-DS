@@ -3,8 +3,8 @@ package de.fiereu.openmmo.codegen.maps
 import java.io.File
 
 /**
- * The DS decomp's map header table, read the two ways anything here needs it: the enum whose
- * line order is the header id, and the fields each header row carries.
+ * The DS decomp's map header table, read the two ways anything here needs it: the enum whose line
+ * order is the header id, and the fields each header row carries.
  */
 object PlatinumHeaders {
 

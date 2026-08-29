@@ -1,9 +1,9 @@
 package de.fiereu.openmmo.server.game.world.interest
 
 /**
- * Identifies an interest group a session can belong to. A session may be in several groups at
- * once (its map, its guild, a battle) so the same manager can drive overworld presence, guild
- * chat, or battle updates.
+ * Identifies an interest group a session can belong to. A session may be in several groups at once
+ * (its map, its guild, a battle) so the same manager can drive overworld presence, guild chat, or
+ * battle updates.
  */
 sealed interface InterestKey
 

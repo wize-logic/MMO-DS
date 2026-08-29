@@ -3,8 +3,8 @@ package de.fiereu.openmmo.server.game.script
 import de.fiereu.openmmo.common.enums.Direction
 
 /**
- * One step of an applymovement sequence: either a walk one tile in [direction] or a turn in
- * place to face [direction].
+ * One step of an applymovement sequence: either a walk one tile in [direction] or a turn in place
+ * to face [direction].
  */
 enum class MovementStep(
     val direction: Direction,

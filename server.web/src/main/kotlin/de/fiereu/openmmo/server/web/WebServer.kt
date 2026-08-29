@@ -13,9 +13,9 @@ import kotlinx.coroutines.runBlocking
 private val log = KotlinLogging.logger {}
 
 /**
- * The website's dynamic half: a registration form target and a status endpoint, on loopback
- * behind apache. It renders whole pages rather than answering with json, so registering works
- * in a browser with no script running at all.
+ * The website's dynamic half: a registration form target and a status endpoint, on loopback behind
+ * apache. It renders whole pages rather than answering with json, so registering works in a browser
+ * with no script running at all.
  */
 class WebServer(
     private val config: WebConfig,
@@ -113,9 +113,9 @@ class WebServer(
   }
 
   /**
-   * Caps how long one request may take to arrive and to be read back. The default is no cap at
-   * all, so a caller that opens a connection and then dribbles a byte a minute keeps a worker
-   * thread for as long as it likes; eight of those and nothing else is served.
+   * Caps how long one request may take to arrive and to be read back. The default is no cap at all,
+   * so a caller that opens a connection and then dribbles a byte a minute keeps a worker thread for
+   * as long as it likes; eight of those and nothing else is served.
    */
   private fun limitRequestTime() {
     setIfUnset("sun.net.httpserver.maxReqTime", "15")

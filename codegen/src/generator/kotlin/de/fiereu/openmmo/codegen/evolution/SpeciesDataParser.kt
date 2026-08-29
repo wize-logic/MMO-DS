@@ -16,8 +16,8 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Reads the DS decomp's per species data for the parts the GBA decomps cannot express: how a
- * species evolves, and what its egg is. The species ids in this decomp are already national
- * dex numbers, so unlike the GBA data there is nothing to remap.
+ * species evolves, and what its egg is. The species ids in this decomp are already national dex
+ * numbers, so unlike the GBA data there is nothing to remap.
  */
 class SpeciesDataParser(private val rootDir: File) {
 

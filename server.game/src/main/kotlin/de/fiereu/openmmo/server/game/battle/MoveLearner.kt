@@ -57,9 +57,9 @@ constructor(
   }
 
   /**
-   * Puts [moveId] into move [slot], dropping whatever was there. False, and nothing written, 
-   * for a slot outside the moveset, a move the monster already knows, or a move that was not
-   * the one offered.
+   * Puts [moveId] into move [slot], dropping whatever was there. False, and nothing written, for a
+   * slot outside the moveset, a move the monster already knows, or a move that was not the one
+   * offered.
    */
   fun apply(
       known: MutableList<PokemonMove>,

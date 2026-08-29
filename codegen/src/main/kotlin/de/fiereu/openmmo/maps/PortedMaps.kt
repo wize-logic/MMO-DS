@@ -6,9 +6,7 @@ import de.fiereu.openmmo.common.enums.Weather
 import de.fiereu.openmmo.maps.generated.ported.terrain.GOLDENROD
 import de.fiereu.openmmo.maps.generated.ported.terrain.GOLDENROD_POKECENTER_1F
 
-/**
- * Maps that reached the client out of another cartridge and have no generated source here yet.
- */
+/** Maps that reached the client out of another cartridge and have no generated source here yet. */
 object PortedMaps {
 
   fun loadInto(maps: MapManager) {

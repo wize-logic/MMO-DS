@@ -2,6 +2,7 @@ package de.fiereu.openmmo.common.utils
 
 /**
  * Decodes a hex string into the bytes it spells, for example `"0c2e"` into `[0x0c, 0x2e]`.
+ *
  * @throws IllegalArgumentException if the length is odd or a character is not a hex digit.
  */
 fun String.hexToBytes(): ByteArray {

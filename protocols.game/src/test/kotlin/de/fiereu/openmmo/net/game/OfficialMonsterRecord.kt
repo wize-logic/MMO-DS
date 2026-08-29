@@ -1,8 +1,8 @@
 package de.fiereu.openmmo.net.game
 
 /**
- * The monster record as the game client itself reads it, transcribed from the client's reader
- * so that tests have an oracle independent of this project's own encoder.
+ * The monster record as the game client itself reads it, transcribed from the client's reader so
+ * that tests have an oracle independent of this project's own encoder.
  */
 object OfficialMonsterRecord {
 

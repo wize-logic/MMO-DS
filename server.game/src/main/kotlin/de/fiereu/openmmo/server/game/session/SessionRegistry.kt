@@ -27,9 +27,9 @@ class SessionRegistry @Inject constructor() {
   }
 
   /**
-   * Makes [ctx] the one session holding [userId], and answers with the session that held it
-   * before. An account is played by one client at a time, so a second join displaces the first
-   * rather than running beside it.
+   * Makes [ctx] the one session holding [userId], and answers with the session that held it before.
+   * An account is played by one client at a time, so a second join displaces the first rather than
+   * running beside it.
    */
   fun claimUser(userId: Int, ctx: SessionContext): SessionContext? = sessionsByUser.put(userId, ctx)
 

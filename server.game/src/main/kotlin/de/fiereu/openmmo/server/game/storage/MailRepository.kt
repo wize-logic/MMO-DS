@@ -20,8 +20,8 @@ const val MAIL_BOX_IN = 0
 const val MAIL_BOX_SENT = 1
 
 /**
- * One side of a letter. The official client gives the sender's copy and the recipient's copy separate ids
- * and lets either be deleted alone, so this is a copy rather than a message.
+ * One side of a letter. The official client gives the sender's copy and the recipient's copy
+ * separate ids and lets either be deleted alone, so this is a copy rather than a message.
  */
 data class MailCopy(
     val id: Long,

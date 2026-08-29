@@ -26,8 +26,8 @@ data class TrainerDef(
     val prizeRate: Int,
     val party: List<TrainerMon>,
     /**
-     * The story flag that says this trainer has been beaten, or "" where the region keeps that
-     * in a bitfield the script layer owns instead.
+     * The story flag that says this trainer has been beaten, or "" where the region keeps that in a
+     * bitfield the script layer owns instead.
      */
     val defeatedFlag: String = "",
 )

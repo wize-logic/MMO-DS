@@ -9,9 +9,9 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * Reads the move table out of the DS decomp, which is the only one of the trees that has all
- * of it: the GBA table stops at Psycho Boost (354) and the game the client draws has 467
- * moves, so Ambipom's Double Hit and everything else Gen 4 added had no entry at all.
+ * Reads the move table out of the DS decomp, which is the only one of the trees that has all of it:
+ * the GBA table stops at Psycho Boost (354) and the game the client draws has 467 moves, so
+ * Ambipom's Double Hit and everything else Gen 4 added had no entry at all.
  */
 class MoveParser(private val rootDir: File) {
 

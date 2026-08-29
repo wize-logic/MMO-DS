@@ -120,8 +120,8 @@ class NpcStoryFlagSyncTest :
         }
       }
       /**
-       * The rival stands in the corner of the player's own bedroom in Sinnoh, hidden by a flag
-       * the opening sets and cleared by the scene that walks him in.
+       * The rival stands in the corner of the player's own bedroom in Sinnoh, hidden by a flag the
+       * opening sets and cleared by the scene that walks him in.
        */
       test("the rival waiting in the Twinleaf bedroom is hidden for a new character") {
         runTest {

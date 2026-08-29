@@ -9,9 +9,9 @@ import de.fiereu.bytecodec.U8
 import de.fiereu.bytecodec.listPrefixed
 
 /**
- * Claim the funds a listing (or several) has settled (c2s 0x54, ours). The official client's claim rides an
- * opcode this registry already spends on a battle packet, so the slot is ours; the shape is
- * the official client's `Op`: a counted list of listing ids.
+ * Claim the funds a listing (or several) has settled (c2s 0x54, ours). The official client's claim
+ * rides an opcode this registry already spends on a battle packet, so the slot is ours; the shape
+ * is the official client's `Op`: a counted list of listing ids.
  */
 data class GtlClaimPacket(val listingIds: List<Long>)
 
@@ -34,8 +34,8 @@ object GtlPriceChangePacketCodec : PacketCodec<GtlPriceChangePacket>() {
 }
 
 /**
- * One shelf verb's answer (s2c 0xAF, ours; the official client's `wn1` is a code the client maps to its own
- * toast strings, and this is the same idea).
+ * One shelf verb's answer (s2c 0xAF, ours; the official client's `wn1` is a code the client maps to
+ * its own toast strings, and this is the same idea).
  */
 data class GtlResultPacket(val code: Byte, val a: Long, val b: Int) {
   companion object {

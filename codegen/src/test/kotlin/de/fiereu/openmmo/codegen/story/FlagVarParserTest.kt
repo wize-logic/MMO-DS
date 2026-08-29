@@ -96,9 +96,9 @@ class FlagVarParserTest :
         FlagVarParser.maleIntroFlags(decomp) shouldBe emptyList()
       }
       /**
-       * The DS decomp keeps flags and vars in one enum dump that its build compiles into a C
-       * enum, so a line reading `NAME = OTHER` takes that entry's value and every line after
-       * it counts on from there.
+       * The DS decomp keeps flags and vars in one enum dump that its build compiles into a C enum,
+       * so a line reading `NAME = OTHER` takes that entry's value and every line after it counts on
+       * from there.
        */
       test("the DS dump is an enum run, not a list of line numbers") {
         val decomp = kotlin.io.path.createTempDirectory("story-nds").toFile()

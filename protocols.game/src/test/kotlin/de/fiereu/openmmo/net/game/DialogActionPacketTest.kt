@@ -41,8 +41,9 @@ class DialogActionPacketTest :
       }
 
       /**
-       * Tag 4 is ours, not the official client's: a DS line buffers a name into a numbered string variable and
-       * nothing in the official client's tag set carries one. The slot is the number the message itself names.
+       * Tag 4 is ours, not the official client's: a DS line buffers a name into a numbered string
+       * variable and nothing in the official client's tag set carries one. The slot is the number
+       * the message itself names.
        */
       test("a string-variable argument round-trips its slot and its name") {
         val packet =

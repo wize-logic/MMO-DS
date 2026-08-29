@@ -19,8 +19,7 @@ import javax.inject.Singleton
 private val log = KotlinLogging.logger {}
 
 /**
- * A trainer noticing the player, which is the one field mechanic this server had neither half
- * of.
+ * A trainer noticing the player, which is the one field mechanic this server had neither half of.
  */
 @Singleton
 class TrainerSightService
@@ -137,9 +136,9 @@ constructor(
   }
 
   /**
-   * How many tiles ahead of [npc] the player is standing when looking along [facing], or null
-   * when they are not on that line, are out of range, or something walkable-blocking is
-   * between the two. `GetDistanceNorth` and its three siblings, plus `IsPathInterrupted`.
+   * How many tiles ahead of [npc] the player is standing when looking along [facing], or null when
+   * they are not on that line, are out of range, or something walkable-blocking is between the two.
+   * `GetDistanceNorth` and its three siblings, plus `IsPathInterrupted`.
    */
   private fun distanceAlong(
       map: MapDef,

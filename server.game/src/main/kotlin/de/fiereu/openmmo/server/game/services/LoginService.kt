@@ -113,9 +113,9 @@ constructor(
   }
 
   /**
-   * One account, one client. A second join with the same account closes the first session
-   * instead of playing beside it: two clients on one character each hold their own copy of it,
-   * and the last one to be saved wins, which is how a character loses a day's play.
+   * One account, one client. A second join with the same account closes the first session instead
+   * of playing beside it: two clients on one character each hold their own copy of it, and the last
+   * one to be saved wins, which is how a character loses a day's play.
    */
   private fun displacePreviousSession(userId: Int, ctx: SessionContext) {
     val previous = sessionRegistry.claimUser(userId, ctx)

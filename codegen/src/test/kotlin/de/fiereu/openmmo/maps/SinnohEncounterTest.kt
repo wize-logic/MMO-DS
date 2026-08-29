@@ -7,8 +7,8 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 
 /**
- * A Gen 4 grass table is not one list per condition: it is one list of twelve slots whose
- * *species* are swapped out before the roll, at slot indices the game hardcodes.
+ * A Gen 4 grass table is not one list per condition: it is one list of twelve slots whose *species*
+ * are swapped out before the roll, at slot indices the game hardcodes.
  */
 class SinnohEncounterTest :
     FunSpec({

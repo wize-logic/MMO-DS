@@ -39,8 +39,8 @@ constructor(
 
   /**
    * Where a grant lands and what it looks like when it arrives. The decomp passes these to
-   * `GiveMon` one at a time, but every scripted grant bar one wants the defaults, so they
-   * travel together and the call sites that only name a species and a level stay one line.
+   * `GiveMon` one at a time, but every scripted grant bar one wants the defaults, so they travel
+   * together and the call sites that only name a species and a level stay one line.
    */
   data class Grant(
       val nickname: String = "",
@@ -55,8 +55,8 @@ constructor(
   )
 
   /**
-   * An individual the engine rolled: its personality value, which is what a nature is read out
-   * of, its six IVs packed five bits each, and whether it came out shiny.
+   * An individual the engine rolled: its personality value, which is what a nature is read out of,
+   * its six IVs packed five bits each, and whether it came out shiny.
    */
   data class Individual(val seed: Int, val ivBits: Int, val isShiny: Boolean)
 
@@ -116,9 +116,9 @@ constructor(
   }
 
   /**
-   * The decomp's `GiveEgg`: the same grant as [givePokemon] with the egg bit set, which is the
-   * one field that separates the two on the wire (`PokemonCodec`'s `eggBits`). It hatches into
-   * a level 1 of its species, so that is the level it is rolled at.
+   * The decomp's `GiveEgg`: the same grant as [givePokemon] with the egg bit set, which is the one
+   * field that separates the two on the wire (`PokemonCodec`'s `eggBits`). It hatches into a level
+   * 1 of its species, so that is the level it is rolled at.
    */
   suspend fun giveEgg(session: SessionContext, state: PlayerState, dexId: Int): Pokemon? {
     val characterId = state.characterId ?: return null

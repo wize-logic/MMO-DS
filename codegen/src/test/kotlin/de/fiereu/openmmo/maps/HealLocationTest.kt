@@ -6,9 +6,9 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 
 /**
- * A map's heal location is a join across two decomp files, the `setrespawn` in the map's
- * scripts and the tile that constant names in `heal_locations.json`, so the values below are
- * checked against both decomps by hand rather than against anything this build produced.
+ * A map's heal location is a join across two decomp files, the `setrespawn` in the map's scripts
+ * and the tile that constant names in `heal_locations.json`, so the values below are checked
+ * against both decomps by hand rather than against anything this build produced.
  */
 class HealLocationTest :
     FunSpec({

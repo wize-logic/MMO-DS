@@ -49,8 +49,8 @@ enum class TimerRule(val id: Byte, val nameStringId: Int) {
 }
 
 /**
- * The sixteen groups a format checks a party against, and the first six of which are also the
- * tiers a species belongs to.
+ * The sixteen groups a format checks a party against, and the first six of which are also the tiers
+ * a species belongs to.
  */
 enum class TierGroup(val id: Byte, val nameStringId: Int, val speciesTier: Boolean) {
   UBERS(0, 5750, true),

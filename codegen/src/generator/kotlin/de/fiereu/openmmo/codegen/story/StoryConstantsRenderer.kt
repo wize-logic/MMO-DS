@@ -8,8 +8,8 @@ import java.io.File
 
 /**
  * Emits one Kotlin object of flag key constants and one of var key constants per region. Each
- * constant value is the region namespaced story key ("hoenn/FLAG_ADVENTURE_STARTED") that
- * scripts hand to [de.fiereu.openmmo.server.game.script.ScriptContext].
+ * constant value is the region namespaced story key ("hoenn/FLAG_ADVENTURE_STARTED") that scripts
+ * hand to [de.fiereu.openmmo.server.game.script.ScriptContext].
  */
 class StoryConstantsRenderer(
     region: String,

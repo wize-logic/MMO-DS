@@ -34,8 +34,8 @@ class GiftCommand @Inject constructor(private val storyPlayer: StoryPlayerServic
 
     /**
      * Every ItemDef the generated registry declares, keyed by its constant name with the
-     * underscores dropped ("POKE_BALL" -> "pokeball"), so the command names items the way a
-     * person types them.
+     * underscores dropped ("POKE_BALL" -> "pokeball"), so the command names items the way a person
+     * types them.
      */
     val byName: Map<String, ItemDef> by lazy {
       Items.javaClass.methods

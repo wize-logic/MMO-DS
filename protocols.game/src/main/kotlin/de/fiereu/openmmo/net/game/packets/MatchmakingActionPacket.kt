@@ -3,9 +3,9 @@ package de.fiereu.openmmo.net.game.packets
 import de.fiereu.bytecodec.*
 
 /**
- * The three actions the queue can send, as the wire byte names them. the official client's `the official client`
- * writes the `pm1` byte and then the tail that byte's own case takes: 0 an int, 1 a long and a
- * short, 2 nothing at all.
+ * The three actions the queue can send, as the wire byte names them. the official client's `the
+ * official client` writes the `pm1` byte and then the tail that byte's own case takes: 0 an int, 1
+ * a long and a short, 2 nothing at all.
  */
 sealed class MatchmakingActionKind {
   abstract val actionId: Byte

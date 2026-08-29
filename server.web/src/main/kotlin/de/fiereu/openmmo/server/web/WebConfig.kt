@@ -5,9 +5,9 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /**
- * Everything the website needs, taken from the same environment variables the servers already
- * read. There is no config file: the site is one process behind apache and the login database
- * is the only state it touches.
+ * Everything the website needs, taken from the same environment variables the servers already read.
+ * There is no config file: the site is one process behind apache and the login database is the only
+ * state it touches.
  */
 data class WebConfig(
     val host: String = LOOPBACK,

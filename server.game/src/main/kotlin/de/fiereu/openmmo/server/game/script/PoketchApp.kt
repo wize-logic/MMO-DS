@@ -1,9 +1,9 @@
 package de.fiereu.openmmo.server.game.script
 
 /**
- * The 25 stock Poketch app ids, in the decomp's `POKETCH_APPID_*` order, so an ordinal here is
- * that id. Cycle order on the device is this order: `Poketch_IncrementAppID` walks the
- * registry by index, not the overlay-lookup table.
+ * The 25 stock Poketch app ids, in the decomp's `POKETCH_APPID_*` order, so an ordinal here is that
+ * id. Cycle order on the device is this order: `Poketch_IncrementAppID` walks the registry by
+ * index, not the overlay-lookup table.
  */
 enum class PoketchApp {
   DIGITALWATCH,
@@ -41,9 +41,9 @@ enum class PoketchApp {
 
   companion object {
     /**
-     * The six ids a session registers, in cycle order. Chat takes 0, party keeps 4 as the
-     * stock monitor, and 1 / 2 / 3 / 5 follow so Increment walks chat → friends → guild → map
-     * → party → net.
+     * The six ids a session registers, in cycle order. Chat takes 0, party keeps 4 as the stock
+     * monitor, and 1 / 2 / 3 / 5 follow so Increment walks chat → friends → guild → map → party →
+     * net.
      */
     val ROSTER: List<PoketchApp> =
         listOf(

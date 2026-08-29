@@ -28,8 +28,8 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 
 /**
- * The end of the opening: the first step onto Route 201 runs the scene that puts a Pokemon in
- * the player's party, which is the thing 154 Sinnoh maps of wild tables have been waiting on, 
+ * The end of the opening: the first step onto Route 201 runs the scene that puts a Pokemon in the
+ * player's party, which is the thing 154 Sinnoh maps of wild tables have been waiting on,
  * `EncounterService` will not roll grass for an empty party.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -112,9 +112,9 @@ class Route201StarterTest :
       }
 
       /**
-       * What a party member is for. `EncounterService` refuses to roll grass for an empty
-       * party, so until the briefcase handed one over the 154 Sinnoh maps carrying wild tables
-       * were dark whatever the player stood on.
+       * What a party member is for. `EncounterService` refuses to roll grass for an empty party, so
+       * until the briefcase handed one over the 154 Sinnoh maps carrying wild tables were dark
+       * whatever the player stood on.
        */
       test("Route 201 has tall grass over a land encounter table") {
         val route = checkNotNull(MapManager().getMap(3, 1, 86))

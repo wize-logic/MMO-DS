@@ -14,8 +14,8 @@ enum class OpposingSide(val wireValue: Byte) {
 }
 
 /**
- * The field state that opens a battle (opcode 0x30). Each side sends a monster count that
- * sizes the client's slot array followed by that many blocks.
+ * The field state that opens a battle (opcode 0x30). Each side sends a monster count that sizes the
+ * client's slot array followed by that many blocks.
  */
 data class BattleFieldStatePacket(
     val playerName: String,

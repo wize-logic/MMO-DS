@@ -56,8 +56,8 @@ data class BattleSidePartyPacket(
 )
 
 /**
- * A single bag item stack carried by opcode 0x40 at join. It shares the wire shape of a
- * battle-side monster and decodes through the same codec.
+ * A single bag item stack carried by opcode 0x40 at join. It shares the wire shape of a battle-side
+ * monster and decodes through the same codec.
  */
 data class ItemStack(val objectId: Long, val itemId: Short, val quantity: Short)
 

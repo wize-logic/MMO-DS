@@ -3,9 +3,9 @@ package de.fiereu.openmmo.net.game.packets
 import de.fiereu.bytecodec.*
 
 /**
- * One story variable. The client keys these in a short-keyed map holding bytes, so the key is
- * the wide half of the pair and the value the narrow one, not the other way round, which
- * reads the same three bytes and hands the client the wrong variable.
+ * One story variable. The client keys these in a short-keyed map holding bytes, so the key is the
+ * wide half of the pair and the value the narrow one, not the other way round, which reads the same
+ * three bytes and hands the client the wrong variable.
  */
 data class PlayerVariableEntry(
     val key: Short,

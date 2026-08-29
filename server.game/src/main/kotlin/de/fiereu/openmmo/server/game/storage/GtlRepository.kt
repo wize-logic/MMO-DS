@@ -123,8 +123,8 @@ interface GtlRepository {
 
   /**
    * Take [units] of an active, unexpired listing for [buyerId], the single-winner step of a
-   * purchase: only the update that decrements `remaining` sees the row, so two buyers cannot
-   * be handed the same units.
+   * purchase: only the update that decrements `remaining` sees the row, so two buyers cannot be
+   * handed the same units.
    */
   suspend fun purchaseUnits(
       id: Long,
@@ -140,8 +140,8 @@ interface GtlRepository {
   suspend fun recordSale(sale: GtlSaleRow)
 
   /**
-   * Take [units] of claimed money off the row for its seller. Only what was read is taken, so
-   * a fill landing between the read and the claim stays claimable.
+   * Take [units] of claimed money off the row for its seller. Only what was read is taken, so a
+   * fill landing between the read and the claim stays claimable.
    */
   suspend fun claimUnits(id: Long, sellerId: Long, units: Int): Boolean
 

@@ -6,9 +6,9 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 
 /**
- * Sinnoh's flag and var ids come out of one enum dump whose values are a running count rather
- * than line numbers: an entry written `NAME = OTHER` takes that entry's value and the count
- * carries on from there.
+ * Sinnoh's flag and var ids come out of one enum dump whose values are a running count rather than
+ * line numbers: an entry written `NAME = OTHER` takes that entry's value and the count carries on
+ * from there.
  */
 class SinnohStoryConstantsTest :
     FunSpec({

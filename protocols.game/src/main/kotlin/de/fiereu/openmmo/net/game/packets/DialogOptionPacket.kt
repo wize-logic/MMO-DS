@@ -7,8 +7,8 @@ import de.fiereu.bytecodec.S64LE
 import de.fiereu.bytecodec.U16LE
 
 /**
- * Sent when the player picks a target for an item chosen from the bag outside battle, the
- * party member the item is being used on.
+ * Sent when the player picks a target for an item chosen from the bag outside battle, the party
+ * member the item is being used on.
  */
 data class DialogOptionPacket(
     val itemId: Int,

@@ -5,9 +5,9 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 
 /**
- * The competitive tables are wire values, not orderings of ours, and every one of them is a
- * number somebody could "tidy" into its ordinal without noticing. These are the claims that
- * would break silently if they did.
+ * The competitive tables are wire values, not orderings of ours, and every one of them is a number
+ * somebody could "tidy" into its ordinal without noticing. These are the claims that would break
+ * silently if they did.
  */
 class PvpRulesTest :
     FunSpec({

@@ -6,9 +6,9 @@ import de.fiereu.bytecodec.S64LE
 import de.fiereu.bytecodec.S8
 
 /**
- * Asks what a pairing would produce. The game client sends this when the second parent is put
- * down and again on every one of its three gender buttons, which send -1 (leave it to the
- * server), 0 and 1 and nothing else.
+ * Asks what a pairing would produce. The game client sends this when the second parent is put down
+ * and again on every one of its three gender buttons, which send -1 (leave it to the server), 0 and
+ * 1 and nothing else.
  */
 data class AssignBreedingSlotPacket(
     val ownPokemonEntityId: Long,

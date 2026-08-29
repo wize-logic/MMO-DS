@@ -16,8 +16,8 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 
 /**
- * The layout is the official reader's, `the official client`: the entity id read by the shared id reader,
- * then one byte.
+ * The layout is the official reader's, `the official client`: the entity id read by the shared id
+ * reader, then one byte.
  */
 class EntityTransportationPacketTest :
     FunSpec({

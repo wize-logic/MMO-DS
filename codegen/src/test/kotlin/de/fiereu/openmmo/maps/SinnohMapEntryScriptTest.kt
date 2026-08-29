@@ -4,9 +4,9 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 
 /**
- * What a Sinnoh map runs when a player arrives on it lives in a second archive the header
- * names, `res/field/scripts/scripts_init_*.s`, and the generator used to emit "" and no frame
- * table for all 593 of them.
+ * What a Sinnoh map runs when a player arrives on it lives in a second archive the header names,
+ * `res/field/scripts/scripts_init_*.s`, and the generator used to emit "" and no frame table for
+ * all 593 of them.
  */
 class SinnohMapEntryScriptTest :
     FunSpec({
@@ -28,8 +28,8 @@ class SinnohMapEntryScriptTest :
 
       /**
        * The server runs the first row whose var matches, so file order is the answer and not a
-       * detail. These four ids are written 0x2334 upward in the decomp and come out decimal,
-       * the way every other script id on a map does.
+       * detail. These four ids are written 0x2334 upward in the decomp and come out decimal, the
+       * way every other script id on a map does.
        */
       test("a frame table keeps its rows in file order and its ids in one base") {
         val pokecenter = maps.getMap(sinnoh, 0, 135)!!

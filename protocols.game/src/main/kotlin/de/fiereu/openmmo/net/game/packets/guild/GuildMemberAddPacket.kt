@@ -8,8 +8,8 @@ import de.fiereu.bytecodec.S64LE
 import de.fiereu.bytecodec.S8
 
 /**
- * s2c 0x83. the official client `the official client` is one `f/uI0` member row: rank, id, joined-at, QL1, then the online
- * byte.
+ * s2c 0x83. the official client `the official client` is one `f/uI0` member row: rank, id,
+ * joined-at, QL1, then the online byte.
  */
 data class GuildMemberAddPacket(
     val rank: Byte,

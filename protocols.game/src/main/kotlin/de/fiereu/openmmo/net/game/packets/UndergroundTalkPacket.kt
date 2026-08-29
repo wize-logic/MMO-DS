@@ -9,6 +9,7 @@ import de.fiereu.bytecodec.bytesPrefixed
 
 /**
  * Talking to another player in Sinnoh's Underground.
+ *
  * @param kind which of the five below.
  * @param entityId the player this is about. c2s on a [KIND_REQUEST] it is the player being faced;
  * @param payload the kind's own bytes; see each constant.
@@ -31,29 +32,28 @@ data class UndergroundTalkPacket(
     const val KIND_REQUEST = 0
 
     /**
-     * c2s: this player's availability changed. `payload[0]` is one of [STATE_FREE],
-     * [STATE_BUSY], [STATE_MINING].
+     * c2s: this player's availability changed. `payload[0]` is one of [STATE_FREE], [STATE_BUSY],
+     * [STATE_MINING].
      */
     const val KIND_STATE = 1
 
     /**
      * bidi: one of the conversation's own comm commands, relayed verbatim to the other party.
      * `payload[0]` is the command id (75, 76, 78, 80 or 82, the broadcast half of
-     * `src/underground/player_talk.c` and `src/underground/records.c`) and the rest is its
-     * body.
+     * `src/underground/player_talk.c` and `src/underground/records.c`) and the rest is its body.
      */
     const val KIND_DATA = 2
 
     /**
-     * s2c: the answer to a [KIND_REQUEST]. `payload[0]` is the engine's `enum TalkResult`, 
-     * [TALK_SUCCESS], [TALK_FAIL] or [TALK_MINING], and `payload[1]` is which end of a
-     * successful pairing this player is: [ROLE_INITIATOR] or [ROLE_RESPONDER].
+     * s2c: the answer to a [KIND_REQUEST]. `payload[0]` is the engine's `enum TalkResult`,
+     * [TALK_SUCCESS], [TALK_FAIL] or [TALK_MINING], and `payload[1]` is which end of a successful
+     * pairing this player is: [ROLE_INITIATOR] or [ROLE_RESPONDER].
      */
     const val KIND_RESULT = 3
 
     /**
-     * bidi: the conversation is over. c2s when this player's menu closed; s2c when the other
-     * party dropped, or left the cavern with a box still open on this screen.
+     * bidi: the conversation is over. c2s when this player's menu closed; s2c when the other party
+     * dropped, or left the cavern with a box still open on this screen.
      */
     const val KIND_END = 4
 
@@ -66,8 +66,7 @@ data class UndergroundTalkPacket(
 
     /**
      * [KIND_END]: this client would not take the pairing. Availability is a report, so it is a
-     * round trip old, and the player who was faced may have opened a menu or started digging
-     * since.
+     * round trip old, and the player who was faced may have opened a menu or started digging since.
      */
     const val END_REFUSED = 1
 

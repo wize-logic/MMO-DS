@@ -4,8 +4,8 @@ import de.fiereu.openmmo.common.enums.EvolutionMethod
 import de.fiereu.openmmo.common.enums.MonsterGender
 
 /**
- * One way a species can evolve. [param] is read according to [EvolutionMethod.param] and is 0
- * for the methods that take none.
+ * One way a species can evolve. [param] is read according to [EvolutionMethod.param] and is 0 for
+ * the methods that take none.
  */
 data class EvolutionDef(
     val method: EvolutionMethod,

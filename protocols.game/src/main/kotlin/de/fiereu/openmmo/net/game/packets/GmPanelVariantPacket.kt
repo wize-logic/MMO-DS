@@ -21,9 +21,9 @@ data class GmPanelPair(
 )
 
 /**
- * s2c 0xA2. One discriminator byte and then the body that byte's own case takes; the official client matches
- * the byte against an enum and falls back to the 0 case, so a value outside the set below
- * carries no body rather than being a malformed packet.
+ * s2c 0xA2. One discriminator byte and then the body that byte's own case takes; the official
+ * client matches the byte against an enum and falls back to the 0 case, so a value outside the set
+ * below carries no body rather than being a malformed packet.
  */
 data class GmPanelVariantPacket(
     val variant: Byte,

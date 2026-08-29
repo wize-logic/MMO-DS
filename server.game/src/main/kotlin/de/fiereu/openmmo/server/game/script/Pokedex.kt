@@ -7,9 +7,8 @@ import de.fiereu.openmmo.server.game.storage.CharacterStore
 import de.fiereu.openmmo.server.game.storage.StoredCharacter
 
 /**
- * Seen and caught species, stored as story flags so they persist with the rest of a
- * character's progress. The wire's pokedex lists are a view of those flags, the same shape as
- * [Badge].
+ * Seen and caught species, stored as story flags so they persist with the rest of a character's
+ * progress. The wire's pokedex lists are a view of those flags, the same shape as [Badge].
  */
 internal object Pokedex {
   fun seenKey(regionName: String, speciesId: Int): String = "$regionName/DEX_SEEN_$speciesId"

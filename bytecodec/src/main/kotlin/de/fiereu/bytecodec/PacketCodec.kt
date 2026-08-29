@@ -4,9 +4,9 @@ interface CodecScope<P> {
   fun <T> field(codec: Codec<T>, get: (P) -> T): T
 
   /**
-   * A field present only when [present] is true, absent otherwise. [present] must be derivable
-   * the same way on both sides, typically from a flags field decoded just above, so encode and
-   * decode always agree on presence.
+   * A field present only when [present] is true, absent otherwise. [present] must be derivable the
+   * same way on both sides, typically from a flags field decoded just above, so encode and decode
+   * always agree on presence.
    */
   fun <T> optionalField(present: Boolean, codec: Codec<T>, get: (P) -> T?): T?
 

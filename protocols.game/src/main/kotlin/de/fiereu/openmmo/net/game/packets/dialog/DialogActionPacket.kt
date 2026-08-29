@@ -12,8 +12,8 @@ data class CreatureMovesArg(val team: Byte, val moveIds: List<Short>) : DialogMe
 
 /**
  * Fills a ROM string variable with a literal string, the DS decomp's `BufferPlayerName`,
- * `BufferRivalName` and `BufferCounterpartName`, whose names live on this server and not in
- * any text bank the client can look them up in.
+ * `BufferRivalName` and `BufferCounterpartName`, whose names live on this server and not in any
+ * text bank the client can look them up in.
  */
 data class TextStringArg(val stringVariable: Byte, val text: String) : DialogMessageArg()
 

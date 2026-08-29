@@ -16,9 +16,9 @@ class RegistrationService(
     /** Accounts one address may create in the window. */
     private val limiter: RateLimiter,
     /**
-     * Requests one address may make in the window, whether or not they were accounts. Without
-     * it a caller who never sends anything valid is never counted at all, and posting rubbish
-     * forever is free.
+     * Requests one address may make in the window, whether or not they were accounts. Without it a
+     * caller who never sends anything valid is never counted at all, and posting rubbish forever is
+     * free.
      */
     private val attempts: RateLimiter = RateLimiter(ATTEMPTS_PER_ADDRESS),
     /**

@@ -59,9 +59,8 @@ private val log = KotlinLogging.logger {}
 private const val CANT_USE_NOW = "You can't use that now."
 
 /**
- * The moves one monster has been offered and not yet answered for, kept after the battle ends.
- * Only the head has been prompted: the client answers one move at a time, so the rest wait
- * their turn.
+ * The moves one monster has been offered and not yet answered for, kept after the battle ends. Only
+ * the head has been prompted: the client answers one move at a time, so the rest wait their turn.
  */
 private data class PendingMoveLearn(
     val charId: Long,
@@ -70,9 +69,9 @@ private data class PendingMoveLearn(
 )
 
 /**
- * Orchestrates battles: builds the battle state from the party and the opposing side, routes
- * client actions through the [TurnEngine], and persists the outcome. Packets go out through
- * the [BattlePacketEmitter] over the battle's interest key.
+ * Orchestrates battles: builds the battle state from the party and the opposing side, routes client
+ * actions through the [TurnEngine], and persists the outcome. Packets go out through the
+ * [BattlePacketEmitter] over the battle's interest key.
  */
 @Singleton
 class BattleService
@@ -102,9 +101,9 @@ constructor(
   }
 
   /**
-   * A line typed on the battle channel. It is scoped to the sender's battle, both players of
-   * a player battle, the sender alone otherwise, and delivered as an ordinary
-   * [ChatMessagePacket] of type BATTLE, which is the type the client's Battle tab shows.
+   * A line typed on the battle channel. It is scoped to the sender's battle, both players of a
+   * player battle, the sender alone otherwise, and delivered as an ordinary [ChatMessagePacket] of
+   * type BATTLE, which is the type the client's Battle tab shows.
    */
   fun onBattleChat(event: PacketEvent<BattleChatMessagePacket>) {
     val session = event.session

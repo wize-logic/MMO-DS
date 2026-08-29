@@ -6,8 +6,8 @@ import java.util.Base64
 
 /**
  * Resolves the [TileBehavior] of each tile from the decomp tileset metatile attributes, so the
- * server can tell grass from plain ground. Emerald packs attributes as 16-bit words (behavior
- * in bits 0-7), FireRed as 32-bit words (behavior in bits 0-8).
+ * server can tell grass from plain ground. Emerald packs attributes as 16-bit words (behavior in
+ * bits 0-7), FireRed as 32-bit words (behavior in bits 0-8).
  */
 class MetatileBehaviors
 private constructor(

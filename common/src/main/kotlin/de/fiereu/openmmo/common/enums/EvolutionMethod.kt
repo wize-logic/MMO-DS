@@ -1,9 +1,9 @@
 package de.fiereu.openmmo.common.enums
 
 /**
- * What an evolution entry's parameter holds. The parameter is one 16 bit number in the data,
- * so its meaning is only knowable from the method beside it, and a level and an item id are
- * otherwise indistinguishable.
+ * What an evolution entry's parameter holds. The parameter is one 16 bit number in the data, so its
+ * meaning is only knowable from the method beside it, and a level and an item id are otherwise
+ * indistinguishable.
  */
 enum class EvolutionParam {
   /** No parameter; the entry is two fields wide. */
@@ -28,9 +28,9 @@ enum class EvolutionTrigger {
 }
 
 /**
- * How a species evolves. The names and their order are the game's own `EVO_*` table; the [id]
- * is the number the data stores and the generator refuses to run if the table it reads has
- * drifted from this enum.
+ * How a species evolves. The names and their order are the game's own `EVO_*` table; the [id] is
+ * the number the data stores and the generator refuses to run if the table it reads has drifted
+ * from this enum.
  */
 enum class EvolutionMethod(val id: Int, val param: EvolutionParam, val trigger: EvolutionTrigger) {
   NONE(0, EvolutionParam.NONE, EvolutionTrigger.LEVEL_UP),

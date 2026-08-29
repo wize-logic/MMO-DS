@@ -5,8 +5,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Reads and writes a character's story progression: boolean flags and named integer vars. This
- * is the game agnostic story state.
+ * Reads and writes a character's story progression: boolean flags and named integer vars. This is
+ * the game agnostic story state.
  */
 @Singleton
 class StoryService @Inject constructor(private val characterStore: CharacterStore) {

@@ -123,8 +123,8 @@ fun trainerSightService(
 
 /**
  * A real [LoginService], with every collaborator built for real. The character-list and
- * character-creation handlers touch only the store and the session, so nothing here is faked;
- * the token secret is any non-empty one, since a join is not what this builds.
+ * character-creation handlers touch only the store and the session, so nothing here is faked; the
+ * token secret is any non-empty one, since a join is not what this builds.
  */
 fun loginService(
     store: CharacterStore,

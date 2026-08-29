@@ -7,8 +7,8 @@ import javax.inject.Singleton
 
 /**
  * Tracks which sessions belong to which interest groups and fans packets out to a group. It is
- * purpose-agnostic: the same instance backs overworld presence (see [PresenceService]), guild
- * chat, or battle updates depending on the [InterestKey] used.
+ * purpose-agnostic: the same instance backs overworld presence (see [PresenceService]), guild chat,
+ * or battle updates depending on the [InterestKey] used.
  */
 @Singleton
 class InterestManager @Inject constructor() {

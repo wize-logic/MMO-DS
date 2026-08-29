@@ -39,8 +39,8 @@ data class ParsedMap(
     val coordScripts: List<ParsedCoordScript>,
     /**
      * Fully qualified name of the generated [de.fiereu.openmmo.maps.TerrainPlane] this map is
-     * placed on, for the DS regions whose geometry belongs to a shared matrix. Empty for the
-     * GBA regions, which carry their own block data.
+     * placed on, for the DS regions whose geometry belongs to a shared matrix. Empty for the GBA
+     * regions, which carry their own block data.
      */
     val terrainRef: String = "",
 )

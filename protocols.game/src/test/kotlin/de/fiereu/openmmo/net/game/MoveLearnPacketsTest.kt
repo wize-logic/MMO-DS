@@ -18,9 +18,9 @@ private const val ENTITY_LE = "00c0c82aefadce1a"
 private const val FURY_SWIPES: Short = 154
 
 /**
- * The layout is the one client the official client reads and writes: a monster id, a signed move slot and
- * one move id. Its own reader is three statements, `the official client` takes the id, a `get()` and a
- * `getShort()`; `the official client` writes the same three back.
+ * The layout is the one client the official client reads and writes: a monster id, a signed move
+ * slot and one move id. Its own reader is three statements, `the official client` takes the id, a
+ * `get()` and a `getShort()`; `the official client` writes the same three back.
  */
 class MoveLearnPacketsTest :
     FunSpec({
@@ -52,7 +52,8 @@ class MoveLearnPacketsTest :
         MoveLearnReplyPacketCodec.encodeToBytes(decoded) shouldBe bytes
       }
 
-      // 32710 sends `02` then two move ids; the official client reads that `02` as a slot and stops after the
+      // 32710 sends `02` then two move ids; the official client reads that `02` as a slot and stops
+      // after the
       // first id. A one-move 32710 prompt is the same eleven bytes either way and so proves
       // nothing, which is why the two-move one is the case worth keeping.
       test("a 32710 prompt for two moves is not this packet") {

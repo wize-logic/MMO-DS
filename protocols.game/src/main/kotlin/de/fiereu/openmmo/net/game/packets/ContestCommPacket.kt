@@ -10,6 +10,7 @@ import de.fiereu.bytecodec.bytesPrefixed
 
 /**
  * A link Super Contest: the queue that fills one, and the engine traffic that runs it.
+ *
  * @param kind which of the eight below.
  * @param sessionId the contest this belongs to. 0 before a seat exists.
  * @param seat which of the up-to-four places this is about: the sender on the way up, the sender
@@ -33,9 +34,9 @@ data class ContestCommPacket(
 
   companion object {
     /**
-     * c2s: put me in the queue for a link contest. `payload[0]` is the contest rank,
-     * `payload[1]` the contest type and `payload[2]` the party slot of the Pokemon being
-     * entered, the same three the registration desk asks for before an official contest.
+     * c2s: put me in the queue for a link contest. `payload[0]` is the contest rank, `payload[1]`
+     * the contest type and `payload[2]` the party slot of the Pokemon being entered, the same three
+     * the registration desk asks for before an official contest.
      */
     const val KIND_QUEUE = 0
 
@@ -49,15 +50,14 @@ data class ContestCommPacket(
     const val KIND_WAITING = 2
 
     /**
-     * s2c: the contest is starting and this is your place in it. [seat] is this player's own
-     * net id.
+     * s2c: the contest is starting and this is your place in it. [seat] is this player's own net
+     * id.
      */
     const val KIND_SEAT = 3
 
     /**
-     * bidi: one of the contest's own comm commands, relayed verbatim. `payload[0]` is the
-     * command id (22, 37, the table `CommCmd_Init` registers for a contest) and the rest is its
-     * body.
+     * bidi: one of the contest's own comm commands, relayed verbatim. `payload[0]` is the command
+     * id (22, 37, the table `CommCmd_Init` registers for a contest) and the rest is its body.
      */
     const val KIND_DATA = 4
 
@@ -65,14 +65,14 @@ data class ContestCommPacket(
     const val KIND_SYNC = 5
 
     /**
-     * bidi: a player is out. c2s when this client leaves a contest that has not finished; s2c
-     * to everyone else, with [seat] naming who.
+     * bidi: a player is out. c2s when this client leaves a contest that has not finished; s2c to
+     * everyone else, with [seat] naming who.
      */
     const val KIND_LEAVE = 6
 
     /**
-     * c2s: what this client computed. The payload is one byte per human seat, in seat order:
-     * that seat's placement, 0 for the winner.
+     * c2s: what this client computed. The payload is one byte per human seat, in seat order: that
+     * seat's placement, 0 for the winner.
      */
     const val KIND_RESULT = 7
 

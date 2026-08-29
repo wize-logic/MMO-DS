@@ -6,9 +6,9 @@ import de.fiereu.bytecodec.*
 const val MOVE_LEARN_NO_SLOT: Byte = -1
 
 /**
- * One move a monster just gained. [slot] is the move slot it went into, or
- * [MOVE_LEARN_NO_SLOT] when every slot was taken, then the client asks which move to drop and
- * answers with a [MoveLearnReplyPacket].
+ * One move a monster just gained. [slot] is the move slot it went into, or [MOVE_LEARN_NO_SLOT]
+ * when every slot was taken, then the client asks which move to drop and answers with a
+ * [MoveLearnReplyPacket].
  */
 data class MoveLearnPromptPacket(
     val entityId: Long,

@@ -6,9 +6,9 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 
 /**
- * The oracle is the engine's own build output, not a round trip through this file:
- * pokeplatinum's generated enum gives `TEXT_BANK_TWINLEAF_TOWN` 554, and that bank's generated
- * header gives `TwinleafTown_Text_BigThud` message 0.
+ * The oracle is the engine's own build output, not a round trip through this file: pokeplatinum's
+ * generated enum gives `TEXT_BANK_TWINLEAF_TOWN` 554, and that bank's generated header gives
+ * `TwinleafTown_Text_BigThud` message 0.
  */
 class TextIdTest :
     FunSpec({

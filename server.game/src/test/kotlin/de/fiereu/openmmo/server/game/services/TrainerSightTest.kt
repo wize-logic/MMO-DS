@@ -39,9 +39,9 @@ class TrainerSightTest :
       }
 
       /**
-       * The table itself. Platinum's trainers are one JSON file each rather than two C tables,
-       * and `res/trainers/data` holds one per line of `generated/trainers.txt`, `none.json`
-       * being the enum's own empty slot.
+       * The table itself. Platinum's trainers are one JSON file each rather than two C tables, and
+       * `res/trainers/data` holds one per line of `generated/trainers.txt`, `none.json` being the
+       * enum's own empty slot.
        */
       test("the Platinum trainer table is loaded and its parties are the decomp's") {
         val trainers = TrainerRegistry()

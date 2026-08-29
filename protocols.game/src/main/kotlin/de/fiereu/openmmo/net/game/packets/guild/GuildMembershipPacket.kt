@@ -3,8 +3,8 @@ package de.fiereu.openmmo.net.game.packets.guild
 import de.fiereu.bytecodec.*
 
 /**
- * the official client `the official client` as `the official client` and `the official client` walk it. The int after the message is
- * constructor argument 6; `d81` does not store it.
+ * the official client `the official client` as `the official client` and `the official client` walk
+ * it. The int after the message is constructor argument 6; `d81` does not store it.
  */
 data class GuildProfileData(
     val guildId: Long,

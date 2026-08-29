@@ -3,9 +3,9 @@ package de.fiereu.openmmo.net.game.packets
 import de.fiereu.bytecodec.*
 
 /**
- * One flag of the local script VM's state. [id] is the engine's own flag number, from
- * Platinum's `generated/vars_flags.h`; it is not the GBA id space [StoryFlagUpdatePacket]
- * carries and the two must not be mixed.
+ * One flag of the local script VM's state. [id] is the engine's own flag number, from Platinum's
+ * `generated/vars_flags.h`; it is not the GBA id space [StoryFlagUpdatePacket] carries and the two
+ * must not be mixed.
  */
 data class ScriptFlagEntry(
     val id: Short,
@@ -30,17 +30,16 @@ data class SaveBlockEntry(
 }
 
 /**
- * The state the client's own script VM reads and writes: the engine's `VarsFlags` save block,
- * sent as a sparse list either way, and the whole save blocks that hang off the same
- * ownership.
+ * The state the client's own script VM reads and writes: the engine's `VarsFlags` save block, sent
+ * as a sparse list either way, and the whole save blocks that hang off the same ownership.
  */
 data class ScriptStatePacket(
     val flags: List<ScriptFlagEntry>,
     val vars: List<ScriptVarEntry>,
     /**
      * Save blocks, on the same terms as the two lists above: absolute coming down, only what
-     * changed going up. Empty by default so a body that ends before the block count still
-     * decodes as the seat it is.
+     * changed going up. Empty by default so a body that ends before the block count still decodes
+     * as the seat it is.
      */
     val blocks: List<SaveBlockEntry> = emptyList(),
 )

@@ -33,9 +33,9 @@ class BreedingRegistry @Inject constructor() {
   fun incenseBabies(): List<IncenseBaby> = GeneratedBreeding.INCENSE_BABIES
 
   /**
-   * How well the two would breed. Two monsters of the same species and different trainers are
-   * the best pairing there is; a Ditto pairs with anything but another Ditto, and never at the
-   * top score.
+   * How well the two would breed. Two monsters of the same species and different trainers are the
+   * best pairing there is; a Ditto pairs with anything but another Ditto, and never at the top
+   * score.
    */
   fun compatibility(first: BreedingParent, second: BreedingParent): BreedingCompatibility {
     val groups =
@@ -67,9 +67,8 @@ class BreedingRegistry @Inject constructor() {
   }
 
   /**
-   * The species a pairing's egg would be, or null when neither monster can be the mother, a
-   * Ditto or a female is what makes one, and a pair with neither never gets this far in the
-   * game.
+   * The species a pairing's egg would be, or null when neither monster can be the mother, a Ditto
+   * or a female is what makes one, and a pair with neither never gets this far in the game.
    */
   fun eggSpecies(
       first: BreedingParent,

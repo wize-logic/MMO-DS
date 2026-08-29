@@ -6,9 +6,9 @@ import de.fiereu.bytecodec.S8
 import de.fiereu.bytecodec.Utf16LeNullTerminated
 
 /**
- * Where a direct trade stands. The official client's trade screen speaks only 0x50 (an action byte up) and
- * 0x52 (a slot up, a monster record down), so the session's own state has no official packet;
- * this one is ours, on an s2c slot the official client leaves empty.
+ * Where a direct trade stands. The official client's trade screen speaks only 0x50 (an action byte
+ * up) and 0x52 (a slot up, a monster record down), so the session's own state has no official
+ * packet; this one is ours, on an s2c slot the official client leaves empty.
  */
 data class TradeStatePacket(
     val state: Byte,

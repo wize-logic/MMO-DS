@@ -26,8 +26,8 @@ private val BattleListTrainerCodec: Codec<BattleListTrainer> =
     }
 
 /**
- * One battle in progress, as the window's Matches tab draws it: a queue, two scalars it prints
- * as a rating and a duration, and the trainers on each side.
+ * One battle in progress, as the window's Matches tab draws it: a queue, two scalars it prints as a
+ * rating and a duration, and the trainers on each side.
  */
 data class BattleListRow(
     val battleId: Int,

@@ -41,9 +41,9 @@ private val FLUSH_DEBOUNCE = 10.seconds
 const val MONEY_MAX = 999_999
 
 /**
- * How many monsters the PC holds: the engine's eighteen boxes of thirty, which is what our
- * client can actually draw and address. The boxes are a view over one flat list here rather
- * than containers of their own, so a slot is `box * 30 + position`.
+ * How many monsters the PC holds: the engine's eighteen boxes of thirty, which is what our client
+ * can actually draw and address. The boxes are a view over one flat list here rather than
+ * containers of their own, so a slot is `box * 30 + position`.
  */
 const val PC_STORAGE_SIZE = 18 * 30
 
@@ -61,8 +61,8 @@ data class StoredCharacter(
 
 /**
  * Refusal of a name some other character already answers to. It is thrown rather than returned
- * because every caller wants the character it asked for, and a name already spoken for is the
- * one ordinary way it does not get one.
+ * because every caller wants the character it asked for, and a name already spoken for is the one
+ * ordinary way it does not get one.
  */
 class CharacterNameTakenException(val name: String) :
     IllegalStateException("character name '$name' is already taken")
@@ -184,9 +184,9 @@ constructor(
       characters.values.firstOrNull { it.info.name.equals(name, ignoreCase = true) }
 
   /**
-   * The id and stored spelling of whoever answers to [name], ignoring case. The cache holds
-   * only the connected characters, so the database answers for everybody else, which is how
-   * mail reaches a player who is not online.
+   * The id and stored spelling of whoever answers to [name], ignoring case. The cache holds only
+   * the connected characters, so the database answers for everybody else, which is how mail reaches
+   * a player who is not online.
    */
   suspend fun findIdByName(name: String): Pair<Long, String>? =
       findCachedByName(name)?.let { it.info.id to it.info.name } ?: repository.findIdByName(name)
@@ -225,9 +225,9 @@ constructor(
   }
 
   /**
-   * Applies [change] to the cached character under the map's own lock. Scripts run on their
-   * own coroutine while packets are answered on the mailbox coroutine, so a plain read, copy
-   * and write would let one thread drop the other's field.
+   * Applies [change] to the cached character under the map's own lock. Scripts run on their own
+   * coroutine while packets are answered on the mailbox coroutine, so a plain read, copy and write
+   * would let one thread drop the other's field.
    */
   private fun mutate(characterId: Long, change: (StoredCharacter) -> StoredCharacter?): Boolean {
     var applied = false
@@ -287,9 +287,7 @@ constructor(
     }
   }
 
-  /**
-   * Seats one monster in the container [pokemon] names, and answers with it as it was seated.
-   */
+  /** Seats one monster in the container [pokemon] names, and answers with it as it was seated. */
   suspend fun addPokemon(
       characterId: Long,
       pokemon: Pokemon,
@@ -376,8 +374,8 @@ constructor(
   }
 
   /**
-   * One half of a trade: the party monster [outgoingId] leaves and [incoming] takes its exact
-   * slot, in a single durable write.
+   * One half of a trade: the party monster [outgoingId] leaves and [incoming] takes its exact slot,
+   * in a single durable write.
    */
   suspend fun swapPartyMonster(characterId: Long, outgoingId: Long, incoming: Pokemon): Pokemon? {
     var removed: Pokemon? = null
@@ -573,14 +571,13 @@ constructor(
   }
 
   /**
-   * Marks the character dirty and writes it before returning. Anything a player can trade or
-   * spend goes through here, so a crash cannot lose an item that the client was already told
-   * it has.
+   * Marks the character dirty and writes it before returning. Anything a player can trade or spend
+   * goes through here, so a crash cannot lose an item that the client was already told it has.
    */
   /**
-   * Applies a change to something a player can trade or spend and writes it before returning.
-   * A failed write is undone by [rollback] and reported, so a caller never tells a player
-   * about an item, a coin or a monster the database did not accept.
+   * Applies a change to something a player can trade or spend and writes it before returning. A
+   * failed write is undone by [rollback] and reported, so a caller never tells a player about an
+   * item, a coin or a monster the database did not accept.
    */
   private suspend fun mutateDurably(
       characterId: Long,
@@ -600,9 +597,9 @@ constructor(
       }
 
   /**
-   * Persist the character and drop it from the cache once the write succeeded. While the save
-   * keeps failing the character stays cached and dirty, and the periodic flusher finishes the
-   * eviction on its next successful write.
+   * Persist the character and drop it from the cache once the write succeeded. While the save keeps
+   * failing the character stays cached and dirty, and the periodic flusher finishes the eviction on
+   * its next successful write.
    */
   fun unloadCharacterAsync(characterId: Long, unfinishedScript: StoredCharacter? = null) {
     pendingUnload.add(characterId)

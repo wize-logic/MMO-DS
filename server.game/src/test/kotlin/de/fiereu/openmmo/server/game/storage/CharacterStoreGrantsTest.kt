@@ -49,8 +49,8 @@ class CharacterStoreGrantsTest :
       }
 
       /**
-       * The report a client sends when its own engine earned or spent is a *delta*, and this
-       * is why.
+       * The report a client sends when its own engine earned or spent is a *delta*, and this is
+       * why.
        */
       test("a spend and an earning that overlap both land") {
         runTest {
@@ -98,9 +98,9 @@ class CharacterStoreGrantsTest :
       }
 
       /**
-       * Two scenes granting at once used to be handed the same free slot, and the box screen
-       * drops one of a pair that share one: it keys the container by slot before writing it
-       * back, so the next thing the player drags deletes the monster that lost the collision.
+       * Two scenes granting at once used to be handed the same free slot, and the box screen drops
+       * one of a pair that share one: it keys the container by slot before writing it back, so the
+       * next thing the player drags deletes the monster that lost the collision.
        */
       test("two grants that arrive together are seated in different slots") {
         runTest {
@@ -138,8 +138,8 @@ class CharacterStoreGrantsTest :
       }
 
       /**
-       * A rollback is there so that a scene stopped before its own story var was advanced
-       * cannot be replayed on top of the rewards it already handed out.
+       * A rollback is there so that a scene stopped before its own story var was advanced cannot be
+       * replayed on top of the rewards it already handed out.
        */
       test("an unfinished script gives back what it granted and keeps where it left the player") {
         runTest {

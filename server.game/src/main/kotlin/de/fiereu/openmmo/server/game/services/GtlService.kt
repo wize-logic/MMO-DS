@@ -101,10 +101,10 @@ private const val PRICE_CHANGE_COOLDOWN_MIN = 10L
 private const val LOG_ROWS = 30
 
 /**
- * The global trade link, official-shaped: an anonymous shelf of monsters and item stacks anyone
- * can search; item listings sell by the unit, proceeds park on the row until the seller
- * presses Claim, listing costs a fee that is not refunded, and every verb is answered with a
- * result code the window maps to the official client's own toasts ([GtlResultPacket]).
+ * The global trade link, official-shaped: an anonymous shelf of monsters and item stacks anyone can
+ * search; item listings sell by the unit, proceeds park on the row until the seller presses Claim,
+ * listing costs a fee that is not refunded, and every verb is answered with a result code the
+ * window maps to the official client's own toasts ([GtlResultPacket]).
  */
 @Singleton
 class GtlService
@@ -204,8 +204,8 @@ constructor(
   }
 
   /**
-   * c2s 0x9A: put something up, the official client's own create packet: kind, the monster's id or the
-   * item's, the unit price, the quantity. The goods leave first, the fee is paid second, the
+   * c2s 0x9A: put something up, the official client's own create packet: kind, the monster's id or
+   * the item's, the unit price, the quantity. The goods leave first, the fee is paid second, the
    * row is written third, and every later failure walks the earlier steps back.
    */
   suspend fun onCreateListing(event: PacketEvent<CreateMarketListingPacket>) {
@@ -505,7 +505,10 @@ constructor(
     event.session.send(emptyMarketBoard())
   }
 
-  /** The retired 0xE1 create tail. The official client's 0xE1 is a template search; not this shelf's verb. */
+  /**
+   * The retired 0xE1 create tail. The official client's 0xE1 is a template search; not this shelf's
+   * verb.
+   */
   fun onLegacyCreate(event: PacketEvent<GtlCreateListingPacket>) {
     log.debug { "gtl legacy 0xE1 create ignored (${event.packet.categoryIndex})" }
   }

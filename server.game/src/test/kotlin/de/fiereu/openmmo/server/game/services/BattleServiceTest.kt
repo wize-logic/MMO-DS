@@ -476,9 +476,9 @@ class BattleServiceTest :
       }
 
       /**
-       * The cartridge sends a catch to the box when the party is full. Appending a seventh
-       * party member instead made a monster the box screen cannot draw and cannot move out
-       * again, its slot is past the six the party addresses.
+       * The cartridge sends a catch to the box when the party is full. Appending a seventh party
+       * member instead made a monster the box screen cannot draw and cannot move out again, its
+       * slot is past the six the party addresses.
        */
       test("a catch with a full party goes to the box") {
         runTest {
@@ -511,9 +511,9 @@ class BattleServiceTest :
       }
 
       /**
-       * Six in the party and every box slot taken. The cartridge never lets that encounter
-       * start; ours ended the battle with the monster caught and then dropped on the floor,
-       * which is the one outcome a player cannot recover from.
+       * Six in the party and every box slot taken. The cartridge never lets that encounter start;
+       * ours ended the battle with the monster caught and then dropped on the floor, which is the
+       * one outcome a player cannot recover from.
        */
       test("a catch with no room anywhere is refused and the battle stands") {
         runTest {

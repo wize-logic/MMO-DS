@@ -315,9 +315,9 @@ class PlatinumNdsParser(
       }
 
   /**
-   * The named values the init tables compare against. Only the Distortion World's progress
-   * enum and the decomp's own booleans appear in 207 rows, so this reads that one enum rather
-   * than every constant header in the decomp.
+   * The named values the init tables compare against. Only the Distortion World's progress enum and
+   * the decomp's own booleans appear in 207 rows, so this reads that one enum rather than every
+   * constant header in the decomp.
    */
   private val initScriptConstants: Map<String, Int> by lazy {
     val file = File(rootDir, "include/constants/distortion_world.h")
@@ -521,8 +521,8 @@ class PlatinumNdsParser(
 
   /**
    * The map's encounter archive, or null where it has none or holds no fixed tables. The Great
-   * Marsh and the Trophy Garden rotate their tables daily and store them in a shape of their
-   * own; nothing here invents a fixed table for them.
+   * Marsh and the Trophy Garden rotate their tables daily and store them in a shape of their own;
+   * nothing here invents a fixed table for them.
    */
   private fun readEncounterArchive(fields: Map<String, String>): JsonObject? {
     val archive = fields["wildEncountersArchiveID"] ?: return null
@@ -598,8 +598,8 @@ class PlatinumNdsParser(
 
   /**
    * The archive's form words. `CreateWildMon` reads the first two as the sea a Shellos or a
-   * Gastrodon came from, and the Unown table id picks a group of letters; the remaining three
-   * it never reads at all, so they are carried in file order rather than named.
+   * Gastrodon came from, and the Unown table id picks a group of letters; the remaining three it
+   * never reads at all, so they are carried in file order rather than named.
    */
   private fun readForms(obj: JsonObject?): ParsedEncounterForms? {
     if (obj == null) return null

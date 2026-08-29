@@ -228,9 +228,9 @@ constructor(
   }
 
   /**
-   * The matrix's own header grid, which is the only thing that says which map a tile belongs
-   * to on a region built this way: `FieldMap_ChangeZone` reads exactly this and swaps the map
-   * header under the player without moving them.
+   * The matrix's own header grid, which is the only thing that says which map a tile belongs to on
+   * a region built this way: `FieldMap_ChangeZone` reads exactly this and swaps the map header
+   * under the player without moving them.
    */
   private fun changedZone(
       ctx: SessionContext,
@@ -332,8 +332,8 @@ constructor(
   }
 
   /**
-   * Whether a step lands somewhere the player can be, which is the collision bit, what the
-   * tile is, and, since Strength, whether a boulder is standing on it.
+   * Whether a step lands somewhere the player can be, which is the collision bit, what the tile is,
+   * and, since Strength, whether a boulder is standing on it.
    */
   private fun isWalkable(
       map: MapDef,

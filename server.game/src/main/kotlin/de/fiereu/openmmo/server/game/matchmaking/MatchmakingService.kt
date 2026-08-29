@@ -26,9 +26,7 @@ import javax.inject.Singleton
 
 private val log = KotlinLogging.logger {}
 
-/**
- * Matchmaking: whether a party may enter a queue, and who it meets when a round comes round.
- */
+/** Matchmaking: whether a party may enter a queue, and who it meets when a round comes round. */
 @Singleton
 class MatchmakingService
 @Inject
@@ -97,8 +95,8 @@ constructor(
   fun languagesOf(charId: Long): List<Byte> = languages[charId] ?: emptyList()
 
   /**
-   * Run one round of one queue: pair off everyone waiting, in the order they arrived, and seat
-   * each pair. An odd one out keeps their place and is told the round could not place them.
+   * Run one round of one queue: pair off everyone waiting, in the order they arrived, and seat each
+   * pair. An odd one out keeps their place and is told the round could not place them.
    */
   fun runRound(queue: MatchmakingQueue): Int {
     val waiting = waitingIn(queue).filter { canStillFight(it) }

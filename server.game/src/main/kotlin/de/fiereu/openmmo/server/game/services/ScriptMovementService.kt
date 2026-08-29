@@ -18,9 +18,9 @@ import kotlinx.coroutines.delay
 private val log = KotlinLogging.logger {}
 
 /**
- * Drives scripted overworld movement (the decomp applymovement/waitmovement). Steps play one
- * tile at a time with a short delay between them, so the call only returns once the whole path
- * is done, which is exactly waitmovement.
+ * Drives scripted overworld movement (the decomp applymovement/waitmovement). Steps play one tile
+ * at a time with a short delay between them, so the call only returns once the whole path is done,
+ * which is exactly waitmovement.
  */
 @Singleton
 class ScriptMovementService
@@ -144,8 +144,8 @@ constructor(
 
   /**
    * Remove the npc a script was triggered by, the decomp's `RemoveObject VAR_LAST_TALKED`. The
-   * script only has the entity id it was handed, so the map's own object list is walked back
-   * to find whose it is.
+   * script only has the entity id it was handed, so the map's own object list is walked back to
+   * find whose it is.
    */
   fun removeNpcTalkedTo(session: SessionContext, state: PlayerState, entityId: Long) {
     val charId = state.characterId ?: return

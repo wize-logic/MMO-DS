@@ -12,8 +12,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Overworld presence built on the generic [InterestManager]. A player's map is one interest
- * group.
+ * Overworld presence built on the generic [InterestManager]. A player's map is one interest group.
  */
 @Singleton
 class PresenceService

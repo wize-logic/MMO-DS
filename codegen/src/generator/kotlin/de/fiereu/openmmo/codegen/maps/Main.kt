@@ -14,8 +14,8 @@ private fun parseRegionSource(spec: String): RegionSource {
 }
 
 /**
- * The terrain of maps that reached the client out of another cartridge, which have no region
- * of their own here: `ported|<decomp dir>|<mmo dir>|<name>,<name>`.
+ * The terrain of maps that reached the client out of another cartridge, which have no region of
+ * their own here: `ported|<decomp dir>|<mmo dir>|<name>,<name>`.
  */
 private data class PortedSource(val dir: File, val mmoDir: File, val names: List<String>)
 

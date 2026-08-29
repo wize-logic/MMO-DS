@@ -29,9 +29,8 @@ import kotlinx.coroutines.launch
 private val log = KotlinLogging.logger {}
 
 /**
- * Launches a [Script] on the connection's own coroutine scope so it can wait on a dialog
- * without blocking packet handling. Shared by every script trigger (npc/sign interactions and
- * map entry).
+ * Launches a [Script] on the connection's own coroutine scope so it can wait on a dialog without
+ * blocking packet handling. Shared by every script trigger (npc/sign interactions and map entry).
  */
 @Singleton
 class ScriptRunner
@@ -53,9 +52,9 @@ constructor(
       runAll(session, state, listOf(script), entityId)
 
   /**
-   * Undoes what a script wrote when it does not reach its end. Scenes advance their story var
-   * last, so leaving the earlier writes in place would let the next login replay the scene on
-   * top of them, granting its rewards twice.
+   * Undoes what a script wrote when it does not reach its end. Scenes advance their story var last,
+   * so leaving the earlier writes in place would let the next login replay the scene on top of
+   * them, granting its rewards twice.
    */
   suspend fun rollBack(session: SessionContext, state: PlayerState, entityId: Long) {
     val snapshot = session.attributes.remove(SCRIPT_SNAPSHOT) ?: return
@@ -65,8 +64,7 @@ constructor(
   }
 
   /**
-   * Takes the snapshot of a script that is still running, for a caller that will undo it
-   * itself.
+   * Takes the snapshot of a script that is still running, for a caller that will undo it itself.
    */
   fun takeRollback(session: SessionContext): StoredCharacter? =
       session.attributes.remove(SCRIPT_SNAPSHOT)

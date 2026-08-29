@@ -101,9 +101,9 @@ class FieldMoveWallTest :
       }
 
       /**
-       * **Water carries no collision.** Every surfable tile in Sinnoh has the impassable bit
-       * clear, because on the cartridge it is the avatar's own state that keeps a walking
-       * player off the water, and that state is the client's.
+       * **Water carries no collision.** Every surfable tile in Sinnoh has the impassable bit clear,
+       * because on the cartridge it is the avatar's own state that keeps a walking player off the
+       * water, and that state is the client's.
        */
       test("a lake is a wall to a player on foot and a road to one on the water") {
         runTest {

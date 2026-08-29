@@ -4,8 +4,8 @@ import de.fiereu.openmmo.codegen.defineTable
 import java.io.File
 
 /**
- * Maps the decomp's internal species id to its national dex number. The two match through gen
- * 1 but diverge from gen 3 on.
+ * Maps the decomp's internal species id to its national dex number. The two match through gen 1 but
+ * diverge from gen 3 on.
  */
 object NationalDex {
 

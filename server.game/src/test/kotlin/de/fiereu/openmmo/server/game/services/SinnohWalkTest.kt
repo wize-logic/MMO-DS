@@ -78,8 +78,8 @@ class SinnohWalkTest :
         }
       }
       /**
-       * Twinleaf Town is a matrix map, so its tiles are global: the doorstep of the player's
-       * house is (116, 886), not (6, 9).
+       * Twinleaf Town is a matrix map, so its tiles are global: the doorstep of the player's house
+       * is (116, 886), not (6, 9).
        */
       test("a step on a Sinnoh matrix map reaches observers in a packet that holds the tile") {
         runTest {
@@ -131,9 +131,9 @@ class SinnohWalkTest :
         }
       }
       /**
-       * The four steps off the bed are the four tiles carrying the bedroom's coord triggers,
-       * whose scripts are the ids 7, 8, 9 and 10, ids, not labels, because a Sinnoh event
-       * carries a number that only means anything on its own map.
+       * The four steps off the bed are the four tiles carrying the bedroom's coord triggers, whose
+       * scripts are the ids 7, 8, 9 and 10, ids, not labels, because a Sinnoh event carries a
+       * number that only means anything on its own map.
        */
       test("a bedroom coordinate trigger resolves the map's own numeric script id") {
         runTest {
@@ -168,9 +168,9 @@ class SinnohWalkTest :
       }
 
       /**
-       * A coordinate trigger is a rectangle. The band across the top of Twinleaf Town is the
-       * only way out to Route 201 and it is eight tiles wide, and the scene it runs reads the
-       * column the player is standing on to know which way to walk the guitarist.
+       * A coordinate trigger is a rectangle. The band across the top of Twinleaf Town is the only
+       * way out to Route 201 and it is eight tiles wide, and the scene it runs reads the column the
+       * player is standing on to know which way to walk the guitarist.
        */
       test("a coordinate trigger wider than one tile fires from every column it covers") {
         runTest {

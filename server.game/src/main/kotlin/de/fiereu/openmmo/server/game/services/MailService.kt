@@ -39,8 +39,8 @@ private const val MAIL_SELF = 15
 private const val MAIL_OWN_BOX_FULL = 18
 
 /**
- * Rows on one page of the box. The official client's own pager is `f/rV0`, a `Cp0(10, 8)`: ten rows to a
- * page, eight page buttons.
+ * Rows on one page of the box. The official client's own pager is `f/rV0`, a `Cp0(10, 8)`: ten rows
+ * to a page, eight page buttons.
  */
 const val MAIL_PAGE_ROWS = 10
 

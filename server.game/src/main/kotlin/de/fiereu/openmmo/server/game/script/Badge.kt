@@ -1,8 +1,6 @@
 package de.fiereu.openmmo.server.game.script
 
-/**
- * The eight gym badges, in the decomp's own `BADGE_ID_*` order, so an ordinal here is that id.
- */
+/** The eight gym badges, in the decomp's own `BADGE_ID_*` order, so an ordinal here is that id. */
 enum class Badge {
   COAL,
   FOREST,

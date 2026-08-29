@@ -15,9 +15,9 @@ data class ComputedStats(
 )
 
 /**
- * Shedinja, whose maximum hit points are one whatever its level, IVs and EVs would otherwise
- * come to. Wonder Guard is the point of the species and the single hit point is the other half
- * of it, so the games write the number down rather than compute it.
+ * Shedinja, whose maximum hit points are one whatever its level, IVs and EVs would otherwise come
+ * to. Wonder Guard is the point of the species and the single hit point is the other half of it, so
+ * the games write the number down rather than compute it.
  */
 private const val SHEDINJA = 292
 

@@ -163,8 +163,8 @@ constructor(
 
   /**
    * Start a contest out of the queue for one rank and type if it can. Called on every join and
-   * meant to be called on a timer too; both are safe, because the decision is only ever made
-   * from the queue as it stands.
+   * meant to be called on a timer too; both are safe, because the decision is only ever made from
+   * the queue as it stands.
    */
   fun fill(rank: Int, type: Int) {
     val now = System.currentTimeMillis()
@@ -232,8 +232,8 @@ constructor(
   }
 
   /**
-   * The seat frame's body: rank, type, human count, then per seat a flags byte, a gender byte
-   * and a UTF-16 null-terminated name.
+   * The seat frame's body: rank, type, human count, then per seat a flags byte, a gender byte and a
+   * UTF-16 null-terminated name.
    */
   private fun seatPayload(contest: Contest): ByteArray {
     val out = ByteArrayOutputStream()
@@ -266,9 +266,9 @@ constructor(
       )
 
   /**
-   * One of the contest's own comm commands, or a barrier, to everybody else. The sender's seat
-   * is stamped on the way down because a four-party relay cannot infer it, and the payload is
-   * not read: it is the engine's protocol and its meaning belongs to the engines.
+   * One of the contest's own comm commands, or a barrier, to everybody else. The sender's seat is
+   * stamped on the way down because a four-party relay cannot infer it, and the payload is not
+   * read: it is the engine's protocol and its meaning belongs to the engines.
    */
   private fun relay(charId: Long, msg: ContestCommPacket) {
     val contest = running[seatedIn[charId] ?: return] ?: return

@@ -35,8 +35,8 @@ internal object StoryClientState {
 
   /**
    * The wire holds a variable's value in one signed byte, so a story value outside that range
-   * cannot be sent at all. Saying so out loud beats handing the client a truncated value it
-   * will treat as the real one.
+   * cannot be sent at all. Saying so out loud beats handing the client a truncated value it will
+   * treat as the real one.
    */
   private fun clampToWire(key: String, value: Int): Byte {
     if (value !in Byte.MIN_VALUE..Byte.MAX_VALUE) {
@@ -46,8 +46,8 @@ internal object StoryClientState {
   }
 
   /**
-   * Every var in the GBA range, zeros included. A var back at 0 is stored as absent, so
-   * sending only what is stored would leave the client holding the old value.
+   * Every var in the GBA range, zeros included. A var back at 0 is stored as absent, so sending
+   * only what is stored would leave the client holding the old value.
    */
   fun allVariables(regionId: Byte, vars: Map<String, Int>): List<PlayerVariableEntry> {
     val byId = variables(regionId, vars).associate { it.key.toInt() to it.value }
@@ -57,8 +57,8 @@ internal object StoryClientState {
   }
 
   /**
-   * The seat for the client's own script VM: every `region/vm/...` key this character holds,
-   * turned back into the engine's flag and var ids.
+   * The seat for the client's own script VM: every `region/vm/...` key this character holds, turned
+   * back into the engine's flag and var ids.
    */
   fun scriptState(
       regionId: Byte,

@@ -15,8 +15,8 @@ import javax.inject.Singleton
 
 /**
  * Sends one of each staff packet so a client can be watched decoding them. None of these is
- * addressed to an ordinary player and nothing here is a real lookup: the scalars are fixed and
- * only the shapes matter.
+ * addressed to an ordinary player and nothing here is a real lookup: the scalars are fixed and only
+ * the shapes matter.
  */
 @Singleton
 class GmCommand @Inject constructor() : ChatCommand {

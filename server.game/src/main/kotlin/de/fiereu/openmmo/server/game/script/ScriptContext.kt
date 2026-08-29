@@ -57,9 +57,9 @@ internal constructor(
     get() = state.facingDirection
 
   /**
-   * Where the player is standing, the decomp's `GetPlayerMapPos`. These are matrix
-   * coordinates, the same ones the map's own triggers and objects carry, which is what lets a
-   * scene that spans a wide coordinate trigger pick the path it walks people along.
+   * Where the player is standing, the decomp's `GetPlayerMapPos`. These are matrix coordinates, the
+   * same ones the map's own triggers and objects carry, which is what lets a scene that spans a
+   * wide coordinate trigger pick the path it walks people along.
    */
   val playerX: Int
     get() = state.x.toInt()
@@ -252,9 +252,7 @@ internal constructor(
   fun isPoketchAppRegistered(app: PoketchApp): Boolean =
       app in PoketchApp.ROSTER || isFlagSet(app.keyIn(regionName))
 
-  /**
-   * Put [app] on the device, the decomp's `RegisterPoketchApp`. A roster id is already there.
-   */
+  /** Put [app] on the device, the decomp's `RegisterPoketchApp`. A roster id is already there. */
   fun registerPoketchApp(app: PoketchApp) {
     if (app in PoketchApp.ROSTER) return
     setFlag(app.keyIn(regionName))
@@ -309,8 +307,8 @@ internal constructor(
   fun partyCount(): Int = checkNotNull(player) { STORY_PLAYER_UNAVAILABLE }.partyCount(state)
 
   /**
-   * True when at least two party members can fight, the decomp's `CheckHasTwoAliveMons`. An
-   * egg does not count; neither does a fainted one.
+   * True when at least two party members can fight, the decomp's `CheckHasTwoAliveMons`. An egg
+   * does not count; neither does a fainted one.
    */
   fun hasTwoAliveMons(): Boolean =
       characterId

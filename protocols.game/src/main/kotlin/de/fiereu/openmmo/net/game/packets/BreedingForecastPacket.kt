@@ -10,9 +10,9 @@ data class BreedingStatContribution(
 )
 
 /**
- * One stat's forecast. Entries come in the stat order hp, atk, def, speed, spAtk, spDef, the
- * order a monster record's IVs are already in, so the position in the list is the stat and
- * there is no stat id on the wire.
+ * One stat's forecast. Entries come in the stat order hp, atk, def, speed, spAtk, spDef, the order
+ * a monster record's IVs are already in, so the position in the list is the stat and there is no
+ * stat id on the wire.
  */
 data class BreedingStatEntry(
     val guaranteed: Boolean,

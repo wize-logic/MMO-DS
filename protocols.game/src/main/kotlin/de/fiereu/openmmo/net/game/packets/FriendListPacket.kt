@@ -3,8 +3,8 @@ package de.fiereu.openmmo.net.game.packets
 import de.fiereu.bytecodec.*
 
 /**
- * the official client `f/Prn` as `the official client` reads it. The first byte is consumed and discarded by the
- * constructor; `lastSeen` is `Prn.K5`. The four shorts are `ne0.nV`'s length.
+ * the official client `f/Prn` as `the official client` reads it. The first byte is consumed and
+ * discarded by the constructor; `lastSeen` is `Prn.K5`. The four shorts are `ne0.nV`'s length.
  */
 data class FriendAppearance(
     val name: String,

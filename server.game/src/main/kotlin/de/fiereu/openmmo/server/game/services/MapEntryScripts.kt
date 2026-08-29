@@ -11,9 +11,9 @@ import javax.inject.Singleton
 private val log = KotlinLogging.logger {}
 
 /**
- * Works out which scripts a map runs when a player arrives on it: the ON_TRANSITION script,
- * then the first ON_FRAME entry whose story var matches, then the coordinate trigger the
- * player landed on.
+ * Works out which scripts a map runs when a player arrives on it: the ON_TRANSITION script, then
+ * the first ON_FRAME entry whose story var matches, then the coordinate trigger the player landed
+ * on.
  */
 @Singleton
 class MapEntryScripts
@@ -48,9 +48,9 @@ constructor(
   fun hasCoordinate(map: MapDef, x: Int, y: Int): Boolean = map.coordScripts.any { it.covers(x, y) }
 
   /**
-   * A Sinnoh map's entry scripts are numeric ids that only mean anything on their own map, so
-   * the lookup has to be keyed by the map the way [InteractionService] already keys its npc
-   * and sign scripts.
+   * A Sinnoh map's entry scripts are numeric ids that only mean anything on their own map, so the
+   * lookup has to be keyed by the map the way [InteractionService] already keys its npc and sign
+   * scripts.
    */
   private fun resolve(map: MapDef, label: String): Script? {
     val script =

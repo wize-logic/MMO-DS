@@ -20,8 +20,7 @@ class ChecksumMismatchException(name: String, expected: String, actual: String) 
     Exception("$name hashed to $actual but the feed says $expected")
 
 /**
- * Downloads one feed entry, resuming where it can and refusing bytes that do not match the
- * hash.
+ * Downloads one feed entry, resuming where it can and refusing bytes that do not match the hash.
  */
 class Downloader(
     private val http: HttpClient,

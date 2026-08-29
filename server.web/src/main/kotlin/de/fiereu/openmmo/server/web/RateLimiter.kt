@@ -4,8 +4,8 @@ import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Fixed window counter, one window per key. Registration is the only thing anonymous traffic
- * can make this process write, so it is the only thing that is limited.
+ * Fixed window counter, one window per key. Registration is the only thing anonymous traffic can
+ * make this process write, so it is the only thing that is limited.
  */
 class RateLimiter(
     private val limit: Int,

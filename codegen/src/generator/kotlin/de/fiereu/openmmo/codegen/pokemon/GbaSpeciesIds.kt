@@ -5,8 +5,8 @@ import java.io.File
 
 /**
  * The national dex ids a GBA decomp actually has a monster for. Its species table carries
- * placeholder entries with no stats behind them, and the learnset and trainer readers use this
- * to drop the learnsets and party members that point at one.
+ * placeholder entries with no stats behind them, and the learnset and trainer readers use this to
+ * drop the learnsets and party members that point at one.
  */
 object GbaSpeciesIds {
 

@@ -312,9 +312,8 @@ constructor(
 
   /**
    * A Strength boulder sits where this visit pushed it, not where the map still writes it. The
-   * A-press has to agree with
-   * [de.fiereu.openmmo.server.game.services.FieldMoveService.boulderAt] or a pushed rock can
-   * only be talked to on the tile it left.
+   * A-press has to agree with [de.fiereu.openmmo.server.game.services.FieldMoveService.boulderAt]
+   * or a pushed rock can only be talked to on the tile it left.
    */
   private fun applyBoulderPlacement(npc: NpcDef, state: PlayerState?): NpcDef {
     if (state == null || npc.script != STRENGTH_BOULDER_SCRIPT) return npc

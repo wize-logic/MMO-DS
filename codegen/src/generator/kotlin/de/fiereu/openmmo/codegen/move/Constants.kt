@@ -9,9 +9,9 @@ fun typeRef(token: String): String {
 }
 
 /**
- * The DS tree stores a move's effect as a name; its position in `move_battle_effects.txt` is
- * the number, and that number is [MoveEffect]'s own ordinal. See the enum for what pins the
- * two lists together.
+ * The DS tree stores a move's effect as a name; its position in `move_battle_effects.txt` is the
+ * number, and that number is [MoveEffect]'s own ordinal. See the enum for what pins the two lists
+ * together.
  */
 fun effectRef(effects: Map<String, Int>, token: String): String {
   val ordinal = effects[token]
@@ -23,9 +23,9 @@ fun effectRef(effects: Map<String, Int>, token: String): String {
 }
 
 /**
- * The DS range a move is aimed at, as the target the GBA tree gives the same move. Every pair
- * here but the last two is read off the 351 moves both trees carry, with how many witness it;
- * the last two are ranges Gen 4 added, which no shared move can witness.
+ * The DS range a move is aimed at, as the target the GBA tree gives the same move. Every pair here
+ * but the last two is read off the 351 moves both trees carry, with how many witness it; the last
+ * two are ranges Gen 4 added, which no shared move can witness.
  */
 private val TARGET_BY_RANGE =
     mapOf(

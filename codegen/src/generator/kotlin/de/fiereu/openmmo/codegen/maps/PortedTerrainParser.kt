@@ -5,10 +5,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Base64
 
-/**
- * The walkable surface of a map this game did not ship, read out of the cartridge it came
- * from.
- */
+/** The walkable surface of a map this game did not ship, read out of the cartridge it came from. */
 class PortedTerrainParser(
     private val decompDir: File,
     private val mmoDir: File,
@@ -134,8 +131,8 @@ class PortedTerrainParser(
   )
 
   /**
-   * One matrix. Both games read this container with the same routine: two byte counts, two
-   * flags saying whether the header and altitude grids are present, a name, then the grids.
+   * One matrix. Both games read this container with the same routine: two byte counts, two flags
+   * saying whether the header and altitude grids are present, a name, then the grids.
    */
   private fun readMatrix(file: File): Matrix {
     require(file.isFile) { "no ${file.path}, the ported map's cells cannot be found without it" }

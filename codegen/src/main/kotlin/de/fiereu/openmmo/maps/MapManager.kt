@@ -34,9 +34,9 @@ class MapManager @Inject constructor() {
       maps.values.firstOrNull { normalize(it.name) == normalize(name) }
 
   /**
-   * Every map whose name contains [text], nearest match first: an exact name, then one that
-   * starts with it, then the rest, and alphabetically within each. Empty [text] matches every
-   * named map, which is how the handbook pages through them.
+   * Every map whose name contains [text], nearest match first: an exact name, then one that starts
+   * with it, then the rest, and alphabetically within each. Empty [text] matches every named map,
+   * which is how the handbook pages through them.
    */
   fun search(text: String): List<MapDef> {
     val wanted = normalize(text)

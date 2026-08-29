@@ -618,7 +618,8 @@ object GameProtocol : Protocol() {
 
     s2c<WorldSessionStatePacket>(0xFFu, WorldSessionStatePacketCodec)
 
-    // The local-script block, 0xCB..0xCF. Every other id above is the official client's, read off the official client
+    // The local-script block, 0xCB..0xCF. Every other id above is the official client's, read off
+    // the official client
     // client; these are not, because that client has no packet for them, its server runs the
     // cutscene and its client only ever replies to a box.
     bidi<ScriptStatePacket>(0xCBu, ScriptStatePacketCodec)
@@ -628,7 +629,8 @@ object GameProtocol : Protocol() {
     c2s<BattleOutcomePacket>(0xCFu, BattleOutcomePacketCodec)
 
     // The native link-battle pair, held to the same rule as the block above: C6, C7 and C9 are
-    // the only ids free in both directions of both tables that are not in the official client's E0, EF
+    // the only ids free in both directions of both tables that are not in the official client's E0,
+    // EF
     // entity-update family.
     s2c<LinkBattleOpenPacket>(0xC6u, LinkBattleOpenPacketCodec)
     bidi<LinkBattleDataPacket>(0xC7u, LinkBattleDataPacketCodec)
@@ -637,7 +639,8 @@ object GameProtocol : Protocol() {
     c2s<ContestCommPacket>(0xC6u, ContestCommPacketCodec)
     s2c<ContestCommPacket>(0xCCu, ContestCommPacketCodec)
 
-    // The last of the three, and the same rule again: the official client has no Underground at all, so
+    // The last of the three, and the same rule again: the official client has no Underground at
+    // all, so
     // there is no official shape to follow.
     bidi<UndergroundTalkPacket>(0xC9u, UndergroundTalkPacketCodec)
     c2s<BagDeltaPacket>(0xDDu, BagDeltaPacketCodec)

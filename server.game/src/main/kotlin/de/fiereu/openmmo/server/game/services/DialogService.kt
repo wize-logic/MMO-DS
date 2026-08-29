@@ -90,9 +90,9 @@ class DialogService @Inject constructor() {
   }
 
   /**
-   * Platinum starter picker ROM ids. The wire is the same 0x23 the Emerald one uses, a count
-   * and that many species ids, which the client looks up in its own species-name bank, so the
-   * only Sinnoh things here are the three species and the text.
+   * Platinum starter picker ROM ids. The wire is the same 0x23 the Emerald one uses, a count and
+   * that many species ids, which the client looks up in its own species-name bank, so the only
+   * Sinnoh things here are the three species and the text.
    */
   suspend fun chooseSinnohStarter(session: SessionContext, state: PlayerState): Int {
     val species = listOf(TURTWIG, CHIMCHAR, PIPLUP)
@@ -225,8 +225,8 @@ class DialogService @Inject constructor() {
   }
 
   /**
-   * Shows a dialog box and waits for the player to advance or close it. [actionType] is 3 for
-   * a sign and 4 for an npc box, [entityId] is the speaking npc or -1.
+   * Shows a dialog box and waits for the player to advance or close it. [actionType] is 3 for a
+   * sign and 4 for an npc box, [entityId] is the speaking npc or -1.
    */
   suspend fun showAndWait(
       session: SessionContext,
@@ -369,7 +369,10 @@ class DialogService @Inject constructor() {
     return response.await()
   }
 
-  /** the official client `qM1.b` / iq1 case 9: two unused bytes, S16LE bank, U8 count, S16LE entries. */
+  /**
+   * the official client `qM1.b` / iq1 case 9: two unused bytes, S16LE bank, U8 count, S16LE
+   * entries.
+   */
   private fun listMenuDetail(entries: List<DialogLine>): ByteArray {
     require(entries.isNotEmpty()) { "a text list needs at least one row" }
     require(entries.size <= LIST_MENU_MAX) { "a text list is at most $LIST_MENU_MAX rows" }

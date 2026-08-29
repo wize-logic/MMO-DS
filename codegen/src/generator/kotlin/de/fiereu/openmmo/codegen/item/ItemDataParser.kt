@@ -10,9 +10,9 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * A wire id is regionId * 1000 + index, and the client answers in the region 5 table. Any
- * table keyed by a decomp's own item index has to be lifted into this block before the two can
- * be compared.
+ * A wire id is regionId * 1000 + index, and the client answers in the region 5 table. Any table
+ * keyed by a decomp's own item index has to be lifted into this block before the two can be
+ * compared.
  */
 const val ITEM_REGION_BLOCK = 5000
 

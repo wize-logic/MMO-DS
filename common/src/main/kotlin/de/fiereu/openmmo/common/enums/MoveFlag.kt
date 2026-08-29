@@ -1,9 +1,9 @@
 package de.fiereu.openmmo.common.enums
 
 /**
- * The per move flags both decompilations carry. The first six are the same six in both, one
- * for one, across every move they share; the last two are presentation flags only the DS tree
- * has, and their bits are ours.
+ * The per move flags both decompilations carry. The first six are the same six in both, one for
+ * one, across every move they share; the last two are presentation flags only the DS tree has, and
+ * their bits are ours.
  */
 enum class MoveFlag(val bit: Int) {
   MAKES_CONTACT(1 shl 0),

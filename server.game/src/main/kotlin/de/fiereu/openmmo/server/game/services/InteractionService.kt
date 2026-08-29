@@ -65,8 +65,8 @@ constructor(
   }
 
   /**
-   * The player pressed the action button on the tile they face: a person, a sign, or a piece
-   * of furniture.
+   * The player pressed the action button on the tile they face: a person, a sign, or a piece of
+   * furniture.
    */
   fun onTileInteract(event: PacketEvent<TileInteractPacket>) {
     val session = event.session
@@ -147,9 +147,7 @@ constructor(
     log.debug { "Tile interaction at ($facingX, $facingY) has no bg event" }
   }
 
-  /**
-   * The shared field-move script an HM tile asks for, or null when the tile is only scenery.
-   */
+  /** The shared field-move script an HM tile asks for, or null when the tile is only scenery. */
   private fun fieldMoveScriptId(
       behavior: TileBehavior?,
       facing: Direction,

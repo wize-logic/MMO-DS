@@ -3,8 +3,8 @@ package de.fiereu.openmmo.net.game.packets.guild
 import de.fiereu.bytecodec.*
 
 /**
- * the official client `the official client` as `f/uI0` and `f/Od0` walk it. Same shape as a friend `Prn`: utf16 name, a
- * discarded byte, last-seen, kind, packed slots, four shorts.
+ * the official client `the official client` as `f/uI0` and `f/Od0` walk it. Same shape as a friend
+ * `Prn`: utf16 name, a discarded byte, last-seen, kind, packed slots, four shorts.
  */
 data class GuildAppearance(
     val name: String,

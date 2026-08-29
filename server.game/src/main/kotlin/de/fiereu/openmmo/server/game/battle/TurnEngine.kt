@@ -55,8 +55,8 @@ private data class StageEffect(val stat: BattleStat, val delta: Int, val onSelf:
 
 /**
  * Resolves one wild battle turn with the Gen 3 core rules: priority and speed order, accuracy
- * stages, the damage formula with crit, stab, and type chart, and stat stage moves. Effects
- * outside that core fail gracefully without touching state.
+ * stages, the damage formula with crit, stab, and type chart, and stat stage moves. Effects outside
+ * that core fail gracefully without touching state.
  */
 @Singleton
 class TurnEngine

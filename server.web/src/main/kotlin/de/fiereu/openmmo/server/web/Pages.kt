@@ -1,8 +1,8 @@
 package de.fiereu.openmmo.server.web
 
 /**
- * The handful of pages this process renders itself: what a visitor sees the moment they submit
- * the form. Everything else is static and served by apache, so these only have to match that
+ * The handful of pages this process renders itself: what a visitor sees the moment they submit the
+ * form. Everything else is static and served by apache, so these only have to match that
  * stylesheet, not reproduce it.
  */
 object Pages {

@@ -8,8 +8,8 @@ import io.kotest.matchers.shouldNotBe
 
 /**
  * Sinnoh comes out of a DS decomp, so nothing the Hoenn and Kanto generators assume holds: the
- * geometry belongs to a *matrix* several map headers share rather than to a map, and the
- * events on it are placed in that matrix's own coordinates.
+ * geometry belongs to a *matrix* several map headers share rather than to a map, and the events on
+ * it are placed in that matrix's own coordinates.
  */
 class SinnohMapTerrainTest :
     FunSpec({

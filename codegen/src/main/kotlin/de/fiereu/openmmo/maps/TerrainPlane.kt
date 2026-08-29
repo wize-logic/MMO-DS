@@ -38,8 +38,7 @@ class TerrainPlane(
   }
 
   /**
-   * The matrix cell altitude under a tile, or null outside the matrix or on a plane without
-   * them.
+   * The matrix cell altitude under a tile, or null outside the matrix or on a plane without them.
    */
   fun altitudeAt(x: Int, y: Int): Int? {
     if (altitudes.isEmpty() || x < 0 || y < 0 || x >= width || y >= height) return null

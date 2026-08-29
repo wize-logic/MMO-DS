@@ -18,8 +18,8 @@ enum class ContestRank {
 }
 
 /**
- * The bit a won ribbon sets, in the same layout the game keeps it in: four ranks per type,
- * types in order, twenty bits of the sixty-four.
+ * The bit a won ribbon sets, in the same layout the game keeps it in: four ranks per type, types in
+ * order, twenty bits of the sixty-four.
  */
 fun superContestRibbonBit(type: ContestType, rank: ContestRank): Long =
     1L shl (type.ordinal * ContestRank.entries.size + rank.ordinal)

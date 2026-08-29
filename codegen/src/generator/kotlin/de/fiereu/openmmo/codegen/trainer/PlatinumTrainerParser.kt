@@ -76,9 +76,9 @@ class PlatinumTrainerParser(private val rootDir: File) {
   }
 
   /**
-   * `sTrainerClassPrizeMul`, which pays a trainer class this much per level of its last
-   * monster, the same shape as the GBA's `gTrainerMoneyTable`, as a designated-initializer
-   * array rather than a list of pairs.
+   * `sTrainerClassPrizeMul`, which pays a trainer class this much per level of its last monster,
+   * the same shape as the GBA's `gTrainerMoneyTable`, as a designated-initializer array rather than
+   * a list of pairs.
    */
   private fun readPrizeRates(): Map<String, Int> {
     val file = File(rootDir, "include/data/trainer_class_prize_mul.h")

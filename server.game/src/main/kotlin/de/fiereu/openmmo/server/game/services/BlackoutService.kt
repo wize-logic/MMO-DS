@@ -26,9 +26,9 @@ constructor(
 ) {
 
   /**
-   * The decomp `setrespawn`, which sits in the ON_TRANSITION script of every map that sets
-   * one. Applied from the map's own data rather than from a ported script, so entering a
-   * Pokémon Center moves the respawn whether or not that map's scripts are ported.
+   * The decomp `setrespawn`, which sits in the ON_TRANSITION script of every map that sets one.
+   * Applied from the map's own data rather than from a ported script, so entering a Pokémon Center
+   * moves the respawn whether or not that map's scripts are ported.
    */
   fun onMapEnter(state: PlayerState, map: MapDef) {
     val charId = state.characterId ?: return

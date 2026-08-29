@@ -12,8 +12,8 @@ import io.kotest.matchers.shouldBe
 import java.io.ByteArrayOutputStream
 
 /**
- * A captured page from client 32710, rewritten so its monster records are the length the
- * client this server speaks to reads.
+ * A captured page from client 32710, rewritten so its monster records are the length the client
+ * this server speaks to reads.
  */
 private fun withRecordsThisClientReads(bytes: ByteArray): ByteArray {
   val out = ByteArrayOutputStream()

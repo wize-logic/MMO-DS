@@ -23,8 +23,8 @@ object FlagVarParser {
       scriptFlags(decompDir, "EventScript_ResetAllMapFlags")
 
   /**
-   * The DS decomp keeps both sets in one enum dump, `generated/vars_flags.txt`, and the game's
-   * own var space starts at 0x4000 partway down it.
+   * The DS decomp keeps both sets in one enum dump, `generated/vars_flags.txt`, and the game's own
+   * var space starts at 0x4000 partway down it.
    */
   fun ndsFlags(decompDir: File): List<StoryConstant> =
       ndsConstants(decompDir).filter { it.name.startsWith("FLAG_") }
@@ -81,8 +81,8 @@ object FlagVarParser {
 
   /**
    * The flags one decomp script sets, found by its label. Each game keeps these scripts in a
-   * different file (Emerald in data/scripts/new_game.inc, FireRed in data/event_scripts.s), so
-   * the label is looked up across the data folder instead of at a fixed path.
+   * different file (Emerald in data/scripts/new_game.inc, FireRed in data/event_scripts.s), so the
+   * label is looked up across the data folder instead of at a fixed path.
    */
   private fun scriptFlags(decompDir: File, label: String): List<String> {
     val file = findScriptFile(decompDir, label) ?: return emptyList()

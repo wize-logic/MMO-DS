@@ -41,8 +41,8 @@ data class Pokemon(
     val sheen: Int = 0,
     /**
      * Super Contest ribbons, a bit per (type, rank) pair, see [superContestRibbonBit]. Not a
-     * trophy: the contest hall refuses a rank above the number of that type's ribbons the
-     * monster already holds, so this is the whole of a player's contest progression.
+     * trophy: the contest hall refuses a rank above the number of that type's ribbons the monster
+     * already holds, so this is the whole of a player's contest progression.
      */
     val superContestRibbons: Long = 0L,
     /** Where this monster was caught: the region, bank and map the trainer was standing on. */

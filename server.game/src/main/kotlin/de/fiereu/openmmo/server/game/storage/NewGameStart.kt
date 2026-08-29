@@ -11,9 +11,9 @@ import de.fiereu.openmmo.story.generated.sinnoh.SinnohFlags
 import de.fiereu.openmmo.story.generated.sinnoh.SinnohVars
 
 /**
- * Where a fresh character starts and the story state its source game would already have set.
- * Every region needs its own entry, so a new region is one function here rather than another
- * branch in [CharacterStore].
+ * Where a fresh character starts and the story state its source game would already have set. Every
+ * region needs its own entry, so a new region is one function here rather than another branch in
+ * [CharacterStore].
  */
 internal data class NewGameStart(
     val bankId: Byte,
@@ -22,14 +22,17 @@ internal data class NewGameStart(
     val y: Short,
     val dynamicWarp: DynamicWarp? = null,
     /**
-     * The respawn the opening sets before the player can reach a Pokémon Center. Both decomps
-     * set it from a script that branches (on gender in Emerald, on a scene var in FireRed), so
-     * it is spelled out here rather than carried by the map the way a Center's is.
+     * The respawn the opening sets before the player can reach a Pokémon Center. Both decomps set
+     * it from a script that branches (on gender in Emerald, on a scene var in FireRed), so it is
+     * spelled out here rather than carried by the map the way a Center's is.
      */
     val healLocation: HealLocation,
     val storyFlags: Set<String> = emptySet(),
     val storyVars: Map<String, Int> = emptyMap(),
-    /** the official client's starting purse. The the official client CharacterInfo captures carry this exact value. */
+    /**
+     * the official client's starting purse. The the official client CharacterInfo captures carry
+     * this exact value.
+     */
     val money: Int = 30000,
     /**
      * Low eight bits of CharacterInfo.permissions as the list capture writes them. 0x100

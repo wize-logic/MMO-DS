@@ -77,9 +77,9 @@ class FlagCommand @Inject constructor(private val story: StoryService) : ChatCom
     fun short(flag: String) = flag.substringAfter('/')
 
     /**
-     * Every flag key both regions declare. Reflection over the generated objects because each
-     * is one const per flag and carries no collection of itself, the same shape /gift reads
-     * items out of.
+     * Every flag key both regions declare. Reflection over the generated objects because each is
+     * one const per flag and carries no collection of itself, the same shape /gift reads items out
+     * of.
      */
     val ALL: List<String> by lazy {
       listOf(SinnohFlags, KantoFlags).flatMap { obj ->

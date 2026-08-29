@@ -16,9 +16,9 @@ fun defineTable(file: File, prefix: String): Map<String, Int> {
 }
 
 /**
- * Reads one of the DS decomp's constant lists under `generated`, where a constant's value is
- * the line it is on. Lines carrying their own `=` value are skipped, the same way the map
- * generator reads them.
+ * Reads one of the DS decomp's constant lists under `generated`, where a constant's value is the
+ * line it is on. Lines carrying their own `=` value are skipped, the same way the map generator
+ * reads them.
  */
 fun generatedEnumTable(file: File): Map<String, Int> {
   require(file.exists()) { "Missing generated constant table at ${file.path}" }

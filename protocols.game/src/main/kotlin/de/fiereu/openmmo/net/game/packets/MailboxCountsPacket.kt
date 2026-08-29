@@ -5,9 +5,9 @@ import de.fiereu.bytecodec.PacketCodec
 import de.fiereu.bytecodec.S16LE
 
 /**
- * the official client `the official client`: three shorts written onto `HQ.gV`, `HQ.NU0` and `HQ.I`. The inbox widget
- * prints `gV` against a hard 250; a rise in `NU0` is "you have received new mail"; the sent
- * widget pages against `I`.
+ * the official client `the official client`: three shorts written onto `HQ.gV`, `HQ.NU0` and
+ * `HQ.I`. The inbox widget prints `gV` against a hard 250; a rise in `NU0` is "you have received
+ * new mail"; the sent widget pages against `I`.
  */
 data class MailboxCountsPacket(
     val inbox: Short,
