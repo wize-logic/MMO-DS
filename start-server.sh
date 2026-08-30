@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Start the databases, the login server and the game server for local play.
-# Safe to run twice: anything already listening is left alone.
+# Safe to run twice: anything already listening is left alone. The website counts as
+# one of the servers: it answers registration and the online count.
 #
 #   ./start-server.sh                 # start everything that is not up
 #   OPENMMO_GAMEPORT=7777 ./start-server.sh
@@ -76,11 +77,41 @@ else
         </dev/null >>"$GAME_LOG" 2>&1 &
 fi
 
+# The website answers registration and the online count, so a server pair without it
+# has no way to make an account. A systemd unit when installed, the built distribution
+# in a checkout, and skipped either way if the port is taken.
+WEB_PORT="${OPENMMO_WEB_PORT:-8088}"
+WEB_LOG="$LOG_DIR/openmmo-web-server.log"
+start_website() {
+    if listening "$WEB_PORT"; then
+        say "website already listening on $WEB_PORT"
+        return 0
+    fi
+    if systemctl list-unit-files openmmo-web.service &>/dev/null &&
+       systemctl cat openmmo-web.service &>/dev/null; then
+        say "starting the website (systemd: openmmo-web)"
+        sudo -n systemctl start openmmo-web 2>/dev/null ||
+            warn "could not start openmmo-web; run: sudo systemctl start openmmo-web"
+        return 0
+    fi
+    if [[ -x ./server.web/build/install/server.web/bin/server.web ]]; then
+        say "starting the website on $WEB_PORT (log: $WEB_LOG)"
+        OPENMMO_WEB_PORT="$WEB_PORT" OPENMMO_WEB_ROOT="${OPENMMO_WEB_ROOT:-$PWD/web/public}" \
+            ./server.web/build/install/server.web/bin/server.web \
+            </dev/null >"$WEB_LOG" 2>&1 &
+    else
+        warn "no website: build it with ./gradlew :server.web:installDist, or install it with sudo ./web/deploy.sh"
+    fi
+}
+start_website
+
 say "waiting for both to accept connections"
 deadline=$((SECONDS + WAIT_SECS))
 while (( SECONDS < deadline )); do
     if listening "$LOGIN_PORT" && listening "$GAME_PORT"; then
         say "login on $LOGIN_PORT, game on $GAME_PORT, ready"
+        listening "$WEB_PORT" && say "website on $WEB_PORT" ||
+            warn "the website is not on $WEB_PORT; registration and the online count are down"
         say "play with ./play.sh, stop with ./stop-server.sh"
         exit 0
     fi

@@ -1,7 +1,7 @@
 [Unit]
 Description=OpenMMO website (registration and status)
 Documentation=https://github.com/wize-logic/OpenMMO
-After=network-online.target
+After=network-online.target docker.service
 Wants=network-online.target
 
 [Service]
@@ -11,7 +11,11 @@ Group=openmmo-web
 # Database credentials and ports. Written by web/deploy.sh, root readable only.
 EnvironmentFile=/etc/openmmo/web.env
 ExecStart=/opt/openmmo/web/bin/server.web
-Restart=on-failure
+# The JVM leaves on SIGTERM with 128+15, which systemd would otherwise record as a
+# failure, so a plain stop left the unit failed and nothing brought it back. Say that
+# exit is clean, and restart on every other way of dying.
+SuccessExitStatus=143
+Restart=always
 RestartSec=5s
 
 # It listens on loopback, reads one directory and talks to postgres. Nothing else.
