@@ -6,6 +6,7 @@ import de.fiereu.network.handlers.ChecksumFrameDecoder
 import de.fiereu.network.handlers.ChecksumFrameEncoder
 import de.fiereu.network.handlers.CipherDecoder
 import de.fiereu.network.handlers.CipherEncoder
+import de.fiereu.network.handlers.ConnectionGuard
 import de.fiereu.network.handlers.InboundRateLimiter
 import de.fiereu.network.handlers.PacketFrameDecoder
 import de.fiereu.network.handlers.PacketFrameEncoder
@@ -27,6 +28,8 @@ fun installPipeline(
     applicationProtocol: Protocol,
     applicationHandlerFactory: () -> ProtocolHandler,
     options: PipelineOptions = PipelineOptions(),
+    /** The one guard a server shares across every channel, or null on a client and in a test. */
+    connectionGuard: ConnectionGuard? = null,
 ) {
   val channel = pipeline.channel()
   val session = MutableSessionContext(side, channel, applicationProtocol)
@@ -58,6 +61,10 @@ fun installPipeline(
         }
       }
 
+  // First, so a connection past a cap is closed before anything is built for it.
+  if (connectionGuard != null) {
+    pipeline.addLast(PipelineNames.CONNECTION_GUARD, connectionGuard)
+  }
   pipeline.addLast(
       PipelineNames.WRITE_TIMEOUT,
       WriteTimeoutHandler(options.writeTimeout.inWholeSeconds, TimeUnit.SECONDS),

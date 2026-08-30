@@ -195,9 +195,23 @@ object LoadMapPacketCodec : PacketCodec<LoadMapPacket>() {
   }
 }
 
+/**
+ * The bytes a length field already named, read only if the frame really holds them.
+ *
+ * This length is a signed 32-bit field off the wire, unlike every other blob here, which is
+ * prefixed by a U8 or U16LE through the shared `bytesPrefixed`. Sizing an allocation from it was an
+ * out of memory in one packet: the codec is registered both ways and a decode runs on any known
+ * opcode, before a handler is looked up and before the session has authenticated. A frame cannot be
+ * wider than the framing ceiling, so what is left in the buffer is the only honest bound there is.
+ */
 private fun FixedReadBytes(n: Int): Codec<ByteArray> =
     object : Codec<ByteArray> {
       override fun read(buf: ReadBuffer): ByteArray {
+        if (n < 0) throw MalformedPacketException("negative compressed length: $n")
+        val remaining = buf.remaining()
+        if (n > remaining) {
+          throw MalformedPacketException("compressed length $n, frame holds $remaining")
+        }
         val arr = ByteArray(n)
         if (n > 0) buf.readBytes(arr)
         return arr

@@ -1,8 +1,10 @@
 package de.fiereu.openmmo.server.game
 
+import de.fiereu.network.ConnectionLimits
 import de.fiereu.network.PipelineNames
 import de.fiereu.network.PipelineOptions
 import de.fiereu.network.SessionIdentity
+import de.fiereu.network.handlers.ConnectionGuard
 import de.fiereu.network.installPipeline
 import de.fiereu.network.session
 import de.fiereu.openmmo.net.game.GameProtocol
@@ -38,6 +40,15 @@ constructor(
     private val sessionRegistry: SessionRegistry,
     private val matchmakingRounds: MatchmakingRounds,
 ) {
+  /**
+   * One guard for the whole server, because it counts. It bounds how many sockets and handshake
+   * keypairs an unnamed peer can make this process carry, and closes one that never speaks.
+   */
+  private val connectionGuard =
+      ConnectionLimits().let {
+        ConnectionGuard(it.maxTotal, it.maxPerAddress, it.handshakeTimeoutSeconds)
+      }
+
   fun start() {
     matchmakingRounds.start()
     val channel =
@@ -56,6 +67,7 @@ constructor(
                         applicationProtocol = GameProtocol,
                         applicationHandlerFactory = { handlerProvider.get() },
                         options = PipelineOptions(checksumSize = config.checksumSize),
+                        connectionGuard = connectionGuard,
                     )
                     val session = ch.session() ?: error("session missing after installPipeline")
                     ch.pipeline()

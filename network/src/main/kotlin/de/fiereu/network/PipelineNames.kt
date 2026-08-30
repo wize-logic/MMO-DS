@@ -1,6 +1,7 @@
 package de.fiereu.network
 
 object PipelineNames {
+  const val CONNECTION_GUARD = "connection-guard"
   const val WRITE_TIMEOUT = "write-timeout"
   const val FRAME_LOGGER = "frame-logger"
   const val FRAME_DECODER = "frame-decoder"

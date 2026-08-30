@@ -10,9 +10,9 @@ import java.nio.charset.StandardCharsets
 private val log = KotlinLogging.logger {}
 
 /**
- * How many characters are in the world right now, for the website. The game protocol never says
- * who is online without a login, so the front page needs this side door. Loopback by default: the
- * only caller is the web server on the same machine.
+ * How many characters are in the world right now, for the website. The game protocol never says who
+ * is online without a login, so the front page needs this side door. Loopback by default: the only
+ * caller is the web server on the same machine.
  */
 class StatusEndpoint(
     private val config: GameServerConfig,

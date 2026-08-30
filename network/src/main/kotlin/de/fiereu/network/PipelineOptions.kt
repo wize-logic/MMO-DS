@@ -19,3 +19,14 @@ data class PipelineOptions(
     val inboundBurst: Int = 512,
     val inboundPerSecond: Int = 256,
 )
+
+/**
+ * Ceilings on connections themselves, for the one [de.fiereu.network.handlers.ConnectionGuard] a
+ * server shares across every channel it accepts. The total is set for a player count in the
+ * hundreds and can be raised; the point is that there is one at all.
+ */
+data class ConnectionLimits(
+    val maxTotal: Int = 2_000,
+    val maxPerAddress: Int = 24,
+    val handshakeTimeoutSeconds: Long = 20,
+)
