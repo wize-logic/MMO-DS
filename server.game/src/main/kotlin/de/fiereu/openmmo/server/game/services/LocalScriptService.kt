@@ -13,6 +13,7 @@ import de.fiereu.openmmo.common.enums.PokemonContainer
 import de.fiereu.openmmo.common.enums.Region
 import de.fiereu.openmmo.items.ItemRegistry
 import de.fiereu.openmmo.maps.MapManager
+import de.fiereu.openmmo.moves.MoveRegistry
 import de.fiereu.openmmo.net.game.packets.BagDeltaPacket
 import de.fiereu.openmmo.net.game.packets.BattleOutcomePacket
 import de.fiereu.openmmo.net.game.packets.ClientScriptOwnershipPacket
@@ -35,6 +36,8 @@ import de.fiereu.openmmo.server.game.storage.MONEY_MAX
 import de.fiereu.openmmo.server.game.storage.SaveBlockRepository
 import de.fiereu.openmmo.server.game.world.UndergroundExit
 import de.fiereu.openmmo.server.game.world.UndergroundMap
+import de.fiereu.openmmo.server.game.world.WarpNeighbours
+import de.fiereu.openmmo.server.game.world.localMapKey
 import io.github.oshai.kotlinlogging.KotlinLogging
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -77,8 +80,21 @@ constructor(
     private val items: ItemRegistry,
     private val species: SpeciesRegistry,
     private val budget: GrantBudget,
+    private val moveRegistry: MoveRegistry,
+    private val reportedIndividual: ReportedIndividual,
+    private val ribbonCredits: ContestRibbonCredits,
+    private val violations: ViolationLog,
+    private val warpNeighbours: WarpNeighbours,
     private val saveBlockRepository: SaveBlockRepository,
 ) {
+
+  /**
+   * How often a reported battle may have paid out. A quarter of a token a second is one battle
+   * every four seconds, faster than any fight here reaches its last turn, and the burst covers a
+   * session catching up. Per report rather than per monster, so a whole party growing out of one
+   * fight costs one.
+   */
+  private val outcomePace = PaceLimit(burst = 10.0, perSecond = 0.25)
 
   /**
    * The client saying whether it runs the game's field scripts itself. It arrives once, in front of
@@ -106,6 +122,9 @@ constructor(
 
   /** A report of what the client's VM wrote. Recorded, never answered. */
   suspend fun onScriptState(event: PacketEvent<ScriptStatePacket>) {
+    // The guard every other handler here opens with, and the one place it was missing. From a
+    // session that does not run the scenes there is no scene behind the report.
+    if (event.session.attributes[CLIENT_RUNS_SCRIPTS] != true) return
     val state = event.session.attributes[PLAYER_STATE] ?: return
     val characterId = state.characterId ?: return
     val regionId = state.regionId.toByte()
@@ -123,7 +142,14 @@ constructor(
     }
     // Every row is a write to this character's story rows, so the count is charged before the
     // first one lands and a refused report writes nothing.
-    if (!budget.allow(characterId, GrantBudget.Kind.STORY_WRITES, msg.flags.size + msg.vars.size)) {
+    // Blocks are counted with the rows. A block is the widest write in the report, and counting
+    // only flags and vars meant a report carrying nothing else spent nothing.
+    val rowsClaimed = msg.flags.size + msg.vars.size + msg.blocks.size
+    if (!budget.allow(characterId, GrantBudget.Kind.STORY_WRITES, rowsClaimed)) {
+      violations.record(
+          characterId,
+          ViolationLog.Kind.PAST_ALLOWANCE,
+          "reported $rowsClaimed story rows, past the window's allowance")
       return
     }
 
@@ -201,6 +227,29 @@ constructor(
       }
       return
     }
+    // The checks above ask whether the destination is a real place. None asked whether it is one
+    // this player could have got to, and the region is the whole game, so the report was a
+    // teleport anywhere in Sinnoh. [WarpNeighbours] reads the warp graph the map data already
+    // describes: one hop from the map they were on, that map, a Pokemon Centre for a blackout, or
+    // their own dynamic warp.
+    val cameFrom = stored.info
+    val destination = localMapKey(bank.toInt(), map.toInt())
+    val reachable =
+        warpNeighbours.oneHopFrom(
+            regionId.toInt(), cameFrom.positionBankId.toInt(), cameFrom.positionMapId.toInt())
+    val dynamic = cameFrom.dynamicWarp
+    val dynamicAllows =
+        dynamic != null &&
+            dynamic.regionId == regionId &&
+            localMapKey(dynamic.bankId.toInt(), dynamic.mapId.toInt()) == destination
+    if (destination !in reachable && !dynamicAllows) {
+      violations.record(
+          characterId,
+          ViolationLog.Kind.IMPOSSIBLE_POSITION,
+          "reports walking itself to $regionId:$bank:$map, which is not one warp from" +
+              " ${cameFrom.positionBankId}:${cameFrom.positionMapId}")
+      return
+    }
 
     val facing = Direction.entries.getOrNull(msg.direction) ?: stored.info.positionFacing
     val samePlace =
@@ -268,6 +317,22 @@ constructor(
     // One row per monster. A party holds six, so a report naming the same one many times is not
     // many battles.
     val rows = event.packet.mons.distinctBy { it.id }.take(MAX_PARTY_SIZE)
+    // A fight takes time and nothing here knew that. A ceiling bounded one report and a window
+    // bounded a minute of them, but nothing put a floor under how often a battle can end. One
+    // token per report that claims growth; a report that changes nothing is free, which is what a
+    // closed menu sends.
+    val claimsGrowth =
+        rows.any { entry ->
+          val mon = stored.pokemon.firstOrNull { it.id == entry.id } ?: return@any false
+          entry.level > mon.level || entry.xp > mon.xp
+        }
+    if (claimsGrowth && !outcomePace.allow(characterId)) {
+      violations.record(
+          characterId,
+          ViolationLog.Kind.IMPOSSIBLE_PACE,
+          "reports a battle ending sooner than one can be fought")
+      return
+    }
     for (entry in rows) {
       if (entry.level !in 1..ExpCurves.MAX_LEVEL || entry.xp < 0) continue
       val mon =
@@ -308,8 +373,30 @@ constructor(
               " past the $ceiling that level can hold, clamped"
         }
       }
+      // A reported moveset was taken whole, and the in-battle gate decides what a monster may
+      // use by reading the stored one, so a report could write an unlearnable move in and make
+      // every later check agree with it. What a fight can add is what the species learns by level
+      // up at or below the level reported; whatever is already on the record stays allowed.
+      val learnable =
+          (mon.moves.map { it.id.toInt() } + learnsets.movesAt(mon.dexId, level)).toSet()
+      val reportedMoves = entry.moves.filter { it.id != 0 }
+      val unlearnable =
+          reportedMoves.filter { it.id !in learnable || moveRegistry.get(it.id) == null }
       val moves =
-          entry.moves.filter { it.id != 0 }.map { PokemonMove(it.id.toShort(), it.pp.toByte()) }
+          if (unlearnable.isEmpty()) {
+            reportedMoves.map {
+              val maxPp = moveRegistry.get(it.id)?.pp ?: it.pp
+              PokemonMove(it.id.toShort(), it.pp.coerceIn(0, maxPp).toByte())
+            }
+          } else {
+            violations.record(
+                characterId,
+                ViolationLog.Kind.ILLEGAL_MOVESET,
+                "reports monster ${entry.id} (dex ${mon.dexId}) knowing" +
+                    " ${unlearnable.joinToString { "${it.id}" }}, which nothing at level $level" +
+                    " could have taught it; the stored moveset stands")
+            emptyList()
+          }
       // The contest half of the same report. All three only ever go up: a Poffin adds to a
       // condition and a contest adds a ribbon, and nothing in the game takes either away. Up was
       // unbounded, and one packet took every condition to the ceiling. A contest is scored against
@@ -346,9 +433,19 @@ constructor(
               mon.superContestRibbons
             }
             newRibbons == 0L -> mon.superContestRibbons
-            budget.allow(characterId, GrantBudget.Kind.RIBBONS, 1) ->
-                mon.superContestRibbons or newRibbons
-            else -> mon.superContestRibbons
+            !budget.allow(characterId, GrantBudget.Kind.RIBBONS, 1) -> mon.superContestRibbons
+            // A rate said how fast the set could be claimed and never whether a contest happened.
+            // [ContestService] settles one by agreement between every seat, which is the only
+            // evidence there is, and leaves a credit here. A ribbon spends one.
+            !ribbonCredits.spend(characterId) -> {
+              violations.record(
+                  characterId,
+                  ViolationLog.Kind.IMPOSSIBLE_MONSTER,
+                  "reports a Super Contest ribbon on monster ${entry.id} with no contest settled" +
+                      " to pay for it")
+              mon.superContestRibbons
+            }
+            else -> mon.superContestRibbons or newRibbons
           }
       val grown =
           mon.copy(
@@ -436,7 +533,26 @@ constructor(
       log.warn { "Character $characterId reports item ${msg.itemId}, which is not an item" }
       return
     }
-    if (!budget.allow(characterId, GrantBudget.Kind.ITEMS, msg.delta)) return
+    // A key item is story progress and one-per-save equipment, which is why the broker and the
+    // register wall them off. This wire cannot, because a scene really does hand one over and this
+    // report is how it arrives. What is true of all of them is that nobody is given one twice.
+    if (msg.itemId in KEY_ITEM_IDS && msg.delta > 0) {
+      val held = characterStore.getCharacter(characterId)?.items?.get(msg.itemId) ?: 0
+      if (msg.delta > 1 || held >= 1) {
+        violations.record(
+            characterId,
+            ViolationLog.Kind.FORBIDDEN_ITEM,
+            "reports gaining key item ${msg.itemId} x${msg.delta} while holding $held")
+        return
+      }
+    }
+    if (!budget.allow(characterId, GrantBudget.Kind.ITEMS, msg.delta)) {
+      violations.record(
+          characterId,
+          ViolationLog.Kind.PAST_ALLOWANCE,
+          "reports gaining item ${msg.itemId} x${msg.delta} past the window's allowance")
+      return
+    }
     if (!characterStore.addItem(characterId, msg.itemId, msg.delta)) {
       log.warn {
         "Character $characterId reports item ${msg.itemId} x${msg.delta} the bag cannot take"
@@ -546,24 +662,30 @@ constructor(
     val characterId = state.characterId ?: return
     val msg = event.packet
     if (msg.level !in 1..100) return
-    if (!budget.allow(characterId, GrantBudget.Kind.MONSTERS, 1)) {
-      // The report is the only place this monster exists, so a refusal is a monster the player
-      // caught and will not find. Said out loud rather than dropped in silence.
-      log.warn {
-        "char=$characterId is past its monster allowance; the grant of dex ${msg.dexId}" +
-            " lv ${msg.level} was refused"
-      }
+    if (!budget.allow(characterId, GrantBudget.Kind.MONSTERS, 1) ||
+        !budget.allow(characterId, GrantBudget.Kind.MONSTERS_HOURLY, 1)) {
+      violations.record(
+          characterId,
+          ViolationLog.Kind.PAST_ALLOWANCE,
+          "is past its monster allowance; the grant of dex ${msg.dexId} lv ${msg.level} was" +
+              " refused")
       return
     }
+    // What the client sends about the individual is a name for the capture, not the capture.
+    // [ReportedIndividual] derives the monster behind it from that name, this character, the
+    // species and the server's secret, so the same name always means the same monster and the
+    // client cannot pick what is in it.
+    val rolled =
+        if (msg.seed != 0) reportedIndividual.forToken(characterId, msg.dexId, msg.seed) else null
     // A report of an individual the character already owns is the same catch told twice, not a
     // second monster: the engine rolls a fresh personality per capture, so a matching seed on
     // a matching species is a duplicate report (a client whose box sync re-swept an unanswered
     // grant did exactly that, one copy per following battle).
-    if (msg.seed != 0) {
+    if (rolled != null) {
       val stored = characterStore.getCharacter(characterId)
       val twin =
           (stored?.pokemon.orEmpty() + stored?.pcStorage.orEmpty()).firstOrNull {
-            it.seed == msg.seed && it.dexId == msg.dexId
+            it.seed == rolled.seed && it.dexId == msg.dexId
           }
       if (twin != null) {
         log.warn {
@@ -583,19 +705,17 @@ constructor(
         return
       }
     }
-    // Shininess is the client's word and cannot be checked: the engine rolls it from the
-    // personality it is reporting and a trainer id this record does not carry. Past the allowance
-    // the monster is still granted, as the ordinary one it almost certainly is.
-    val shiny =
-        msg.isShiny &&
-            budget.allow(characterId, GrantBudget.Kind.SHINY, 1).also { allowed ->
-              if (!allowed) {
-                log.warn {
-                  "char=$characterId reports another shiny (dex ${msg.dexId} seed ${msg.seed});" +
-                      " granted as an ordinary one"
-                }
-              }
-            }
+    // Shininess used to be the client's word with no way to check it. It is the server's own draw
+    // now, at the odds the games use, so a shiny that gets here is real and is never downgraded.
+    // The count stays because the derivation leaves one way to hunt: take a monster, look at it,
+    // let it go, report a different name. That costs a slot from the monster allowance each time.
+    val shiny = rolled?.isShiny == true
+    if (shiny && !budget.allow(characterId, GrantBudget.Kind.SHINY, 1)) {
+      violations.record(
+          characterId,
+          ViolationLog.Kind.PAST_ALLOWANCE,
+          "has been handed more shinies than an hour of luck gives (dex ${msg.dexId})")
+    }
     val moves = learnsets.initialMoveset(msg.dexId, msg.level).ifEmpty { listOf(TACKLE_ID) }
     val container = if (msg.container == 0) PokemonContainer.PC else PokemonContainer.PARTY
     val granted =
@@ -611,8 +731,8 @@ constructor(
                 container,
                 msg.slot,
                 // A seed of zero is a report with no individual behind it; the server rolls one.
-                if (msg.seed != 0) StoryPlayerService.Individual(msg.seed, msg.ivBits, shiny)
-                else null,
+                // A name of zero is a report with no capture behind it; the wild roll stands.
+                rolled?.let { StoryPlayerService.Individual(it.seed, it.ivBits, shiny) },
             ))
     if (granted == null) {
       log.warn {

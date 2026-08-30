@@ -21,6 +21,14 @@ class GrantBudget(private val limits: Limits, private val clock: () -> Long) {
       val moneyGained: Int = 1_000_000,
       val itemsGained: Int = 2_000,
       val monstersGranted: Int = 20,
+      /**
+       * Monsters an hour, over the top of the minute above. A minute is the right window for a
+       * burst and the wrong one for a grind, and it matters more since the individual behind a
+       * reported capture became the server's draw ([ReportedIndividual]): the one way left to hunt
+       * a shiny is to take a monster, let it go and report another, which costs a slot here every
+       * time.
+       */
+      val monstersPerHour: Int = 300,
       /** Levels one monster may gain in a single reported battle outcome. */
       val levelsPerOutcome: Int = 10,
       /** Levels a whole party may gain per window. Well above a hard hour of grinding. */
@@ -30,9 +38,10 @@ class GrantBudget(private val limits: Limits, private val clock: () -> Long) {
       /** Super Contest ribbons per window. A contest takes minutes and awards one. */
       val ribbonsWon: Int = 4,
       /**
-       * Shiny monsters per [shinyWindow]. Nothing here rolls one, so a shiny is always the client's
-       * word, and there is no trainer id on the record to check it against. At one in 8,192 this is
-       * far past luck.
+       * Shiny monsters per [shinyWindow]. The roll is the server's now ([ReportedIndividual]), so a
+       * shiny that gets here is real and is never taken away. The count is for the grind: at one in
+       * 8,192, eight in an hour is about sixty-five thousand encounters, so passing it says
+       * captures are being turned over rather than met.
        */
       val shinyGranted: Int = 8,
       val shinyWindow: Duration = Duration.ofHours(1),
@@ -44,6 +53,7 @@ class GrantBudget(private val limits: Limits, private val clock: () -> Long) {
     MONEY,
     ITEMS,
     MONSTERS,
+    MONSTERS_HOURLY,
     LEVELS,
     CONTEST_POINTS,
     RIBBONS,
@@ -88,6 +98,7 @@ class GrantBudget(private val limits: Limits, private val clock: () -> Long) {
         Kind.MONEY -> limits.moneyGained.toLong()
         Kind.ITEMS -> limits.itemsGained.toLong()
         Kind.MONSTERS -> limits.monstersGranted.toLong()
+        Kind.MONSTERS_HOURLY -> limits.monstersPerHour.toLong()
         Kind.LEVELS -> limits.levelsGained.toLong()
         Kind.CONTEST_POINTS -> limits.contestPointsGained.toLong()
         Kind.RIBBONS -> limits.ribbonsWon.toLong()
@@ -96,10 +107,11 @@ class GrantBudget(private val limits: Limits, private val clock: () -> Long) {
       }
 
   /**
-   * A shiny is rare enough that a minute says nothing about it. Everything else shares a window.
+   * A shiny is rare enough that a minute says nothing about it, and a grind is the same shape, so
+   * both take the hour. Everything else shares a window.
    */
   private fun windowFor(kind: Kind): Duration =
-      if (kind == Kind.SHINY) limits.shinyWindow else limits.window
+      if (kind == Kind.SHINY || kind == Kind.MONSTERS_HOURLY) limits.shinyWindow else limits.window
 
   /**
    * Keeps the table from holding a row for every character the server has ever seen. Each row is

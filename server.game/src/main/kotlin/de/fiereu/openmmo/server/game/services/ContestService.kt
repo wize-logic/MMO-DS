@@ -70,6 +70,7 @@ class ContestService
 constructor(
     private val sessions: SessionRegistry,
     private val store: CharacterStore,
+    private val ribbonCredits: ContestRibbonCredits,
 ) {
   /** Queued players, keyed by character. One player is in at most one queue. */
   private val waiting = ConcurrentHashMap<Long, Waiting>()
@@ -350,6 +351,10 @@ constructor(
       // client keeps and reports; what this server does here is agree that the contest happened
       // and say who won it, so a later argument about a record has one place to be checked.
       log.info { "Link contest ${contest.id} agreed: placements ${answers.first()}" }
+      // The ribbon itself is written by each client and arrives on the battle outcome report,
+      // which cannot tell one that was won from one that was typed. This agreement is the only
+      // moment the server can say a contest happened, so it is where the entitlement is issued.
+      for (seat in present) ribbonCredits.award(contest.seats[seat])
     }
     running.remove(contest.id)
     for (id in contest.seats) seatedIn.remove(id)

@@ -54,6 +54,9 @@ class MapManager @Inject constructor() {
 
   fun size(): Int = maps.size
 
+  /** Every registered map, for the passes that need the whole world rather than one address. */
+  fun all(): Collection<MapDef> = maps.values
+
   private fun normalize(s: String) = s.filter { it.isLetterOrDigit() }.lowercase()
 
   fun createLoadMapPacket(
