@@ -1,4 +1,10 @@
-/* Select opens the tester's door into the world. */
+/* Select opens the tester's door into the world.
+ *
+ * OPENMMO_DEBUG_MENU=1 gives the button out. It is off by default: everything on
+ * this menu is a thing the server then keeps. A flag set here goes into the
+ * VarsFlags block and is reported as c2s 0xCB, so it survives a relog, and a warp
+ * is reported as ScriptWarpArrived and moves the stored position. Shipped on, that
+ * is a story editor and a teleporter on one keypress for every player. */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -236,9 +242,10 @@ static int debug_enabled(void)
 {
     const char *v = getenv("OPENMMO_DEBUG_MENU");
 
-    if (v != NULL && v[0] != '\0')
-        return v[0] != '0';
-    return 1;
+    /* Absent means off. A shipped build is not a tester's build. */
+    if (v == NULL || v[0] == '\0')
+        return 0;
+    return v[0] != '0';
 }
 
 /* Select was pressed on a frame the field owned. The menu itself is a field
