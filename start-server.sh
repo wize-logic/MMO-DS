@@ -42,6 +42,13 @@ if systemctl cat openmmo.target &>/dev/null && [[ "${OPENMMO_IGNORE_SYSTEMD:-0}"
 fi
 
 [[ -f .env ]] || die ".env not found. It holds the local database and key settings."
+
+# Both servers refuse to start on the session secret this repository ships with, because a
+# public secret is a signing key anybody can use to mint a join ticket. A desk does not need a
+# real one, so say so here rather than making every checkout set one before it can play.
+if [[ -z "${OPENMMO_SESSION_SECRET:-}" ]]; then
+  export OPENMMO_ALLOW_DEV_SECRET=1
+fi
 [[ -x "$JAVA_HOME/bin/java" ]] || die "No JDK at $JAVA_HOME. Set JAVA_HOME to a JDK 25."
 command -v docker &>/dev/null || die "docker not found; the databases run in containers."
 export JAVA_HOME

@@ -27,16 +27,37 @@ private val log = KotlinLogging.logger {}
  */
 private const val DEV_SESSION_SECRET = "dev-only-secret-do-not-use-in-production"
 
+/**
+ * The one way to run with the shipped secret, for a checkout on a desk.
+ *
+ * Warning about it was not enough: a warning is a line that scrolls past at start, and the failure
+ * it warns about is silent. So the default is a refusal, and development says so out loud instead.
+ * start-server.sh sets this when no real secret is in the environment.
+ */
+private const val ALLOW_DEV_SECRET_ENV = "OPENMMO_ALLOW_DEV_SECRET"
+
+private fun devSecretAllowed(): Boolean =
+    System.getenv(ALLOW_DEV_SECRET_ENV)?.lowercase() in setOf("1", "true", "yes")
+
 object ConfigLoader {
-  fun load(): LoginServerConfig {
+  /**
+   * [allowDevSecret] is the seam the environment variable feeds, and the one a test names directly:
+   * a test that reads the shipped config is not a deployment facing a network.
+   */
+  fun load(allowDevSecret: Boolean = devSecretAllowed()): LoginServerConfig {
     val config = ConfigFactory.load()
     val secret = config.getString("server.sessionSecret")
     require(secret.isNotEmpty()) { "server.sessionSecret must not be empty" }
     if (secret == DEV_SESSION_SECRET) {
-      log.warn {
+      require(allowDevSecret) {
         "server.sessionSecret is the one this repository ships with. This server signs both the" +
             " join ticket and the remember me token with it, so anyone holding it can mint either" +
-            " for any account. Set OPENMMO_SESSION_SECRET before this server faces a network."
+            " for any account. Set OPENMMO_SESSION_SECRET, or $ALLOW_DEV_SECRET_ENV=1 to run" +
+            " anyway."
+      }
+      log.warn {
+        "Running with the session secret this repository ships with, because" +
+            " $ALLOW_DEV_SECRET_ENV is set. Anyone holding it can mint a ticket for any account."
       }
     }
     val rememberMeMaxAge = config.getDuration("server.rememberMeMaxAge")
