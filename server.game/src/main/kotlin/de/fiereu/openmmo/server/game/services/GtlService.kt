@@ -50,6 +50,7 @@ import de.fiereu.openmmo.net.game.packets.gtl.GtlTradeLogRequestPacket
 import de.fiereu.openmmo.net.game.packets.gtl.TradeListing
 import de.fiereu.openmmo.net.game.packets.gtl.TradeListingEntry
 import de.fiereu.openmmo.pokemon.SpeciesRegistry
+import de.fiereu.openmmo.server.game.battle.BattleRegistry
 import de.fiereu.openmmo.server.game.battle.StatCalculator
 import de.fiereu.openmmo.server.game.session.PLAYER_STATE
 import de.fiereu.openmmo.server.game.session.SessionRegistry
@@ -114,6 +115,7 @@ constructor(
     private val store: CharacterStore,
     private val shelf: GtlRepository,
     private val species: SpeciesRegistry,
+    private val battles: BattleRegistry,
 ) {
 
   /**
@@ -217,6 +219,13 @@ constructor(
     // the same reason: it lands between the two writes of a settlement.
     if (state.atTradeTable) {
       session.send(notice("You cannot list a monster while trading."))
+      return
+    }
+    // And for the same reason again, a fight. A battle holds its own copy of the party and
+    // writes it back when it ends, so a monster listed out from under one is given away twice or
+    // taken back by the writeback.
+    if (battles.byChar(charId) != null) {
+      session.send(notice("You cannot list a monster while battling."))
       return
     }
     val kind = event.packet.entryKind.toInt()

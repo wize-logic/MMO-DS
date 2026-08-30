@@ -27,6 +27,7 @@ import de.fiereu.openmmo.net.game.packets.gtl.GtlSearchPageRequestPacket
 import de.fiereu.openmmo.net.game.packets.gtl.GtlSpeciesFilter
 import de.fiereu.openmmo.net.game.packets.gtl.GtlTradeLogRequestPacket
 import de.fiereu.openmmo.pokemon.SpeciesRegistry
+import de.fiereu.openmmo.server.game.battle.BattleRegistry
 import de.fiereu.openmmo.server.game.session.SessionRegistry
 import de.fiereu.openmmo.server.game.storage.CharacterStore
 import de.fiereu.openmmo.server.game.storage.EntityIdService
@@ -87,7 +88,7 @@ private class GtlFixture(scope: CoroutineScope) {
   val store = CharacterStore(repo, EntityIdService(), scope)
   val sessions = SessionRegistry()
   val shelf = FakeGtlRepository()
-  val gtl = GtlService(sessions, store, shelf, SpeciesRegistry())
+  val gtl = GtlService(sessions, store, shelf, SpeciesRegistry(), BattleRegistry())
 
   suspend fun seated(
       name: String,

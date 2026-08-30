@@ -160,6 +160,7 @@ fun loginService(
       WorldStateService(),
       InMemorySaveBlockRepository(),
       fieldMoveService(store, mapManager, presence),
+      ViolationLog(),
   )
 }
 

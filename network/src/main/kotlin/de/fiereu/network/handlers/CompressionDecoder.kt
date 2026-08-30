@@ -3,12 +3,14 @@ package de.fiereu.network.handlers
 import io.netty.buffer.ByteBuf
 import io.netty.channel.ChannelHandlerContext
 import io.netty.handler.codec.ByteToMessageDecoder
+import io.netty.handler.codec.DecoderException
 import java.util.zip.Inflater
 
 // Mirror of the encoder: one persistent raw inflater per connection, never reset, so the deflate
 // window carries across packets. Each compressed segment is inflated after re-appending the
 // 00 00 FF FF sync marker that the sender stripped.
-class CompressionDecoder : ByteToMessageDecoder() {
+class CompressionDecoder(private val maxInflated: Int = DEFAULT_MAX_INFLATED) :
+    ByteToMessageDecoder() {
 
   private val inflater = Inflater(true)
   private val chunk = ByteArray(0x4000)
@@ -32,9 +34,15 @@ class CompressionDecoder : ByteToMessageDecoder() {
         input[payloadLen + 2] = 0xFF.toByte()
         input[payloadLen + 3] = 0xFF.toByte()
         inflater.setInput(input)
+        // A deflate stream says how much it unpacks to only by unpacking, so a small frame can
+        // name a very large one. Nothing stopped this loop, so a peer could hand over a few
+        // kilobytes and have the server allocate for as long as it kept producing.
         while (!inflater.needsInput()) {
           val written = inflater.inflate(chunk)
           if (written == 0) break
+          if (output.readableBytes() + written > maxInflated) {
+            throw DecoderException("a compressed frame inflated past $maxInflated bytes")
+          }
           output.writeBytes(chunk, 0, written)
         }
       }
@@ -46,5 +54,10 @@ class CompressionDecoder : ByteToMessageDecoder() {
 
   override fun handlerRemoved0(ctx: ChannelHandlerContext) {
     inflater.end()
+  }
+
+  companion object {
+    /** Sixteen times the frame ceiling, which no honest frame comes near. */
+    const val DEFAULT_MAX_INFLATED = 0xFFFF * 16
   }
 }

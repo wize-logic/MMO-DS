@@ -47,7 +47,15 @@ constructor(
     private val commands: ChatCommandService,
     private val sessions: SessionRegistry,
     private val characters: CharacterStore,
+    private val violations: ViolationLog,
 ) {
+
+  /**
+   * How fast a player may say things. The length of a line was capped and the rate was not, and
+   * length is the smaller half: a line is copied to every session on its channel, so a global one
+   * costs the server the number of players online for every packet the sender pays for.
+   */
+  private val pace = PaceLimit(burst = 6.0, perSecond = 1.0)
 
   /** A line the player typed. A leading `/` is a server command and stays on this session. */
   suspend fun onSend(session: SessionContext, packet: ChatMessageSendPacket) {
@@ -58,6 +66,12 @@ constructor(
     if (text.isEmpty()) return
 
     val state = session.attributes[PLAYER_STATE] ?: return
+    val charId = state.characterId
+    if (charId != null && !pace.allow(charId)) {
+      violations.record(
+          charId, ViolationLog.Kind.IMPOSSIBLE_PACE, "is talking faster than anybody types")
+      return
+    }
     val me = state.characterId?.let(characters::getCharacter) ?: return
     val type = typeForMode(packet.mode) ?: return
     val body =

@@ -49,6 +49,9 @@ private val log = KotlinLogging.logger {}
  */
 private const val MAX_SAVE_BLOCK_BYTES = 8192
 
+/** Distinct save block ids one character may hold. The client keeps seven. */
+private const val MAX_SAVE_BLOCK_IDS = 16
+
 /**
  * What one script-state report may carry, which is what the client's own reporter sends. It diffs
  * the engine's flag and var block and stops at these, leaving the rest for its next report, so
@@ -176,6 +179,20 @@ constructor(
         "char=$characterId sent ${msg.blocks.size - blocks.size} save block(s) this server will" +
             " not store (empty, or past $MAX_SAVE_BLOCK_BYTES bytes)"
       }
+    }
+    // A block id is the game's own save table id and the client keeps seven, but nothing checked
+    // that, so a report naming any id in the field grew a row per id. Eight a report and the
+    // story allowance bound the rate; this bounds the total. The ids themselves are not mirrored
+    // here on purpose: that would be a second copy of the engine's enum to keep true.
+    val known = saveBlockRepository.load(characterId)
+    val fresh = blocks.keys.count { it !in known }
+    if (fresh > 0 && known.size + fresh > MAX_SAVE_BLOCK_IDS) {
+      violations.record(
+          characterId,
+          ViolationLog.Kind.PAST_ALLOWANCE,
+          "already holds ${known.size} save blocks and reports $fresh more ids," +
+              " past the $MAX_SAVE_BLOCK_IDS a client keeps")
+      return
     }
     if (blocks.isNotEmpty()) saveBlockRepository.save(characterId, blocks)
 

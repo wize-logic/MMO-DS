@@ -33,7 +33,9 @@ class ChatServiceTest :
           val registry = SessionRegistry()
           registry.bindCharacter(a, red)
           registry.bindCharacter(b, blue)
-          val chat = ChatService(ChatCommandService(store, setOf(HelpCommand())), registry, store)
+          val chat =
+              ChatService(
+                  ChatCommandService(store, setOf(HelpCommand())), registry, store, ViolationLog())
 
           chat.onSend(a, ChatMessageSendPacket(mode = 0, target = "hello", message = null))
 
@@ -60,7 +62,9 @@ class ChatServiceTest :
           registry.bindCharacter(a, red)
           registry.bindCharacter(sameMap, green)
           registry.bindCharacter(elsewhere, blue)
-          val chat = ChatService(ChatCommandService(store, setOf(HelpCommand())), registry, store)
+          val chat =
+              ChatService(
+                  ChatCommandService(store, setOf(HelpCommand())), registry, store, ViolationLog())
 
           chat.onSend(a, ChatMessageSendPacket(mode = 0, target = "anyone here?", message = null))
 
@@ -80,7 +84,9 @@ class ChatServiceTest :
           val registry = SessionRegistry()
           registry.bindCharacter(a, red)
           registry.bindCharacter(elsewhere, blue)
-          val chat = ChatService(ChatCommandService(store, setOf(HelpCommand())), registry, store)
+          val chat =
+              ChatService(
+                  ChatCommandService(store, setOf(HelpCommand())), registry, store, ViolationLog())
 
           chat.onSend(a, ChatMessageSendPacket(mode = 6, target = "hello world", message = null))
           chat.onSend(a, ChatMessageSendPacket(mode = 5, target = "wts pearls", message = null))
@@ -100,7 +106,9 @@ class ChatServiceTest :
           val registry = SessionRegistry()
           registry.bindCharacter(a, red)
           registry.bindCharacter(b, blue)
-          val chat = ChatService(ChatCommandService(store, setOf(HelpCommand())), registry, store)
+          val chat =
+              ChatService(
+                  ChatCommandService(store, setOf(HelpCommand())), registry, store, ViolationLog())
 
           chat.onSend(a, ChatMessageSendPacket(mode = 0, target = "/help", message = null))
 
@@ -119,7 +127,9 @@ class ChatServiceTest :
           val registry = SessionRegistry()
           registry.bindCharacter(a, red)
           registry.bindCharacter(b, blue)
-          val chat = ChatService(ChatCommandService(store, setOf(HelpCommand())), registry, store)
+          val chat =
+              ChatService(
+                  ChatCommandService(store, setOf(HelpCommand())), registry, store, ViolationLog())
 
           chat.onSend(a, ChatMessageSendPacket(mode = 4, target = "Blue", message = "psst"))
 
@@ -146,7 +156,9 @@ class ChatServiceTest :
           val registry = SessionRegistry()
           registry.bindCharacter(a, red)
           registry.bindCharacter(b, blue)
-          val chat = ChatService(ChatCommandService(store, setOf(HelpCommand())), registry, store)
+          val chat =
+              ChatService(
+                  ChatCommandService(store, setOf(HelpCommand())), registry, store, ViolationLog())
 
           // 16 and 17 are the server's own channels, 18 is the battle one, which is scoped by its
           // own packet and would arrive here only to get around that.
@@ -168,7 +180,9 @@ class ChatServiceTest :
           val a = FakeSession(characterId = red)
           val registry = SessionRegistry()
           registry.bindCharacter(a, red)
-          val chat = ChatService(ChatCommandService(store, setOf(HelpCommand())), registry, store)
+          val chat =
+              ChatService(
+                  ChatCommandService(store, setOf(HelpCommand())), registry, store, ViolationLog())
 
           chat.onSend(
               a, ChatMessageSendPacket(mode = 6, target = "A".repeat(30_000), message = null))
@@ -187,7 +201,9 @@ class ChatServiceTest :
           val registry = SessionRegistry()
           registry.bindCharacter(a, red)
           registry.bindCharacter(b, blue)
-          val chat = ChatService(ChatCommandService(store, setOf(HelpCommand())), registry, store)
+          val chat =
+              ChatService(
+                  ChatCommandService(store, setOf(HelpCommand())), registry, store, ViolationLog())
 
           chat.onSend(a, ChatMessageSendPacket(mode = 4, target = "Missing", message = "hi"))
 

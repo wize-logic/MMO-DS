@@ -70,7 +70,15 @@ constructor(
     private val worldStateService: WorldStateService,
     private val saveBlockRepository: SaveBlockRepository,
     private val fieldMoveService: FieldMoveService,
+    private val violations: ViolationLog,
 ) {
+
+  /**
+   * How often a session may ask for its player again. The answer is the whole rejoin burst: the
+   * map, the npc spawns, the friend, guild and mail sends and the entry script. It is the most
+   * expensive thing an authenticated session can ask for in one packet.
+   */
+  private val requestPlayerPace = PaceLimit(burst = 8.0, perSecond = 1.0)
 
   fun onJoinGame(event: PacketEvent<JoinPacket>) {
     val ctx = event.session
@@ -378,6 +386,13 @@ constructor(
     val charId = state.characterId
     if (charId == null) {
       log.warn { "RequestPlayer without active character" }
+      return
+    }
+    if (!requestPlayerPace.allow(charId)) {
+      violations.record(
+          charId,
+          ViolationLog.Kind.IMPOSSIBLE_PACE,
+          "is asking for its player faster than a map change can happen")
       return
     }
     // The client asks for its player once a map transition is done, so the warp ends here. The
