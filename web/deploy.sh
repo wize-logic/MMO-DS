@@ -34,7 +34,10 @@ fi
 echo "==> service account and directories"
 id -u openmmo-web >/dev/null 2>&1 || adduser --system --group --no-create-home openmmo-web
 install -d -o root -g root -m 0755 /opt/openmmo "$docroot"
-install -d -o root -g root -m 0750 /etc/openmmo
+# Created here only when this is the first thing installed. deploy/install.sh gives the
+# directory to the openmmo group so the servers can walk to the signing key in it, and
+# re-forcing root:root here would take that back.
+[ -d /etc/openmmo ] || install -d -o root -g root -m 0750 /etc/openmmo
 
 echo "==> static site -> $docroot"
 # --delete would otherwise take mmo/publish.sh's update channel with it: the

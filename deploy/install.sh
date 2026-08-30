@@ -75,7 +75,10 @@ done
 say "service account and directories"
 id -u openmmo >/dev/null 2>&1 || adduser --system --group --no-create-home openmmo
 install -d -o root -g root -m 0755 /opt/openmmo /opt/openmmo/bin
-install -d -o root -g root -m 0750 /etc/openmmo
+# Group openmmo on the directory. Nothing in it is group readable, the env files stay
+# root:root, but a process cannot open a file it cannot walk to and the signing key
+# lives here.
+install -d -o root -g openmmo -m 0750 /etc/openmmo
 
 say "programs -> /opt/openmmo"
 for module in login game; do
@@ -96,7 +99,10 @@ install -o root -g openmmo -m 0640 \
 # empty assignments dropped: an empty value is not an unset one.
 java_home="$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")"
 env_from() {
-  grep -E "^($1)=" "$repo/.env" | grep -v '=$' || true
+  # Drop assignments with nothing on the right. The test anchors the whole line:
+  # `grep -v '=$'` would also throw away a base64 secret, which ends in the padding
+  # character, leaving the server on the secret this repository ships with.
+  grep -E "^($1)=" "$repo/.env" | sed -E '/^[A-Za-z_][A-Za-z0-9_]*=[[:space:]]*$/d' || true
 }
 write_env() {
   local file="$1" pattern="$2"
