@@ -1,0 +1,38 @@
+[Unit]
+Description=OpenMMO login server (2106)
+Documentation=https://github.com/wize-logic/OpenMMO
+After=network-online.target openmmo-db.service
+Wants=network-online.target
+Requires=openmmo-db.service
+PartOf=openmmo.target
+
+[Service]
+Type=exec
+User=openmmo
+Group=openmmo
+# Ports, database credentials and the session secret. Written by deploy/install.sh
+# from the repository .env, root readable only.
+EnvironmentFile=/etc/openmmo/login.env
+ExecStart=/opt/openmmo/login/bin/server.login
+# The JVM leaves on SIGTERM with 128+15, which systemd would otherwise record as a
+# failure, leaving the unit failed with nothing to bring it back.
+SuccessExitStatus=143
+Restart=always
+RestartSec=5s
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=openmmo.target

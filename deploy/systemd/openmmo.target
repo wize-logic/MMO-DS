@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenMMO (databases, login, game and website)
+Documentation=https://github.com/wize-logic/OpenMMO
+# The one handle for the whole product. Every service below is PartOf= this, so
+# stopping the target stops them all, and starting it starts them in order:
+#   sudo systemctl start openmmo.target
+#   sudo systemctl stop  openmmo.target
+#   systemctl status 'openmmo-*'
+Wants=openmmo-db.service openmmo-login.service openmmo-game.service openmmo-web.service
+After=openmmo-db.service openmmo-login.service openmmo-game.service openmmo-web.service
+
+[Install]
+WantedBy=multi-user.target

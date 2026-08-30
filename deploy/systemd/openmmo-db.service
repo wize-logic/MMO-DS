@@ -1,0 +1,23 @@
+[Unit]
+Description=OpenMMO databases (login and game postgres containers)
+Documentation=https://github.com/wize-logic/OpenMMO
+After=docker.service network-online.target
+Requires=docker.service
+PartOf=openmmo.target
+
+[Service]
+# Starts the two containers by name rather than running compose from a checkout: a
+# compose file read from the wrong directory would quietly create a second empty pair
+# and every account would look lost.
+#
+# No ExecStop on purpose. The containers hold the accounts and the world, and bringing
+# them up is the slow part of a restart, so stopping the target leaves the data running.
+# Take them down with `docker compose stop login-db game-db`.
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/docker start login-db game-db
+ExecStartPost=/opt/openmmo/bin/wait-for-db
+TimeoutStartSec=180
+
+[Install]
+WantedBy=openmmo.target

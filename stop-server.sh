@@ -20,6 +20,18 @@ warn() { printf '\033[33m[openmmo]\033[0m %s\n' "$1"; }
 
 listening() { ss -ltn 2>/dev/null | grep -q ":$1 "; }
 
+# Under systemd, stopping the processes by hand only earns them a restart five seconds
+# later, so stop the target instead. The databases keep running either way.
+if systemctl cat openmmo.target &>/dev/null && [[ "${OPENMMO_IGNORE_SYSTEMD:-0}" != 1 ]]; then
+    say "stopping openmmo.target (login, game, website)"
+    sudo systemctl stop openmmo.target
+    if [[ "$STOP_DB" -eq 1 ]]; then
+        say "stopping the databases"
+        docker compose stop login-db game-db >/dev/null || warn "the containers would not stop"
+    fi
+    exit 0
+fi
+
 # The gradle wrapper, then the server it launched. Matched on the exact task
 # and main class so a compiling gradle daemon, and anything else on this
 # machine, are left alone.

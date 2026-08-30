@@ -29,6 +29,18 @@ die()  { printf '\033[31m[openmmo]\033[0m %s\n' "$1" >&2; exit 1; }
 
 listening() { ss -ltn 2>/dev/null | grep -q ":$1 "; }
 
+# A machine that has had deploy/install.sh run on it keeps the servers under systemd,
+# where they restart on their own. Two ways to start the same servers is one too many,
+# so hand over rather than racing for the ports.
+if systemctl cat openmmo.target &>/dev/null && [[ "${OPENMMO_IGNORE_SYSTEMD:-0}" != 1 ]]; then
+    say "this machine runs OpenMMO under systemd"
+    say "starting openmmo.target (databases, login, game, website)"
+    sudo systemctl start openmmo.target
+    systemctl --no-pager --lines=0 status 'openmmo-*' | grep -E '^(●|×|\s+Active)' || true
+    say "stop with ./stop-server.sh, or sudo systemctl stop openmmo.target"
+    exit 0
+fi
+
 [[ -f .env ]] || die ".env not found. It holds the local database and key settings."
 [[ -x "$JAVA_HOME/bin/java" ]] || die "No JDK at $JAVA_HOME. Set JAVA_HOME to a JDK 25."
 command -v docker &>/dev/null || die "docker not found; the databases run in containers."
