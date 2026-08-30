@@ -62,7 +62,7 @@ if [ ! -f "$envfile" ]; then
       # LOGIN_HOST/GAME_HOST as well as the ports: they bind those servers to one
       # interface, and the status panel probes whatever they name. Without them
       # it probes loopback, which a server bound to the public address refuses.
-      grep -E '^(LOGIN_DB_|LOGIN_HOST=|GAME_HOST=|LOGIN_PORT=|GAME_SERVER_PORT=)' "$repo/.env" || true
+      grep -E '^(LOGIN_DB_|LOGIN_HOST=|GAME_HOST=|LOGIN_PORT=|GAME_SERVER_PORT=|GAME_STATUS_)' "$repo/.env" || true
     else
       echo "LOGIN_DB_HOST=localhost"
       echo "LOGIN_DB_PORT=20011"

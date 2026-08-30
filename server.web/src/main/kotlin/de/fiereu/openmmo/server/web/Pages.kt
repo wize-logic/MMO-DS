@@ -29,8 +29,9 @@ object Pages {
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <title>${escape(title)} &middot; OpenMMO DS</title>
       <meta name="robots" content="noindex, follow">
+      <meta name="theme-color" content="#73ace2">
       <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-      <link rel="stylesheet" href="/style.css">
+      <link rel="stylesheet" href="/style.css?v=2">
       </head>
       <body>
       <header class="bar">
@@ -45,8 +46,14 @@ object Pages {
       <main class="shell narrow">
       $body
       </main>
-      <footer class="bar foot">
-        <span>OpenMMO DS is a fan project in development. Not affiliated with PokeMMO or Nintendo.</span>
+      <footer class="foot">
+        <div class="footer-legal">
+          OpenMMO DS is a fan project in development, built on OpenMMO.<br>
+          Not affiliated with PokeMMO, Nintendo, or The Pok&eacute;mon Company. No ROMs or copyrighted
+          assets are distributed.<br>
+          All logos, trademarks, and trade names used herein are the property of their respective
+          owners.
+        </div>
       </footer>
       </body>
       </html>
