@@ -41,10 +41,11 @@ import de.fiereu.openmmo.server.game.storage.EntityIdService
 import de.fiereu.openmmo.server.game.storage.InMemorySaveBlockRepository
 import de.fiereu.openmmo.server.game.testsupport.FakeCharacterRepository
 import de.fiereu.openmmo.server.game.testsupport.FakeSession
+import de.fiereu.openmmo.server.game.testsupport.testGameConfig
+import de.fiereu.openmmo.server.game.world.WarpNeighbours
 import de.fiereu.openmmo.server.game.world.interest.InterestManager
 import de.fiereu.openmmo.server.game.world.interest.PassThroughInterestPolicy
 import io.kotest.core.spec.style.FunSpec
-import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
@@ -101,6 +102,11 @@ class LocalScriptServiceTest :
               ItemRegistry(),
               SpeciesRegistry(),
               budget,
+              MoveRegistry(),
+              ReportedIndividual(testGameConfig()),
+              ContestRibbonCredits(),
+              ViolationLog(),
+              WarpNeighbours(maps),
               InMemorySaveBlockRepository(),
           )
 
@@ -108,7 +114,10 @@ class LocalScriptServiceTest :
         runTest {
           val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
           val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
-          val session = FakeSession(characterId = id, regionId = 3, bankId = 1, mapId = 158)
+          val session =
+              FakeSession(characterId = id, regionId = 3, bankId = 1, mapId = 158).also {
+                it.attributes[CLIENT_RUNS_SCRIPTS] = true
+              }
 
           service(store, MapManager())
               .onScriptState(
@@ -138,7 +147,10 @@ class LocalScriptServiceTest :
         runTest {
           val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
           val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
-          val session = FakeSession(characterId = id, regionId = 3, bankId = 1, mapId = 158)
+          val session =
+              FakeSession(characterId = id, regionId = 3, bankId = 1, mapId = 158).also {
+                it.attributes[CLIENT_RUNS_SCRIPTS] = true
+              }
           val svc = service(store, MapManager())
 
           svc.onScriptState(
@@ -179,7 +191,10 @@ class LocalScriptServiceTest :
         runTest {
           val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
           val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
-          val session = FakeSession(characterId = id, regionId = 3, bankId = 1, mapId = 158)
+          val session =
+              FakeSession(characterId = id, regionId = 3, bankId = 1, mapId = 158).also {
+                it.attributes[CLIENT_RUNS_SCRIPTS] = true
+              }
           service(store, MapManager())
               .onScriptState(
                   PacketEvent(
@@ -196,7 +211,10 @@ class LocalScriptServiceTest :
         runTest {
           val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
           val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
-          val session = FakeSession(characterId = id, regionId = 3, bankId = 1, mapId = 158)
+          val session =
+              FakeSession(characterId = id, regionId = 3, bankId = 1, mapId = 158).also {
+                it.attributes[CLIENT_RUNS_SCRIPTS] = true
+              }
           val svc = service(store, MapManager())
 
           svc.onScriptState(
@@ -644,7 +662,7 @@ class LocalScriptServiceTest :
          * the nature the player saw the ball land on, its IVs, and, once in several thousand, the
          * fact that it was shiny at all.
          */
-        test("a reported capture keeps the individual the client rolled") {
+        test("a reported capture is the server's monster, and stable across a retry") {
           runTest {
             val store =
                 CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
@@ -678,11 +696,18 @@ class LocalScriptServiceTest :
                 ))
 
             val granted = store.getCharacter(id)!!.pokemon.single()
-            granted.seed shouldBe 0x1234_5678
-            granted.iVs.compress() shouldBe ivs.compress()
-            granted.isShiny.shouldBeTrue()
-            // The nature is read out of the seed, which is what makes carrying it worth the bytes.
-            granted.nature shouldBe PokemonNature.entries[0x1234_5678 % PokemonNature.entries.size]
+            val rolled = ReportedIndividual(testGameConfig()).forToken(id, 387, 0x1234_5678)
+
+            // Not the claim. The server's own draw for that claim.
+            granted.seed shouldBe rolled.seed
+            granted.iVs.compress() shouldBe rolled.ivBits
+            granted.isShiny shouldBe rolled.isShiny
+            (granted.iVs.compress() == ivs.compress()) shouldBe false
+            // The nature is read out of the seed, masked the way the record masks it.
+            granted.nature shouldBe
+                PokemonNature.entries[
+                        ((rolled.seed.toLong() and 0xFFFFFFFFL) % PokemonNature.entries.size)
+                            .toInt()]
           }
         }
 
@@ -807,7 +832,10 @@ class LocalScriptServiceTest :
           val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
           val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
           val before = store.getCharacter(id)!!.info
-          val session = FakeSession(characterId = id, regionId = 3, bankId = 1, mapId = 158)
+          val session =
+              FakeSession(characterId = id, regionId = 3, bankId = 1, mapId = 158).also {
+                it.attributes[CLIENT_RUNS_SCRIPTS] = true
+              }
 
           service(store, MapManager())
               .onScriptWarpArrived(

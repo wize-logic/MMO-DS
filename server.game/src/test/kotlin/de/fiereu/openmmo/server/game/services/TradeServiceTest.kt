@@ -101,6 +101,8 @@ private class TradeFixture(scope: CoroutineScope) {
           items = ItemRegistry(),
           blackout =
               blackoutService(store) { scriptRunner(store, mapManager, interestManager, battles) },
+          budget = GrantBudget(),
+          violations = ViolationLog(),
       )
   val duels = DuelService(sessions, store, battles)
   val trades = TradeService(sessions, store, battles, duels)

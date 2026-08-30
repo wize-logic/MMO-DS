@@ -12,6 +12,8 @@ import de.fiereu.openmmo.server.game.battle.BattleRewards
 import de.fiereu.openmmo.server.game.battle.MoveLearner
 import de.fiereu.openmmo.server.game.battle.TurnEngine
 import de.fiereu.openmmo.server.game.battle.WildMonFactory
+import de.fiereu.openmmo.server.game.config.DbConfig
+import de.fiereu.openmmo.server.game.config.GameServerConfig
 import de.fiereu.openmmo.server.game.script.ScriptRegistry
 import de.fiereu.openmmo.server.game.script.ScriptRunner
 import de.fiereu.openmmo.server.game.services.BattleService
@@ -19,6 +21,7 @@ import de.fiereu.openmmo.server.game.services.BlackoutService
 import de.fiereu.openmmo.server.game.services.DialogService
 import de.fiereu.openmmo.server.game.services.EncounterService
 import de.fiereu.openmmo.server.game.services.FieldMoveService
+import de.fiereu.openmmo.server.game.services.GrantBudget
 import de.fiereu.openmmo.server.game.services.GuildService
 import de.fiereu.openmmo.server.game.services.LoginService
 import de.fiereu.openmmo.server.game.services.MailService
@@ -36,6 +39,7 @@ import de.fiereu.openmmo.server.game.services.SocialService
 import de.fiereu.openmmo.server.game.services.StoryPlayerService
 import de.fiereu.openmmo.server.game.services.StoryService
 import de.fiereu.openmmo.server.game.services.TrainerSightService
+import de.fiereu.openmmo.server.game.services.ViolationLog
 import de.fiereu.openmmo.server.game.services.WarpService
 import de.fiereu.openmmo.server.game.services.WorldStateService
 import de.fiereu.openmmo.server.game.session.SessionRegistry
@@ -87,6 +91,7 @@ fun movementService(
       ),
       trainerSightService(store, mapManager, interest, battles, scripts),
       fieldMoveService(store, mapManager, presence),
+      ViolationLog(),
   )
 }
 
@@ -223,6 +228,22 @@ fun battleService(
           trainers = TrainerRegistry(),
           items = ItemRegistry(),
           blackout = blackout,
+          budget = GrantBudget(),
+          violations = ViolationLog(),
       )
   return battles
 }
+
+/** A config for the one thing a unit test wants out of it, the session secret. */
+fun testGameConfig(secret: String = "test-session-secret"): GameServerConfig =
+    GameServerConfig(
+        host = "127.0.0.1",
+        port = 0,
+        checksumSize = 16,
+        rootKeyResource = "game.private.pem",
+        rootKey = null,
+        rootKeyFile = null,
+        sessionSecret = secret.toByteArray(),
+        sessionTokenMaxAge = java.time.Duration.ofMinutes(5),
+        db = DbConfig(),
+    )

@@ -137,6 +137,8 @@ private class Fixture(scope: CoroutineScope) {
           trainers = TrainerRegistry(),
           items = ItemRegistry(),
           blackout = blackout,
+          budget = GrantBudget(),
+          violations = ViolationLog(),
       )
 
   suspend fun playerWithParty(
@@ -152,12 +154,16 @@ private class Fixture(scope: CoroutineScope) {
     // Balls to throw. A throw needs one in the bag and spends it, so a fixture with an empty bag
     // catches nothing; these tests passed because neither was asked.
     store.addItem(created.info.id, POKE_BALL_ITEM_ID, 10)
+    store.addItem(created.info.id, MASTER_BALL_ITEM_ID.toInt(), 10)
     return FakeSession(created.info.id) to created.info.id
   }
 }
 
 /** The Poke Ball's id in this build, which is what the catch tests throw. */
 private const val POKE_BALL_ITEM_ID = 5004
+
+/** The one ball that always holds, for the tests about the catch and not the roll. */
+private const val MASTER_BALL_ITEM_ID: Short = 5001
 
 private fun FakeSession.startBattle(service: BattleService, dexId: Int = 19, level: Int = 2) {
   service.startWildBattle(this, dexId, level)
@@ -496,7 +502,7 @@ class BattleServiceTest :
           }
           session.startBattle(fx.service)
 
-          session.act(fx.service, BattleAction.ITEM, 5004)
+          session.act(fx.service, BattleAction.ITEM, MASTER_BALL_ITEM_ID)
 
           val stored = fx.store.getCharacter(charId).shouldNotBeNull()
           stored.pokemon.size shouldBe MAX_PARTY_SIZE
@@ -538,7 +544,7 @@ class BattleServiceTest :
           }
           session.startBattle(fx.service)
 
-          session.act(fx.service, BattleAction.ITEM, 5004)
+          session.act(fx.service, BattleAction.ITEM, MASTER_BALL_ITEM_ID)
 
           val stored = fx.store.getCharacter(charId).shouldNotBeNull()
           stored.pokemon.size shouldBe MAX_PARTY_SIZE
@@ -553,18 +559,18 @@ class BattleServiceTest :
         }
       }
 
-      test("the ball throw names the Poke Ball by the id the client knows") {
+      test("the ball throw names the ball that was thrown, by the id the client knows") {
         runTest {
           val fx = Fixture(this)
           val (session, _) = fx.playerWithParty()
           session.startBattle(fx.service)
 
-          session.act(fx.service, BattleAction.ITEM, 5004)
+          session.act(fx.service, BattleAction.ITEM, MASTER_BALL_ITEM_ID)
 
           session.sent
               .filterIsInstance<BattleListEventPacket>()
               .single { it.subKind == 4.toByte() }
-              .value shouldBe 5004.toShort()
+              .value shouldBe MASTER_BALL_ITEM_ID
         }
       }
 

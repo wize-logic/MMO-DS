@@ -26,6 +26,8 @@ import de.fiereu.openmmo.server.game.battle.TurnEngine
 import de.fiereu.openmmo.server.game.battle.WildMonFactory
 import de.fiereu.openmmo.server.game.services.BattleService
 import de.fiereu.openmmo.server.game.services.DuelService
+import de.fiereu.openmmo.server.game.services.GrantBudget
+import de.fiereu.openmmo.server.game.services.ViolationLog
 import de.fiereu.openmmo.server.game.session.CLIENT_RUNS_SCRIPTS
 import de.fiereu.openmmo.server.game.session.SessionRegistry
 import de.fiereu.openmmo.server.game.storage.CharacterStore
@@ -103,6 +105,8 @@ private class ChallengeFixture(scope: CoroutineScope) {
           items = ItemRegistry(),
           blackout =
               blackoutService(store) { scriptRunner(store, mapManager, interestManager, battles) },
+          budget = GrantBudget(),
+          violations = ViolationLog(),
       )
   val duels = DuelService(sessions, store, battles)
   val command = ChallengeCommand(battles, duels, sessions, store)

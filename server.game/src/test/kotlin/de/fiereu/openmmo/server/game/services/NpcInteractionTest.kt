@@ -46,6 +46,7 @@ class NpcInteractionTest :
             scripts,
             scriptRunner(store, maps, scripts = scripts),
             trainerSightService(store, maps, scripts = scripts),
+            ViolationLog(),
         )
       }
 

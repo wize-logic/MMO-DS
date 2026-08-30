@@ -19,9 +19,11 @@ import de.fiereu.openmmo.server.game.battle.MoveLearner
 import de.fiereu.openmmo.server.game.battle.TurnEngine
 import de.fiereu.openmmo.server.game.battle.WildMonFactory
 import de.fiereu.openmmo.server.game.services.BattleService
+import de.fiereu.openmmo.server.game.services.GrantBudget
 import de.fiereu.openmmo.server.game.services.MapLoadService
 import de.fiereu.openmmo.server.game.services.PresenceService
 import de.fiereu.openmmo.server.game.services.StoryPlayerService
+import de.fiereu.openmmo.server.game.services.ViolationLog
 import de.fiereu.openmmo.server.game.services.WarpService
 import de.fiereu.openmmo.server.game.services.WorldStateService
 import de.fiereu.openmmo.server.game.storage.CharacterStore
@@ -88,6 +90,8 @@ class StoryResetTest :
                     trainers = TrainerRegistry(),
                     items = items,
                     blackout = blackoutService(store) { scriptRunner(store, mapManager, interest) },
+                    budget = GrantBudget(),
+                    violations = ViolationLog(),
                 ),
             items = items,
         )

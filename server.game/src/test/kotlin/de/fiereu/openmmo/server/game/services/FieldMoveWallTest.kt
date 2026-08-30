@@ -174,6 +174,7 @@ class FieldMoveWallTest :
                   scripts,
                   scriptRunner(store, maps, scripts = scripts),
                   trainerSightService(store, maps, scripts = scripts),
+                  ViolationLog(),
               )
           store.updatePosition(charId, 112, 890, 1, (155 and 0xFF).toByte(), Direction.DOWN)
           val session = FakeSession(characterId = charId, regionId = 3, bankId = 1, mapId = 155)
