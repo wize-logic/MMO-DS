@@ -44,8 +44,6 @@ data class PlayerState(
      * every boulder is where the map put it.
      */
     val boulderTiles: MutableMap<Int, Pair<Int, Int>> = ConcurrentHashMap(),
-    /** Trusts one source tile after scripted movement. */
-    @field:Volatile var acceptNextMoveSource: Boolean = false,
     /**
      * Whether this session is sitting at a trade table. While it is,
      * [de.fiereu.openmmo.server.game.services.PokemonStorageService] refuses to move a monster

@@ -63,7 +63,19 @@ constructor(
     private val mapScriptService: MapScriptService,
     private val trainerSightService: TrainerSightService,
     private val fieldMoveService: FieldMoveService,
+    private val violations: ViolationLog,
 ) {
+
+  /**
+   * How fast a player may take tiles.
+   *
+   * Collision was checked on every step and the position was always the server's, so this was never
+   * a way through a wall. It was a way to cross Sinnoh in the time it takes to cross a room:
+   * nothing asked how often a step arrived, and the pipeline's flood limiter sits thirty times
+   * above the pace the client's own animation walks at. Twelve a second is half again the fastest
+   * the game moves anyone, and the burst is three seconds of them.
+   */
+  private val pace = PaceLimit(burst = 40.0, perSecond = 12.0)
 
   /** One step. The client sends the tile it left and the direction, the server derives the rest. */
   fun onMovement(event: PacketEvent<MovementPacket>) {
@@ -80,18 +92,18 @@ constructor(
             stored.info.positionBankId,
             stored.info.positionMapId,
         ) ?: return
-    var fromX = stored.info.positionX.toInt()
-    var fromY = stored.info.positionY.toInt()
-    if (state.acceptNextMoveSource &&
-        msg.x in 0 until currentMap.width &&
-        msg.y in 0 until currentMap.height) {
-      // Trust the client after scripted movement.
-      fromX = msg.x
-      fromY = msg.y
-      characterStore.updatePosition(charId, fromX.toShort(), fromY.toShort())
-      state.x = fromX.toShort()
-      state.y = fromY.toShort()
-      state.acceptNextMoveSource = false
+    val fromX = stored.info.positionX.toInt()
+    val fromY = stored.info.positionY.toInt()
+
+    // A step the game could not have taken this soon. Refused rather than delayed, and counted:
+    // one is a connection catching up, a stream of them is a speed no animation runs at.
+    if (!pace.allow(charId)) {
+      violations.record(
+          charId,
+          ViolationLog.Kind.IMPOSSIBLE_PACE,
+          "is taking tiles faster than the game walks; the step was dropped")
+      sendPositionReset(ctx, charId, currentMap, fromX, fromY, state.facingDirection)
+      return
     }
 
     val atServerTile = msg.x == fromX && msg.y == fromY

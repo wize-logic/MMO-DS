@@ -25,6 +25,7 @@ import de.fiereu.openmmo.server.game.services.command.StoryCommand
 import de.fiereu.openmmo.server.game.services.command.SyncCommand
 import de.fiereu.openmmo.server.game.services.command.TestBattleCommand
 import de.fiereu.openmmo.server.game.services.command.UiCommand
+import de.fiereu.openmmo.server.game.services.command.ViolationsCommand
 import de.fiereu.openmmo.server.game.services.command.WarpCommand
 import de.fiereu.openmmo.server.game.services.command.YesNoCommand
 
@@ -39,6 +40,8 @@ interface ChatCommandModule {
   @Binds @IntoSet fun handbookCommand(command: HandbookCommand): ChatCommand
 
   @Binds @IntoSet fun posCommand(command: PosCommand): ChatCommand
+
+  @Binds @IntoSet fun violationsCommand(command: ViolationsCommand): ChatCommand
 
   @Binds @IntoSet fun testBattleCommand(command: TestBattleCommand): ChatCommand
 
