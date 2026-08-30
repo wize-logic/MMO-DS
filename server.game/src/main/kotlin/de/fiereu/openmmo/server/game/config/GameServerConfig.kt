@@ -12,6 +12,9 @@ data class GameServerConfig(
     val db: DbConfig = DbConfig(),
     val rootKey: String? = null,
     val rootKeyFile: String? = null,
+    /** Where the online-count endpoint answers; loopback because the website is its one caller. */
+    val statusHost: String = "127.0.0.1",
+    val statusPort: Int = 7779,
 ) {
   override fun equals(other: Any?): Boolean =
       other is GameServerConfig &&
@@ -23,7 +26,9 @@ data class GameServerConfig(
           rootKeyFile == other.rootKeyFile &&
           sessionSecret.contentEquals(other.sessionSecret) &&
           sessionTokenMaxAge == other.sessionTokenMaxAge &&
-          db == other.db
+          db == other.db &&
+          statusHost == other.statusHost &&
+          statusPort == other.statusPort
 
   override fun hashCode(): Int {
     var h = host.hashCode()
@@ -35,6 +40,8 @@ data class GameServerConfig(
     h = h * 31 + sessionSecret.contentHashCode()
     h = h * 31 + sessionTokenMaxAge.hashCode()
     h = h * 31 + db.hashCode()
+    h = h * 31 + statusHost.hashCode()
+    h = h * 31 + statusPort
     return h
   }
 }

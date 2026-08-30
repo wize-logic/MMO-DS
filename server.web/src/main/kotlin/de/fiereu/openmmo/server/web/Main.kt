@@ -35,7 +35,14 @@ fun main() {
               attempts = RateLimiter(config.registrationAttemptsPerHour),
               global = RateLimiter(config.registrationsPerHourTotal),
           ),
-          StatusProbe(config.loginHost, config.loginPort, config.gameHost, config.gamePort))
+          StatusProbe(
+              config.loginHost,
+              config.loginPort,
+              config.gameHost,
+              config.gamePort,
+              config.gameStatusHost,
+              config.gameStatusPort,
+          ))
   Runtime.getRuntime()
       .addShutdownHook(
           Thread {

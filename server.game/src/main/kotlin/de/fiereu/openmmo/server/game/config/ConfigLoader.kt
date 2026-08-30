@@ -35,6 +35,8 @@ object ConfigLoader {
     return GameServerConfig(
         host = config.getString("server.host"),
         port = config.getInt("server.port"),
+        statusHost = config.getString("server.statusHost"),
+        statusPort = config.getInt("server.statusPort"),
         checksumSize = config.getInt("server.checksumSize"),
         rootKeyResource = config.getString("server.rootKeyResource"),
         rootKey = config.stringOrNull("server.rootKey"),

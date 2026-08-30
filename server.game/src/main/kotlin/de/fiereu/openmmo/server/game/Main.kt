@@ -33,6 +33,7 @@ fun main(args: Array<String>) {
                 }
                 .onFailure { log.warn(it) { "Final character flush did not complete" } }
           })
+  StatusEndpoint(config, component.sessionRegistry()).start()
   component.server().start()
 }
 
