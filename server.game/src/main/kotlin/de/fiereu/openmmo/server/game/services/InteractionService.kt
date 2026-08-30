@@ -30,6 +30,7 @@ constructor(
     private val scriptRegistry: ScriptRegistry,
     private val scriptRunner: ScriptRunner,
     private val trainerSight: TrainerSightService,
+    private val violations: ViolationLog,
 ) {
 
   /** The player pressed the action button on a specific entity, that is an npc. */
@@ -52,6 +53,24 @@ constructor(
 
     for (npc in currentMap.npcs) {
       if (npcService.getNpcEntityId(regionId, bankId, mapId, npc.entityIdx) == npcEntityId) {
+        // Its sibling onTileInteract never asks this, because it works out who is in front of the
+        // player from a position this server holds. This one is handed a name, and took any name
+        // on the map: the ids are not secret, so one walk up to a clerk reopened that mart from
+        // anywhere for the rest of the session. The reach is the data's own: the person's tile
+        // plus the box their movement range names, plus the tile you talk across.
+        val reachX = 1 + npc.movementRangeX
+        val reachY = 1 + npc.movementRangeY
+        val playerX = stored.info.positionX.toInt()
+        val playerY = stored.info.positionY.toInt()
+        if (kotlin.math.abs(playerX - npc.x) > reachX ||
+            kotlin.math.abs(playerY - npc.y) > reachY) {
+          violations.record(
+              state.characterId,
+              ViolationLog.Kind.OUT_OF_REACH,
+              "presses A on entity $npcEntityId at (${npc.x}, ${npc.y}) from" +
+                  " ($playerX, $playerY), too far to talk across")
+          return
+        }
         val script = scriptRegistry.forMap(regionId, bankId, mapId, npc.script)
         if (script != null) {
           runScript(session, state, script, npcEntityId)

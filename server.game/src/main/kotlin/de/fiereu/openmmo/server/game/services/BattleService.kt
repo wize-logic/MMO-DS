@@ -34,6 +34,7 @@ import de.fiereu.openmmo.server.game.battle.BattleResult
 import de.fiereu.openmmo.server.game.battle.BattleRewards
 import de.fiereu.openmmo.server.game.battle.BattleRng
 import de.fiereu.openmmo.server.game.battle.BattleRules
+import de.fiereu.openmmo.server.game.battle.CatchRoll
 import de.fiereu.openmmo.server.game.battle.MoveLearner
 import de.fiereu.openmmo.server.game.battle.PvpFoe
 import de.fiereu.openmmo.server.game.battle.StatCalculator
@@ -92,6 +93,8 @@ constructor(
     private val trainers: TrainerRegistry,
     private val items: ItemRegistry,
     private val blackout: BlackoutService,
+    private val budget: GrantBudget,
+    private val violations: ViolationLog,
 ) {
 
   private val pokeBallItemId: Short by lazy { items.idOf(Items.POKE_BALL).toShort() }
@@ -231,10 +234,14 @@ constructor(
     )
   }
 
-  /** Throws a ball at the monster. False when the character is not in a battle. */
+  /**
+   * Takes the monster, for the developer command that exists to skip the game. No ball, so no roll
+   * and no allowance: /catch is gated on the account's own developer bit, and a testing shortcut
+   * that had to get lucky would not be one.
+   */
   suspend fun catchActiveWild(charId: Long): Boolean {
     val battle = battles.byChar(charId) ?: return false
-    catchWild(battle)
+    catchWild(battle, ball = null)
     return true
   }
 
@@ -520,7 +527,7 @@ constructor(
       battle.session.send(
           itemStackUpdatePacket(
               ballId, characterStore.getCharacter(battle.charId)?.items?.get(ballId) ?: 0))
-      catchWild(battle)
+      catchWild(battle, item)
       return
     }
     if (item.healsHp) {
@@ -797,9 +804,32 @@ constructor(
     battle.pendingResult = BattleResult.FLED
   }
 
-  private suspend fun catchWild(battle: BattleInstance) {
+  private suspend fun catchWild(battle: BattleInstance, ball: ItemDef?) {
     if (!battle.catchable) {
       emitter.sendNotice(battle, "You can't catch this monster.")
+      emitter.sendPrompt(battle)
+      return
+    }
+    // The ball has to hold. It always did, which was the wrong game and an unattended bot's whole
+    // program: answer every battle with one packet and take the monster.
+    val target = battle.opponentMon()
+    if (ball != null &&
+        !CatchRoll.holds(
+            ball, target.species.catchRate, target.currentHp, target.stats.hp, battle.rng)) {
+      emitter.sendNotice(battle, "Oh, no! The Pokemon broke free!")
+      emitter.sendPrompt(battle)
+      return
+    }
+    // Counted the way a client-reported grant is. Nothing here is a claim, but the allowance is
+    // about how many monsters one character takes out of the world in a stretch.
+    if (ball != null &&
+        (!budget.allow(battle.charId, GrantBudget.Kind.MONSTERS, 1) ||
+            !budget.allow(battle.charId, GrantBudget.Kind.MONSTERS_HOURLY, 1))) {
+      violations.record(
+          battle.charId,
+          ViolationLog.Kind.PAST_ALLOWANCE,
+          "is catching faster than an allowance of monsters permits")
+      emitter.sendNotice(battle, "Oh, no! The Pokemon broke free!")
       emitter.sendPrompt(battle)
       return
     }
@@ -845,11 +875,12 @@ constructor(
     // event, so the client can resolve the monster when the throw lands.
     battle.session.send(SocialListEntryAddPacket(caught))
     battle.session.send(acquiredMonsterDelta(caught, battle.opponentMon().species))
-    // "Player threw a Poke Ball" event.
+    // The throw event, naming the ball that was actually thrown. It used to name the Poke Ball
+    // whatever went in, which drew the wrong ball for every other kind.
     battle.session.send(
         BattleListEventPacket(
             kind = 0,
-            value = pokeBallItemId,
+            value = ball?.let { items.idOrNull(it)?.toShort() } ?: pokeBallItemId,
             subKind = 4,
             detail = BattleListEventDetail(listType = 1, value = 1),
         ),

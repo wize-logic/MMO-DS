@@ -143,8 +143,11 @@ constructor(
       return
     }
     val name = event.packet.name.trim()
-    if (name.isEmpty() || name.length > 32) {
-      log.warn { "Rejected character name '${event.packet.name}' for userId=${state.userId}" }
+    val refusal = CharacterNames.refuse(name)
+    if (refusal != null) {
+      log.warn {
+        "Rejected character name '${event.packet.name}' for userId=${state.userId}: it $refusal"
+      }
       ctx.send(buildCharacterList(state.userId))
       return
     }
