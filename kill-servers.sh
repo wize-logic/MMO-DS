@@ -9,6 +9,12 @@
 #     is the slow part; `./stop-server.sh --db` is where that lives.
 #   * every process that is not a JVM, which is the client, the viewer, the
 #     launcher and anything else that happens to be running.
+#
+# A SERVER UNDER SYSTEMD IS STOPPED THROUGH SYSTEMD. Since deploy/install.sh exists a
+# server here may be openmmo-login.service or openmmo-game.service, and those restart
+# five seconds after anything kills them, so a plain TERM looks like it worked and the
+# port is back before the next command. The unit each pid belongs to is read out of its
+# cgroup and stopped as a unit.
 set -eu
 
 DRY=0
@@ -67,12 +73,23 @@ ports_of() {
 
 alive() { kill -0 "$1" 2>/dev/null; }
 
+# The systemd unit a pid belongs to, or nothing. Read from the cgroup, which is the
+# kernel's own answer and needs no privileges.
+unit_of() {
+    sed -n 's#.*/system\.slice/\(openmmo-[a-z]*\.service\).*#\1#p' \
+        "/proc/$1/cgroup" 2>/dev/null | head -1
+}
+
 # ------------------------------------------------------------------ find
 FOUND=''
 for d in /proc/[0-9]*; do
     pid=${d#/proc/}
     label=$(classify "$pid") || continue
-    printf '  pid %-8s %-26s %s\n' "$pid" "$label" "$(ports_of "$pid")"
+    # ss only names the process behind a port for pids this user owns, and a server
+    # under systemd runs as openmmo, so say which unit it is instead of an empty column.
+    where=$(unit_of "$pid")
+    [ -n "$where" ] || where=$(ports_of "$pid")
+    printf '  pid %-8s %-26s %s\n' "$pid" "$label" "$where"
     FOUND="$FOUND $pid"
 done
 
@@ -87,8 +104,27 @@ if [ "$DRY" -eq 1 ]; then
 fi
 
 # ------------------------------------------------------------------ stop
-say 'sending TERM'
-for pid in $FOUND; do kill -TERM "$pid" 2>/dev/null || true; done
+UNITS=''
+LOOSE=''
+for pid in $FOUND; do
+    unit=$(unit_of "$pid")
+    if [ -n "$unit" ]; then
+        case " $UNITS " in *" $unit "*) ;; *) UNITS="$UNITS $unit" ;; esac
+    else
+        LOOSE="$LOOSE $pid"
+    fi
+done
+
+if [ -n "$UNITS" ]; then
+    say "stopping under systemd:$UNITS"
+    # shellcheck disable=SC2086
+    sudo systemctl stop $UNITS || warn 'systemctl stop failed; they will restart themselves'
+fi
+
+if [ -n "$LOOSE" ]; then
+    say 'sending TERM'
+    for pid in $LOOSE; do kill -TERM "$pid" 2>/dev/null || true; done
+fi
 
 # A server closes its listeners and flushes on TERM, so it is worth waiting
 # for. Fifteen seconds is longer than any clean shutdown here has taken.
