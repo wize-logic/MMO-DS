@@ -1,4 +1,6 @@
-# OpenMMO DS
+# MMO DS
+
+ORIGINAL REPO: https://github.com/openmmo-org/OpenMMO
 
 An open source server and client for a small persistent Pokemon world.
 Still in development, not ready for real use.
