@@ -10,7 +10,7 @@
  
  static Application sApplication;
  // This variable doesn't really makes sense. If it's set to off, the game will
-@@ -62,10 +64,12 @@
+@@ -62,10 +65,12 @@
  static PMBackLightSwitch sSavedBacklightState;
  BOOL gIgnoreCartridgeForWake;
  extern const ApplicationManagerTemplate gOpeningCutsceneAppTemplate;
@@ -23,7 +23,7 @@
  
      InitSystem();
      InitVRAM();
-@@ -88,6 +93,7 @@
+@@ -86,6 +91,7 @@
      sApplication.args.saveData = SaveData_Init();
  
      SoundSystem_Init(SaveData_GetChatotCry(sApplication.args.saveData), SaveData_GetOptions(sApplication.args.saveData));
@@ -48,7 +48,7 @@
      } else {
          switch (OS_GetResetParameter()) {
          case RESET_CLEAN:
-@@ -125,7 +139,7 @@
+@@ -125,7 +141,7 @@
          }
      }
  
@@ -57,7 +57,7 @@
      gSystem.frameCounter = 0;
  
      InitRNG();
-@@ -143,6 +157,8 @@
+@@ -143,6 +159,8 @@
              SoftReset(RESET_CLEAN);
          }
  

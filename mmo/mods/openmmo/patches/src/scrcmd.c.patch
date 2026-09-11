@@ -1,11 +1,6 @@
 --- a/src/scrcmd.c
 +++ b/src/scrcmd.c
-@@ -811,139 +811,140 @@
- static BOOL ScrCmd_Dummy1F9(ScriptContext *ctx)
- {
-     u16 dummy = ScriptContext_GetVar(ctx);
-     return FALSE;
- }
+@@ -816,64 +816,65 @@
  
  static BOOL ScrCmd_Unused_004(ScriptContext *ctx)
  {
@@ -105,15 +100,7 @@
  }
  
  static u32 Compare(u16 value0, u16 value1)
- {
-     if (value0 < value1) {
-         return FALSE;
-     } else if (value0 == value1) {
-         return TRUE;
-     } else {
-         return 2;
-     }
- }
+@@ -889,56 +890,56 @@
  
  static BOOL ScrCmd_Unused_00B(ScriptContext *ctx)
  {
@@ -200,17 +187,7 @@
  }
  
  static BOOL ScrCmd_CompareVarToValue(ScriptContext *ctx)
- {
-     u16 value0 = *ScriptContext_GetVarPointer(ctx);
-     u16 value1 = ScriptContext_ReadHalfWord(ctx);
-     ctx->comparisonResult = Compare(value0, value1);
-     return FALSE;
-@@ -954,25 +955,21 @@
-     u16 *var0 = ScriptContext_GetVarPointer(ctx);
-     u16 *var1 = ScriptContext_GetVarPointer(ctx);
-     ctx->comparisonResult = Compare(*var0, *var1);
-     return FALSE;
- }
+@@ -959,15 +960,11 @@
  
  static BOOL ScrCmd_Unused_013(ScriptContext *ctx)
  {
@@ -231,17 +208,7 @@
  }
  
  static BOOL ScrCmd_CallCommonScript(ScriptContext *ctx)
- {
-     FieldSystem *fieldSystem = ctx->fieldSystem;
-     u8 *subCtxActive = FieldSystem_GetScriptMemberPtr(fieldSystem, SCRIPT_MANAGER_SUB_CONTEXT_ACTIVE);
-     u8 *numActiveContexts = FieldSystem_GetScriptMemberPtr(fieldSystem, SCRIPT_MANAGER_NUM_ACTIVE_CONTEXTS);
-     ScriptContext **commonScriptCtx = FieldSystem_GetScriptMemberPtr(fieldSystem, SCRIPT_MANAGER_SUB_CONTEXT);
-@@ -1013,55 +1010,39 @@
-      * same shape GoToIf/CallIf already have. */
-     s32 offset = ScriptContext_ReadWord(ctx);
-     ScriptContext_Jump(ctx, ctx->scriptPtr + offset);
-     return FALSE;
- }
+@@ -1018,45 +1015,29 @@
  
  static BOOL ScrCmd_Unused_017(ScriptContext *ctx)
  {
@@ -302,17 +269,7 @@
  }
  
  static BOOL ScrCmd_Call(ScriptContext *ctx)
- {
-     /* pc port: same unsequenced-evaluation repair as ScrCmd_GoTo above. */
-     s32 offset = ScriptContext_ReadWord(ctx);
-     ScriptContext_Call(ctx, ctx->scriptPtr + offset);
-     return FALSE;
-@@ -1850,16 +1831,22 @@
- static BOOL ScrCmd_AddMenuEntryImm(ScriptContext *ctx)
- {
-     FieldSystem *fieldSystem = ctx->fieldSystem;
-     FieldMenuManager **fieldMenuMan = FieldSystem_GetScriptMemberPtr(fieldSystem, SCRIPT_MANAGER_FIELD_MENU_MANAGER);
- 
+@@ -1855,6 +1836,12 @@
      u8 entryStringID = ScriptContext_ReadByte(ctx);
      u8 entryIndex = ScriptContext_ReadByte(ctx);
  
@@ -325,17 +282,7 @@
      FieldMenuManager_AddMenuEntry(*fieldMenuMan, entryStringID, entryIndex);
      return FALSE;
  }
- 
- static BOOL ScrCmd_AddMenuEntry(ScriptContext *ctx)
- {
-     FieldSystem *fieldSystem = ctx->fieldSystem;
-     FieldMenuManager **fieldMenuMan = FieldSystem_GetScriptMemberPtr(fieldSystem, SCRIPT_MANAGER_FIELD_MENU_MANAGER);
-@@ -1886,16 +1873,21 @@
- {
-     FieldSystem *fieldSystem = ctx->fieldSystem;
-     u16 *selectedOptionPtr = FieldSystem_GetVarPointer(fieldSystem, ctx->data[0]);
- 
-     if (*selectedOptionPtr == LIST_MENU_NO_SELECTION_YET) {
+@@ -1891,6 +1878,11 @@
          return FALSE;
      }
  
@@ -347,17 +294,7 @@
      return TRUE;
  }
  
- static BOOL ScrCmd_ShowUnionRoomMenu(ScriptContext *ctx)
- {
-     FieldSystem *fieldSystem = ctx->fieldSystem;
-     FieldMenuManager **fieldMenuMan = FieldSystem_GetScriptMemberPtr(fieldSystem, SCRIPT_MANAGER_FIELD_MENU_MANAGER);
- 
-@@ -2188,16 +2180,27 @@
-     MapObject **objectPtr = FieldSystem_GetScriptMemberPtr(fieldSystem, SCRIPT_MANAGER_TARGET_OBJECT);
- 
-     if (*objectPtr == NULL) {
-         MapObjectManager *mapObjMan = fieldSystem->mapObjMan;
-         MapObjectMan_PauseAllMovement(mapObjMan);
+@@ -2193,6 +2185,17 @@
  
          MapObject *object = MapObjMan_GetLocalMapObjByMovementType(fieldSystem->mapObjMan, MOVEMENT_TYPE_FOLLOW_PLAYER);
  
@@ -375,17 +312,7 @@
          if (object
              && SystemFlag_CheckHasPartner(SaveData_GetVarsFlags(fieldSystem->saveData)) == TRUE
              && MapObject_IsMoving(object) != FALSE) {
- 
-             MapObject_SetPauseMovementOff(object);
-             ScriptContext_Pause(ctx, sub_020410CC);
-             return TRUE;
-         }
-@@ -2467,25 +2470,21 @@
-     *destVarX = PlayerAvatar_GetXPos(fieldSystem->playerAvatar);
-     *destVarZ = PlayerAvatar_GetZPos(fieldSystem->playerAvatar);
- 
-     return FALSE;
- }
+@@ -2472,15 +2475,11 @@
  
  static BOOL ScrCmd_Unused_06A(ScriptContext *ctx)
  {
@@ -406,17 +333,7 @@
  }
  
  static BOOL ScrCmd_GetPlayerDir(ScriptContext *ctx)
- {
-     u16 *destVar = ScriptContext_GetVarPointer(ctx);
-     *destVar = PlayerAvatar_GetFacingDir(ctx->fieldSystem->playerAvatar);
- 
-     return FALSE;
-@@ -2519,16 +2518,26 @@
-     return FALSE;
- }
- 
- static BOOL ScrCmd_SetMovementType(ScriptContext *ctx)
- {
+@@ -2524,6 +2523,16 @@
      MapObject *mapObj = MapObjMan_LocalMapObjByIndex(ctx->fieldSystem->mapObjMan, ScriptContext_GetVar(ctx));
      u16 movementType = ScriptContext_ReadHalfWord(ctx);
  
@@ -433,17 +350,7 @@
      MapObject_SwitchMovementType(mapObj, movementType);
      return FALSE;
  }
- 
- static BOOL ScrCmd_GetMovementType(ScriptContext *ctx)
- {
-     u16 *destVar = ScriptContext_GetVarPointer(ctx);
- 
-@@ -2539,20 +2548,21 @@
-         *destVar = MapObject_GetMovementType(mapObj);
-     }
- 
-     return FALSE;
- }
+@@ -2544,10 +2553,11 @@
  
  static BOOL ScrCmd_Unused_06E(ScriptContext *ctx)
  {
@@ -459,17 +366,7 @@
  }
  
  static BOOL ScrCmd_CountUniqueSealsInSealCase(ScriptContext *ctx)
- {
-     u16 *destVar = ScriptContext_GetVarPointer(ctx);
- 
-     SealCase *sealCase = SaveData_GetSealCase(ctx->fieldSystem->saveData);
-     *destVar = SealCase_CountUniqueSeals(sealCase);
-@@ -3815,16 +3825,27 @@
- static BOOL ScrCmd_StartBattleClient(ScriptContext *ctx)
- {
-     FieldSystem *fieldSystem = ctx->fieldSystem;
-     u16 commType = ScriptContext_GetVar(ctx);
-     u16 v2 = ScriptContext_GetVar(ctx);
+@@ -3820,6 +3830,17 @@
      u16 v3 = ScriptContext_GetVar(ctx);
      u16 destVarID = ScriptContext_ReadHalfWord(ctx);
  
@@ -487,17 +384,7 @@
      CommClub_StartBattleClient(fieldSystem, commType, v2, v3);
      ctx->data[0] = destVarID;
      ScriptContext_Pause(ctx, sub_02042F74);
- 
-     return TRUE;
- }
- 
- static BOOL sub_02042F74(ScriptContext *ctx)
-@@ -3845,16 +3866,27 @@
- static BOOL ScrCmd_StartBattleServer(ScriptContext *ctx)
- {
-     FieldSystem *fieldSystem = ctx->fieldSystem;
-     u16 commType = ScriptContext_GetVar(ctx);
-     u16 v2 = ScriptContext_GetVar(ctx);
+@@ -3850,6 +3871,17 @@
      u16 v3 = ScriptContext_GetVar(ctx);
      u16 destVarID = ScriptContext_ReadHalfWord(ctx);
  
@@ -515,17 +402,7 @@
      CommClub_StartBattleServer(fieldSystem, commType, v2, v3);
      ctx->data[0] = destVarID;
      ScriptContext_Pause(ctx, sub_0204300C);
- 
-     return TRUE;
- }
- 
- static BOOL sub_0204300C(ScriptContext *ctx)
-@@ -4007,46 +4039,86 @@
- }
- 
- static BOOL ScrCmd_StartWildBattle(ScriptContext *ctx)
- {
-     int *battleResultMaskPtr = FieldSystem_GetScriptMemberPtr(ctx->fieldSystem, SCRIPT_MANAGER_BATTLE_RESULT);
+@@ -4012,6 +4044,16 @@
      u16 species = ScriptContext_GetVar(ctx);
      u8 level = (u8)ScriptContext_GetVar(ctx);
  
@@ -542,10 +419,7 @@
      Encounter_NewVsSpeciesAtLevel(ctx->task, species, level, battleResultMaskPtr, FALSE);
      return TRUE;
  }
- 
- static BOOL ScrCmd_StartLegendaryBattle(ScriptContext *ctx)
- {
-     int *battleResultMaskPtr = FieldSystem_GetScriptMemberPtr(ctx->fieldSystem, SCRIPT_MANAGER_BATTLE_RESULT);
+@@ -4022,6 +4064,16 @@
      u16 species = ScriptContext_GetVar(ctx);
      u8 level = (u8)ScriptContext_GetVar(ctx);
  
@@ -562,10 +436,7 @@
      Encounter_NewVsSpeciesAtLevel(ctx->task, species, level, battleResultMaskPtr, TRUE);
      return TRUE;
  }
- 
- static BOOL ScrCmd_StartGiratinaOriginBattle(ScriptContext *ctx)
- {
-     int *battleResultMaskPtr = FieldSystem_GetScriptMemberPtr(ctx->fieldSystem, SCRIPT_MANAGER_BATTLE_RESULT);
+@@ -4032,6 +4084,16 @@
      u16 species = ScriptContext_GetVar(ctx);
      u8 level = (u8)ScriptContext_GetVar(ctx);
  
@@ -582,10 +453,7 @@
      Encounter_NewVsGiratinaOrigin(ctx->task, species, level, battleResultMaskPtr, TRUE);
      return TRUE;
  }
- 
- static BOOL ScrCmd_StartFatefulEncounter(ScriptContext *ctx)
- {
-     int *battleResultMaskPtr = FieldSystem_GetScriptMemberPtr(ctx->fieldSystem, SCRIPT_MANAGER_BATTLE_RESULT);
+@@ -4042,6 +4104,16 @@
      u16 species = ScriptContext_GetVar(ctx);
      u8 level = (u8)ScriptContext_GetVar(ctx);
  
@@ -602,17 +470,7 @@
      Encounter_NewFatefulVsSpeciesAtLevel(ctx->task, species, level, battleResultMaskPtr, TRUE);
      return TRUE;
  }
- 
- static BOOL ScrCmd_StartFirstBattle(ScriptContext *ctx)
- {
-     FieldSystem *fieldSystem = ctx->fieldSystem;
-     int *battleResultMaskPtr = FieldSystem_GetScriptMemberPtr(fieldSystem, SCRIPT_MANAGER_BATTLE_RESULT);
-@@ -4140,16 +4212,34 @@
-     u16 *destVar = ScriptContext_GetVarPointer(ctx);
- 
-     *destVar = SaveData_MiscSaveBlock_InitFlag(ctx->fieldSystem->saveData);
-     return FALSE;
- }
+@@ -4145,6 +4217,24 @@
  
  static BOOL ScrCmd_131(ScriptContext *ctx)
  {
@@ -637,17 +495,7 @@
      ov5_021DDBC8(ctx->task);
      return TRUE;
  }
- 
- static BOOL ScrCmd_CheckPoketchEnabled(ScriptContext *ctx)
- {
-     Poketch *poketch = SaveData_GetPoketch(ctx->fieldSystem->saveData);
-     u16 *destVar = ScriptContext_GetVarPointer(ctx);
-@@ -6364,26 +6454,40 @@
- }
- 
- static BOOL ScrCmd_StartDestroyObstacleAnimation(ScriptContext *ctx)
- {
-     u16 obstacle = ScriptContext_GetVar(ctx);
+@@ -6369,6 +6459,15 @@
      u16 *destVar = ScriptContext_GetVarPointer(ctx);
      FieldSystem *fieldSystem = ctx->fieldSystem;
  
@@ -663,10 +511,7 @@
      switch (obstacle) {
      case 0:
          ov6_0224899C(fieldSystem, destVar, 0, HEAP_ID_FIELD3);
-         break;
-     case 1:
-         ov6_0224899C(fieldSystem, destVar, 1, HEAP_ID_FIELD3);
-         break;
+@@ -6379,6 +6478,11 @@
      case 2:
          ov6_0224899C(fieldSystem, destVar, 2, HEAP_ID_FIELD3);
          break;
@@ -678,8 +523,3 @@
      default:
          GF_ASSERT(FALSE);
          break;
-     }
- 
-     return TRUE;
- }
- 

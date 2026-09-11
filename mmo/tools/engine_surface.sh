@@ -144,7 +144,7 @@ if [ "$mode" = update ]; then
         echo "# Engine paths this client depends on by content, and the hash each had"
         echo "# when mmo/ENGINE_COMMIT was last verified. Regenerated only by a pin"
         echo "# bump: mmo/tools/engine_surface.sh --update, checked by \`make -C mmo"
-        echo "# pincheck\`. The policy this file serves -- when the pin moves at all,"
+        echo "# pincheck\`. The policy this file serves, when the pin moves at all"
         echo "# and what a bump has to prove, is mmo/mods/openmmo/README.md."
         echo "#"
         echo "# A path we patch is hashed as what the compile hands our patch (after"

@@ -1,38 +1,6 @@
 --- a/pc/src/pc_modfs.c
 +++ b/pc/src/pc_modfs.c
-@@ -31,6 +31,7 @@
- 
- #include "map_header.h"
- #include "narc.h"
-+#include "pc_bench.h"
- 
- #ifndef S_ISDIR
- #define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
-@@ -81,18 +82,50 @@
- static int sNMembers;
- static int sCapMembers;
- 
--#define PC_MODFS_MAX_GFX 64
-+/* Raised from 64 for followers. A filled package carries one cooked row per
-+ * follower sprite AND one per shiny coat, the same art with the sequence that
-+ * selects the second palette, which is 1,132 before a ported map's people are
-+ * counted. The table is host-side static, four ints a row, so 2048 costs 32 KB
-+ * of the port's own image and nothing of the DS heaps. */
-+#define PC_MODFS_MAX_GFX 2048
-+
-+/* Cooked frame sequences. One is a whole species set's walk, so this is
-+ * headroom for a second and a third rather than a number anything approaches. */
-+#define PC_MODFS_MAX_SEQS 16
- #define PC_MODFS_MAX_PROPS 64
--#define PC_MODFS_MAX_MAPS 16
-+
-+/* Raised from 16 for a ported region. A cooked row is one MAP, and HeartGold's
-+ * two regions out of one cartridge are 538 of them, so 16 was a number a
-+ * package of one city never came near and a region passes on its fortieth map.
-+ * Host-side static, 84 bytes a row, so 1024 is 86 KB of the port's own image
-+ * and nothing of the DS heaps. */
-+#define PC_MODFS_MAX_MAPS 1024
- 
+@@ -75,11 +75,27 @@
  struct gfx_claim {
      int gfx;
      int nsbtx;
@@ -41,13 +9,12 @@
 +    int like;  /* -1: none; else the engine id whose rows this one wears */
  };
  
-+/* Kept sorted by gfx after boot (sort_gfx), because this is read on the
-+ * billboard miss path, three call sites, per object, per frame, and a
-+ * linear walk of 64 rows that became a linear walk of 1024 would be a
-+ * measurable cost in the one place nobody would look for one. */
  static struct gfx_claim sGfx[PC_MODFS_MAX_GFX];
  static int sNGfx;
  
++/* Cooked frame sequences. One is a whole species set's walk. */
++#define PC_MODFS_MAX_SEQS 16
++
 +struct seq_claim {
 +    int seq;
 +    int member;
@@ -61,7 +28,7 @@
  static int sExtraProps[PC_MODFS_MAX_PROPS];
  static int sNExtraProps;
  
-@@ -822,15 +855,30 @@
+@@ -809,15 +825,30 @@
      }
      while (fgets(line, sizeof line, f) != NULL) {
          char *hash = strchr(line, '#');
@@ -75,9 +42,9 @@
          }
 -        if (sscanf(line, "%d %d", &gfx, &nsbtx) != 2) {
 +        /* Two columns is the row every package written before the renderer
-+         * columns existed carries, and it still means what it meant: clone the
-+         * youngster and use this texture. A fifth names an engine id whose
-+         * every row this one wears (a composed player look). */
++         * columns existed carries, and it still means clone the youngster and
++         * use this texture. A fifth names an engine id whose rows this one
++         * wears. */
 +        model = -1;
 +        seq = -1;
 +        like = -1;
@@ -94,7 +61,7 @@
          if (gfx < 0 || nsbtx < 0 || nsbtx >= 65535) {
              fclose(f);
              die("bad billboard row in %s: %d %d", pk->dir, gfx, nsbtx);
-@@ -838,23 +886,120 @@
+@@ -825,23 +856,83 @@
          for (i = 0; i < sNGfx; i++) {
              if (sGfx[i].gfx == gfx) {
                  sGfx[i].nsbtx = nsbtx;
@@ -176,104 +143,10 @@
 +    fclose(f);
 +}
 +
-+static int gfx_claim_cmp(const void *a, const void *b)
-+{
-+    const struct gfx_claim *x = a;
-+    const struct gfx_claim *y = b;
-+
-+    return (x->gfx > y->gfx) - (x->gfx < y->gfx);
-+}
-+
-+/* Sorted once, after every package has had its say, so a later package
-+ * overriding an earlier one's row still happens in load order. */
-+static void sort_gfx(void)
-+{
-+    if (sNGfx > 1) {
-+        qsort(sGfx, (size_t)sNGfx, sizeof sGfx[0], gfx_claim_cmp);
-+    }
-+}
-+
-+static const struct gfx_claim *find_gfx(int gfx_id)
-+{
-+    int lo = 0;
-+    int hi = sNGfx - 1;
-+
-+    while (lo <= hi) {
-+        int mid = lo + (hi - lo) / 2;
-+
-+        if (sGfx[mid].gfx == gfx_id) {
-+            return &sGfx[mid];
-+        }
-+        if (sGfx[mid].gfx < gfx_id) {
-+            lo = mid + 1;
-+        } else {
-+            hi = mid - 1;
-+        }
-+    }
-+    return NULL;
-+}
-+
- static void load_extra_props(const struct pkg *pk)
+ static int gfx_claim_cmp(const void *a, const void *b)
  {
-     char path[PC_MODFS_PATH];
-@@ -900,6 +1045,45 @@
-     fclose(f);
- }
- 
-+static int map_claim_cmp(const void *a, const void *b)
-+{
-+    const struct map_claim *x = a;
-+    const struct map_claim *y = b;
-+
-+    return (x->id > y->id) - (x->id < y->id);
-+}
-+
-+/* Sorted once, after every package has had its say, for the same reason
-+ * sort_gfx is: map_header.c asks this for every field of every header it is
-+ * handed, and a linear walk of 16 rows that became a linear walk of 339 would
-+ * be a cost in a place nobody would look for one. */
-+static void sort_maps(void)
-+{
-+    if (sNMaps > 1) {
-+        qsort(sMaps, (size_t)sNMaps, sizeof sMaps[0], map_claim_cmp);
-+    }
-+}
-+
-+static const struct map_claim *find_map(int id)
-+{
-+    int lo = 0;
-+    int hi = sNMaps - 1;
-+
-+    while (lo <= hi) {
-+        int mid = lo + (hi - lo) / 2;
-+
-+        if (sMaps[mid].id == id) {
-+            return &sMaps[mid];
-+        }
-+        if (sMaps[mid].id < id) {
-+            lo = mid + 1;
-+        } else {
-+            hi = mid - 1;
-+        }
-+    }
-+    return NULL;
-+}
-+
- static void load_cooked_maps(const struct pkg *pk)
- {
-     char path[PC_MODFS_PATH];
-@@ -1170,6 +1354,10 @@
-     return -1;
- }
- 
-+/* Sorted after the claims are in; the index itself is below, beside the
-+ * lookups that read it. */
-+static void member_index_build(void);
-+
- void pc_modfs_boot(void)
- {
-     const char *mods_dir;
-@@ -1186,6 +1374,7 @@
+     const struct gfx_claim *x = a;
+@@ -1247,6 +1338,7 @@
      sNFiles = 0;
      sNMembers = 0;
      sNGfx = 0;
@@ -281,7 +154,7 @@
  
      mods_dir = getenv("PC_MODS_DIR");
      if (mods_dir == NULL || mods_dir[0] == '\0') {
-@@ -1280,13 +1469,21 @@
+@@ -1341,6 +1433,7 @@
      for (i = 0; i < sNPkgs; i++) {
          scan_pkg_files(&sPkgs[i]);
          load_billboard_gfx(&sPkgs[i]);
@@ -289,89 +162,14 @@
          load_extra_props(&sPkgs[i]);
          load_cooked_maps(&sPkgs[i]);
      }
-+    sort_gfx();
-+    sort_maps();
-     for (i = 0; i < nroots; i++) {
-         scan_modfs_root(roots[i]);
-     }
- 
-+    /* Sorted here rather than on first use: at boot this sits beside the tree
-+     * walk that produced the rows, and in a frame it would be 17,000 rows of
-+     * qsort in front of whatever asked. */
-+    member_index_build();
-+
-     fprintf(stderr, "modfs: %d files, %d members, order=[", sNFiles, sNMembers);
-     for (i = 0; i < sNPkgs; i++) {
-         if (i > 0) {
-@@ -1323,28 +1520,185 @@
-     return NULL;
- }
- 
-+/*
-+ * FINDING THE MEMBER COSTS MORE THAN READING IT, and that is the half the
-+ * frame could not see.
-+ *
-+ * The scan below is linear over every claim a package makes, with a strcmp a
-+ * row and a stat on the match, and it is walked TWICE for one member:
-+ * pc_modfs_member_stat calls this and then stats the path again, and
-+ * pc_modfs_member_read calls it a second time before slurp_host. So a member
-+ * costs two full walks and three stats before a byte is read, and on a
-+ * handheld those stats go through the device's emulated storage.
-+ *
-+ * That is a cost per CLAIM, not per package, so it grew by the size of the
-+ * content on the device rather than by anything the frame did: ~1,950 claims
-+ * became 17,077 when a Gen 5 package went on the RG556. Measured there, the
-+ * read priced at 0.56-0.67 ms while the frame carrying it ran 62 ms longer
-+ * than every span could name, the same 62 ms at hd3d 1, 2 and 3, so it was
-+ * never the rasterizer and never the pacing.
-+ *
-+ * The same shape was found and fixed one function above: the comment over
-+ * pc_modfs_narc_file_count records an uncached walk costing 2.5 cores of a
-+ * Windows session, and a per-path cache being the whole answer. The COUNT got
-+ * that cache; this lookup never did, until the member index below. The span
-+ * stays because it is the number that says so: the read is still priced here,
-+ * and a lookup that goes back to walking shows up in it the same day.
-+ */
-+/*
-+ * THE MEMBER INDEX, and why three of this file's questions stopped being walks.
-+ *
-+ * Does this path hold a member at this index, how many does it hold, is its
-+ * appended run dense, each was a `for (i = 0; i < sNMembers; i++)` over every
-+ * claim in the session. That is a cost per CLAIM rather than per package, so it
-+ * grew with the content on the machine and not with anything a frame did:
-+ * ~1,950 claims became 17,077 when a Gen 5 package went on the RG556, and the
-+ * first frame to touch a package then ran 62 ms longer than every span could
-+ * name. The same 62 ms at hd3d 1, 2 and 3, so never the rasterizer; and with
-+ * the package left unnamed it did not shrink, it disappeared (2026-09-08, one
-+ * probe at 1,957 claims: 58.67 ms of unnamed work became 0.19).
-+ *
-+ * The rows do not move once the packages are loaded, so they are sorted once by
-+ * (path, member) and each question becomes a binary search. The sort is paid at
-+ * boot, where a tree walk is already being paid, and re-runs if a package loads
-+ * late, the same generation guard the count cache keeps.
-+ *
-+ * That cache stays where it is. It still answers a repeat call without touching
-+ * this, and its own measurement, 2.5 cores of a Windows session inside one
-+ * function, is what named this shape the first time, one lookup too high.
-+ */
-+static int *sOrder;             /* rows, sorted by (path, member) */
-+static int sOrderMembers = -1;  /* sNMembers when sOrder was built */
-+
-+/*
-+ * A caller's say over which member claims apply. NULL, the default, is the
-+ * overlay as it always was: every claim wins. When set, a member the function
-+ * answers 1 for is read from the cartridge as if nothing had claimed it. This
-+ * is how one scene borrows the cartridge's own sheets while a package holds
-+ * them everywhere else, the contest stage, whose seats were laid out for the
-+ * cartridge's art and cut a Gen 5 fill off at the top of the screen
-+ * (mods/openmmo/src/openmmo_contest.c).
-+ *
-+ * Consulted in the one lookup every member stat and read goes through, so a
-+ * masked member takes the ROM branch of every NARC hook in pc/patches without
-+ * those hooks knowing. Whole-file claims are not masked; nothing wants that.
-+ * The mask is handed the normalised path: no rom: prefix, no leading slash,
-+ * forward slashes.
-+ */
+@@ -1394,6 +1487,17 @@
+  * whether a path claims a member, how many it claims, and whether its
+  * appended run is dense are all binary searches rather than walks over every
+  * claim in the session. */
++/* A caller's say over which member claims apply. A member the mask answers
++ * 1 for is read from the cartridge as if nothing had claimed it; NULL, the
++ * default, lets every claim win. The contest stage uses it to draw the
++ * cartridge's own sprites for one scene. */
 +static int (*sClaimMask)(const char *nitro_path, unsigned index);
 +
 +void pc_modfs_set_claim_mask(int (*mask)(const char *nitro_path, unsigned index))
@@ -379,204 +177,23 @@
 +    sClaimMask = mask;
 +}
 +
-+static int order_cmp(const void *a, const void *b)
-+{
-+    const struct mclaim *x = &sMembers[*(const int *)a];
-+    const struct mclaim *y = &sMembers[*(const int *)b];
-+    int c = strcmp(x->nitro, y->nitro);
-+
-+    if (c != 0) {
-+        return c;
-+    }
-+    if (x->index != y->index) {
-+        return x->index < y->index ? -1 : 1;
-+    }
-+    return 0;
-+}
-+
-+static void member_index_build(void)
-+{
-+    int i;
-+
-+    if (sOrderMembers == sNMembers) {
-+        return;
-+    }
-+    free(sOrder);
-+    sOrder = NULL;
-+    sOrderMembers = sNMembers;
-+    if (sNMembers <= 0) {
-+        return;
-+    }
-+    sOrder = malloc((size_t)sNMembers * sizeof *sOrder);
-+    if (sOrder == NULL) {
-+        die("out of memory");
-+    }
-+    for (i = 0; i < sNMembers; i++) {
-+        sOrder[i] = i;
-+    }
-+    qsort(sOrder, (size_t)sNMembers, sizeof *sOrder, order_cmp);
-+}
-+
-+/* The first row at or past (key, index), which is sNMembers when there is
-+ * none. A path's rows are contiguous here, so lower(key, 0) and
-+ * lower(key, PC_MODFS_INDEX_MAX) bracket the whole of what it claims, and no
-+ * member can carry the sentinel, because an append past 65535 dies below. */
-+#define PC_MODFS_INDEX_MAX 0xFFFFFFFFu
-+
-+static int member_index_lower(const char *key, unsigned index)
-+{
-+    int lo = 0;
-+    int hi = sNMembers;
-+
-+    member_index_build();
-+    while (lo < hi) {
-+        int mid = lo + (hi - lo) / 2;
-+        const struct mclaim *m = &sMembers[sOrder[mid]];
-+        int c = strcmp(m->nitro, key);
-+
-+        if (c < 0 || (c == 0 && m->index < index)) {
-+            lo = mid + 1;
-+        } else {
-+            hi = mid;
-+        }
-+    }
-+    return lo;
-+}
-+
-+static const char *host_member_raw(const char *nitro_path, unsigned index);
-+
- const char *pc_modfs_host_member(const char *nitro_path, unsigned index)
- {
-+    const char *host;
-+
-+    PC_BENCH_BEGIN(bench_t);
-+    host = host_member_raw(nitro_path, index);
-+    PC_BENCH_END(PC_BENCH_IO, bench_t);
-+    return host;
-+}
-+
-+static const char *host_member_raw(const char *nitro_path, unsigned index)
-+{
-     char key[PC_MODFS_PATH];
--    int i;
-+    const struct mclaim *m;
-+    int at;
+ static int *sOrder;
+ static int sOrderMembers = -1;
  
-     if (nitro_path == NULL || nitro_path[0] == '\0') {
+@@ -1471,6 +1575,9 @@
          return NULL;
      }
      norm_nitro(key, sizeof key, nitro_path);
--    for (i = 0; i < sNMembers; i++) {
--        if (sMembers[i].index == index && strcmp(sMembers[i].nitro, key) == 0) {
--            if (!is_file(sMembers[i].host)) {
--                die("claimed file missing: %s/%u", key, index);
--            }
--            if (strlen(sMembers[i].host) >= sizeof sHostRet) {
--                die("path too long: %s", sMembers[i].host);
--            }
--            memcpy(sHostRet, sMembers[i].host, strlen(sMembers[i].host) + 1);
--            return sHostRet;
--        }
 +    if (sClaimMask != NULL && sClaimMask(key, index)) {
 +        return NULL;
-     }
--    return NULL;
-+    at = member_index_lower(key, index);
-+    if (at >= sNMembers) {
-+        return NULL;
 +    }
-+    m = &sMembers[sOrder[at]];
-+    if (m->index != index || strcmp(m->nitro, key) != 0) {
-+        return NULL;
-+    }
-+    /* THE STAT THAT WAS HERE IS GONE, and nothing became quieter. Both callers
-+     * already fail loudly on a claimed file that is not there, member_stat
-+     * stats it itself, member_read's slurp returns NULL, and both print the
-+     * same sentence this did. On the handheld that stat is a FUSE round trip,
-+     * and a member load made three of them for one file. */
-+    if (strlen(m->host) >= sizeof sHostRet) {
-+        die("path too long: %s", m->host);
-+    }
-+    memcpy(sHostRet, m->host, strlen(m->host) + 1);
-+    return sHostRet;
+     at = member_index_lower(key, index);
+     if (at >= sNMembers) {
+         return NULL;
+@@ -1778,6 +1885,39 @@
+     return row != NULL ? row->nsbtx : -1;
  }
  
- int pc_modfs_member_stat(const char *nitro_path, unsigned index, unsigned *out_size)
-@@ -1560,6 +1914,7 @@
-     unsigned highest = 0;
-     int have = 0;
-     int i;
-+    int lo, hi;
-     unsigned idx;
- 
-     if (nitro_path == NULL || nitro_path[0] == '\0') {
-@@ -1576,13 +1931,11 @@
-             return sCountCache[i].answer;
-         }
-     }
--    for (i = 0; i < sNMembers; i++) {
--        if (strcmp(sMembers[i].nitro, key) == 0) {
--            if (!have || sMembers[i].index > highest) {
--                highest = sMembers[i].index;
--            }
--            have = 1;
--        }
-+    lo = member_index_lower(key, 0);
-+    hi = member_index_lower(key, PC_MODFS_INDEX_MAX);
-+    if (hi > lo) {
-+        have = 1;
-+        highest = sMembers[sOrder[hi - 1]].index;
-     }
-     if (!have || highest < rom_count) {
-         /* The common case -- a narc no package appends to -- caches too, or
-@@ -1606,28 +1959,21 @@
-          * the run has a hole. Duplicate rows for one index cannot occur,
-          * claim_member refuses them when the packages load. */
-         unsigned span = highest - rom_count + 1u;
--        unsigned seen = 0;
-+        int from = member_index_lower(key, rom_count);
-+        unsigned seen = (unsigned)(hi - from);
- 
--        for (i = 0; i < sNMembers; i++) {
--            if (strcmp(sMembers[i].nitro, key) == 0
--                    && sMembers[i].index >= rom_count) {
--                seen++;
--            }
--        }
-         if (seen != span) {
--            for (idx = rom_count; idx <= highest; idx++) {
--                int found = 0;
-+            /* The run has a hole and the sentence has to name it. Sorted, that
-+             * is a walk of this path's own appended rows rather than one pass
-+             * over every claim per missing index, the same answer, off the
-+             * quadratic. */
-+            int at = from;
- 
--                for (i = 0; i < sNMembers; i++) {
--                    if (sMembers[i].index == idx
--                            && strcmp(sMembers[i].nitro, key) == 0) {
--                        found = 1;
--                        break;
--                    }
--                }
--                if (!found) {
-+            for (idx = rom_count; idx <= highest; idx++) {
-+                if (at >= hi || sMembers[sOrder[at]].index != idx) {
-                     die("append hole: %s/%u (highest %u)", key, idx, highest);
-                 }
-+                at++;
-             }
-         }
-     }
-@@ -1643,14 +1989,42 @@
- 
- int pc_modfs_billboard_nsbtx(int gfx_id)
- {
-+    const struct gfx_claim *row = find_gfx(gfx_id);
-+
-+    return row != NULL ? row->nsbtx : -1;
-+}
-+
 +int pc_modfs_billboard(int gfx_id, struct pc_modfs_billboard *out)
 +{
 +    const struct gfx_claim *row = find_gfx(gfx_id);
@@ -595,11 +212,8 @@
 +
 +int pc_modfs_billboard_seq(int seq_id, struct pc_modfs_billboard_seq *out)
 +{
-     int i;
- 
--    for (i = 0; i < sNGfx; i++) {
--        if (sGfx[i].gfx == gfx_id) {
--            return sGfx[i].nsbtx;
++    int i;
++
 +    for (i = 0; i < sNSeqs; i++) {
 +        if (sSeqs[i].seq == seq_id) {
 +            if (out != NULL) {
@@ -608,71 +222,11 @@
 +                out->frames = sSeqs[i].frames;
 +            }
 +            return 1;
-         }
-     }
--    return -1;
++        }
++    }
 +    return 0;
- }
- 
- int pc_modfs_extra_prop(int index)
-@@ -1663,18 +2037,17 @@
- 
- int pc_modfs_map_header(int id, struct pc_modfs_map_header *out)
- {
--    int i;
-+    const struct map_claim *row;
- 
-     if (out == NULL) {
-         return 0;
-     }
--    for (i = 0; i < sNMaps; i++) {
--        if (sMaps[i].id == id) {
--            *out = sMaps[i].h;
--            return 1;
--        }
-+    row = find_map(id);
-+    if (row == NULL) {
-+        return 0;
-     }
--    return 0;
-+    *out = row->h;
-+    return 1;
- }
- 
- static void maybe_probe_map(void)
-@@ -1790,8 +2163,35 @@
-  *   unless a later scan finds a same-TU caller.
-  */
- 
-+/*
-+ * A PACKAGE READ IS A FRAME'S I/O TOO, and it was the one kind the late-frame
-+ * autopsy could not see. Every member a package claims is read whole, from a
-+ * host file, in the frame that asked for it, the same shape as the card read
-+ * pc_card_rom.c has always timed, and on a handheld the same milliseconds or
-+ * worse, because the packages sit on the device's emulated storage and a map
-+ * or a battle asks for dozens of members at once.
-+ *
-+ * Without the span those milliseconds landed in the remainder of `work` with
-+ * nothing naming them: an 84 ms frame on the RG556 whose 3D, 2D, audio and
-+ * card spans together accounted for six of it. PC_BENCH_IO is the span for
-+ * what a package member costs the frame that asks for it, and the cartridge
-+ * was only ever part of that; pc_modfs_host_member prices the other half,
-+ * which turns out to be the larger one.
-+ */
-+static void *slurp_host_raw(const char *host, u32 *out_size);
-+
- static void *slurp_host(const char *host, u32 *out_size)
- {
-+    void *buf;
-+
-+    PC_BENCH_BEGIN(bench_t);
-+    buf = slurp_host_raw(host, out_size);
-+    PC_BENCH_END(PC_BENCH_IO, bench_t);
-+    return buf;
 +}
 +
-+static void *slurp_host_raw(const char *host, u32 *out_size)
-+{
-     FILE *f;
-     long sz;
-     void *buf;
+ int pc_modfs_extra_prop(int index)
+ {
+     if (index < 0 || index >= sNExtraProps) {

@@ -1,6 +1,6 @@
 --- a/pc/include/pc_view.h
 +++ b/pc/include/pc_view.h
-@@ -39,7 +39,9 @@
+@@ -11,7 +11,9 @@
  #endif
  
  #define PC_VIEW_MAGIC   0x50504C56u     /* 'PPLV' */
@@ -10,10 +10,10 @@
 +#define PC_VIEW_VERSION 1007u
  
  /*
-  * The audio ring, diamond's design, whole (see that tree's pc_view.h for
-@@ -72,7 +74,10 @@
-  * A reader that ignores `width` reads a native frame correctly and a wide
-  * one skewed, which is why the viewer checks the version.
+  * The audio ring, diamond's design, whole (see that tree's pc_view.h for the
+@@ -36,7 +38,10 @@
+  * wider than that starts showing the seams of scenes that were built for a 4:3
+  * camera.
   */
 -#define PC_VIEW_WIDE_MAX 342u
 +/* openmmo: 684 is 32:9 against 192 rows, so an adaptive aspect can follow

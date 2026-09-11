@@ -1,6 +1,6 @@
 --- a/pc/src/pc_view.c
 +++ b/pc/src/pc_view.c
-@@ -109,6 +109,7 @@
+@@ -94,6 +94,7 @@
  static int view_wide_debug;         /* PC_WIDE_DEBUG: report the gate     */
  static int view_wide_w;             /* the width in force: 0 = native    */
  static int view_hd_s = 1;           /* internal resolution: 1..HD_MAX    */
@@ -8,7 +8,7 @@
  
  static void view_apply_width(int w)
  {
-@@ -127,11 +128,14 @@
+@@ -112,11 +113,14 @@
  }
  
  /*
@@ -27,7 +27,7 @@
  {
      view_hd_s = (scale >= 2 && scale <= (int)PC_VIEW_HD_MAX) ? scale : 1;
      pc_gpu3d_set_hd(view_hd_s);
-@@ -142,6 +146,261 @@
+@@ -127,6 +131,261 @@
      pc_gpu2d_set_hd(view_hd_s);
  }
  
@@ -289,9 +289,9 @@
  void pc_view_set_aspect(int width)
  {
      view_aspect_mode = width;
-@@ -1098,6 +1357,17 @@
+@@ -943,6 +1202,17 @@
          /* What dropping a picture would save, from the last frame that drew
-          * one, see where the skip is decided. */
+          * one; see where the skip is decided. */
          static unsigned long long picture_ns, render_mark;
 +        /* Refreshes the display went past with no frame of the game behind
 +         * them, and the frames made back, CATCHING UP, below. */
@@ -307,7 +307,7 @@
  
          if (pace < 0) {
              const char *env = getenv("PC_PACE");
-@@ -1123,19 +1393,202 @@
+@@ -968,19 +1238,202 @@
          }
  
          if (pace && !turbo_held) {
@@ -513,29 +513,25 @@
  
                  /* The period that just ended, split. Taken here because
                   * everything but the sleep has happened by now, and the
-@@ -1204,9 +1657,30 @@
+@@ -1049,15 +1502,26 @@
                      }
                  }
  
 -                if (ahead < -100000000LL) {
 -                    next = now;         /* fell behind: re-anchor, no sprint */
 -                } else if (ahead > 0) {
-+                /*
-+                 * OFF A DISPLAY THE SAME DEBT IS IMPLICIT: `next` walks one
-+                 * console frame per frame whatever the clock says, so a
-+                 * frame that fell behind is followed by frames that do not
-+                 * sleep until the clock is caught, the sprint the note
-+                 * below refused beyond a hundred milliseconds. That was the
-+                 * wrong place to give up. Measured on the RG556 (2026-09-11)
-+                 * at a session's start, before the display had been
-+                 * measured well enough to pace on: a join blocked the guest
-+                 * for 175 ms, the re-anchor threw those frames away, and the
-+                 * map load that followed found 25 ms of cushion instead of
-+                 * 200 and cut the sound twice in its first second. So the
-+                 * limit is the same half second as the display's, and past
-+                 * two frames behind the sprint draws no pictures either,
-+                 * the panel was showing the last one anyway.
-+                 */
+-                    /*
+-                     * Relative sleep rather than TIMER_ABSTIME: mingw's
+-                     * winpthreads has nanosleep but not clock_nanosleep.
+-                     */
+-                    struct timespec rem = { (time_t)(ahead / 1000000000LL),
+-                                            (long)(ahead % 1000000000LL) };
++                /* Off a display the same debt is implicit: `next` walks one
++                 * console frame per frame whatever the clock says, so a frame
++                 * that fell behind is followed by frames that do not sleep
++                 * until the clock is caught. The limit is the display's half
++                 * second, and past two frames behind the sprint draws no
++                 * pictures either. */
 +                if (!on_display && ahead < -500000000LL) {
 +                    next = now;         /* half a second behind: re-anchor */
 +                } else if (!on_display && ahead < -2LL * 16715113LL) {
@@ -544,33 +540,31 @@
 +                    view_skip_next = 1;
 +                    pc_gpu3d_soft_skip_next();
 +                } else if (until > 0) {
-                     /* Relative sleep rather than TIMER_ABSTIME: mingw's
-                      * winpthreads has nanosleep but not clock_nanosleep.
-                      *
-@@ -1220,8 +1694,8 @@
-                      * and the waitable timer that answers it. The `slip`
-                      * column below is what that measurement looks like from
-                      * in here, so it cannot go unnoticed a third time. */
--                    struct timespec rem = { (time_t)(ahead / 1000000000LL),
--                                            (long)(ahead % 1000000000LL) };
++                    /* Relative sleep rather than TIMER_ABSTIME: mingw's
++                     * winpthreads has nanosleep but not clock_nanosleep. How
++                     * coarsely it can sleep is pc_win_clock.c's business; the
++                     * `slip` column below is what that looks like here. */
 +                    struct timespec rem = { (time_t)(until / 1000000000LL),
 +                                            (long)(until % 1000000000LL) };
                      view_sleep(&rem);
                  }
  
-@@ -1300,7 +1774,10 @@
-                  * fault of their own, and those were being skipped too.
-                  *
-                  * So the picture has to be a real part of why the frame went
--                 * over -- a quarter of it or more. A machine that genuinely
-+                 * over -- a quarter of it or more -- and the overrun has to
-+                 * be worth half a picture. Both halves of that, and why the
-+                 * second one was the whole of the owner's stutter, are at
-+                 * view_picture_is_the_bill above. A machine that genuinely
-                  * cannot afford --hd3d 4 is over by a few milliseconds with
-                  * fifteen of rasterize behind it and still skips, which is
-                  * the case this was built for.
-@@ -1308,8 +1785,8 @@
+@@ -1100,17 +1564,18 @@
+                 }
+ 
+                 /*
+-                 * The skip decision; see view_skip_next above. Made here
+-                 * because `ahead` is this frame's verdict: at or past the
+-                 * deadline means the machine did not afford this frame's
+-                 * picture, so the next frame drops its picture rather than its
+-                 * pace.
++                 * The skip decision; see view_skip_next above. `ahead` is this
++                 * frame's verdict, so at or past the deadline the next frame
++                 * drops its picture rather than its pace, and only when that
++                 * would have helped: the picture must be a quarter of the
++                 * overrun or more, or a map load costs three pictures for
++                 * nothing.
+                  */
                  if (view_hd_s > 1) {
                      static unsigned run;
  
@@ -581,7 +575,7 @@
                          run++;
                          skipped++;
                          view_skip_next = 1;
-@@ -1319,6 +1796,14 @@
+@@ -1120,6 +1585,14 @@
                      }
                  }
  
@@ -594,9 +588,9 @@
 +                }
 +
                  /*
-                  * A HIGHER INTERNAL RESOLUTION THAN THE MACHINE CAN HOLD IS
-                  * THE ONE WAY THIS SETTING FAILS SILENTLY, so it says so.
-@@ -1361,6 +1846,11 @@
+                  * A higher internal resolution than the machine can hold is
+                  * The one way this setting fails silently, so it says so.
+@@ -1146,6 +1619,11 @@
                                              " %u pictures skipped)\n",
                                      dt > 0.0 ? since / dt : 0.0, dt,
                                      late, paced ? paced : since, skipped);
@@ -608,7 +602,7 @@
                              fprintf(stderr, "pc-pace:   every frame  work"
                                              " %.2f (max %.2f)  publish %.2f"
                                              " (max %.2f)  slip %.2f (max"
-@@ -1432,7 +1922,7 @@
+@@ -1217,7 +1695,7 @@
                                  view_hd_s, paced, late, skipped,
                                  view_hd_s - 1);
                      }

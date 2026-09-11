@@ -1,104 +1,22 @@
-# The pokeplatinum pc/ engine commit this client's fused build is known to
-# build against. The client fuses with the engine as a mod (mmo/mods/openmmo),
-# so it is authored against engine sources that advance in the engine repo next
-# door. `make -C mmo enginecheck` compares $ENGINE_DIR's HEAD to the commit
-# below and warns loudly on drift; `make -C mmo fused` runs that check first, so
-# a fused build that breaks after an engine bump reports "the engine moved"
-# instead of a confusing compile error deep in engine sources.
+# The engine commit this client's fused build is known to build against. The
+# client fuses with the engine as a mod (mmo/mods/openmmo), so it is authored
+# against engine sources that move on their own. `make -C mmo enginecheck`
+# compares the engine checkout's HEAD with the commit below and warns on drift;
+# `make -C mmo fused` runs that check first, so a build that breaks after an
+# engine bump says "the engine moved" instead of failing deep in engine code.
 #
-# This sha is only half the contract. The other half is mmo/ENGINE_SURFACE: the
-# engine paths this build depends on by content, each with the hash it had when
-# this commit was verified. A sha alone cannot say whether an engine that moved
-# moved anywhere that matters, the 2026-08-15 bump crossed 43 commits and
-# 6,080 changed files, of which 3 touched anything here; this bump crosses 146
-# commits and adds the runtime content door (pc_modfs, the narc hook,
-# MapHeader_Lookup, extra-prop).
+# The sha is half the contract. The other half is mmo/ENGINE_SURFACE: the engine
+# paths this build depends on by content, each with the hash it had when this
+# commit was verified. A sha alone cannot say whether an engine that moved moved
+# anywhere that matters.
 #
-# To bump, and the order matters:
-#   1. `make -C mmo pincheck` and read the diff of every path it names.
-#   2. `make -C mmo patchcheck`, every hunk still on exact context.
-#   3. `make -C mmo fused` builds, and the five fused checks in `make test`
-#      boot it: crowd, heap, name, label, ceiling.
-#   4. `make -C mmo abicheck`.
-#   5. Replace the sha below, then `mmo/tools/engine_surface.sh --update`, and
-#      commit the two together. pincheck fails on a sha whose manifest was
-#      written for a different one, so half a bump cannot pass unnoticed.
-# Why the pin moves at all, and how rarely: mmo/mods/openmmo/README.md,
-# "Pinning the engine, and knowing when it moves".
+# To bump, in this order: `make -C mmo pincheck` and read every diff it names;
+# `make -C mmo patchcheck`; `make -C mmo fused` plus the five fused checks in
+# `make test`; `make -C mmo abicheck`. Then replace the sha, run
+# `mmo/tools/engine_surface.sh --update`, and commit the two together. pincheck
+# fails on a sha whose manifest was written for a different one, so half a bump
+# cannot pass unnoticed.
 #
-# The guard compares committed HEAD only; the engine's uncommitted working-tree
-# changes are not captured here.
-#
-# Verified 2026-09-03: pincheck, patchcheck every hunk on exact context,
-# fused builds and links, the five fused checks (crowd, heap, name, label,
-# ceiling) green, abicheck green. This bump crosses TWO commits, both in
-# the rasterizer. First the perspective divide: posX * viewport width was
-# a 32-bit product, which the console never overflows (256 pixels, 24-bit
-# W) and a wide HD viewport of up to 2736 pixels does for any vertex far
-# enough away, sending it to the far side of the screen, the smear every
-# wide HD run has carried, the width cliffs pc_view.c was clamped against,
-# and the black notch from the same wrap in Y. The product is 64-bit now,
-# which is bit-identical at native, and the RAM cap counts what it drops.
-# Second the screen x field: it was sized from 512 * hd alone, so a page
-# wider than 512 columns folded at 1023 pixels (hd3d 2) or 2047 (hd3d 4);
-# it is sized from the page's own width now, the console's at native.
-# The sixteenth bump's note, kept for the record:
-# Verified 2026-09-01, evening: pincheck, patchcheck every hunk on exact
-# context, fused builds and links, the five fused checks (crowd, heap, name,
-# label, ceiling) green, abicheck green, engine suite rows determinism,
-# state_digest, view_channel, session, save_lab, selftest, cli, hd3d,
-# widescreen, mods, sym green. This bump crosses ONE commit, the mixer's
-# output mode: pc_spu_set_output() lets PC_AUDIO_RATE mix at any whole rate
-# through a fixed-point cycle step and PC_AUDIO_INTERP answer between a PCM
-# channel's samples with melonDS's linear, cosine or cubic shapes; the view
-# page's audio_rate, the WAV dump and the audio lab carry the mixer's real
-# rate. With neither set every step is the old arithmetic and the dumps are
-# byte-identical, which two before-and-after runs measured. The launcher's
-# new `sound` row (hd, the default) is what asks for 48,000 and cubic.
-# The fifteenth bump's note, kept for the record:
-# Verified 2026-09-01: pincheck, patchcheck every hunk on exact context, fused
-# builds and links, the five fused checks (crowd, heap, name, label, ceiling)
-# green, abicheck green. This bump crosses ONE commit, the battle copy mirror:
-# every OBJ copy a move script makes of a battler was loaded from a tile
-# buffer filled once at battle start, so on a sprite whose picture changes
-# (our Gen 5 loop) the copy sat on the mon as a frozen still, three frames at
-# the start of every move and the whole of a stat change. The engine now keeps
-# that buffer, and every live copy, equal to the sprite's texture
-# (pc/src/pc_sprite_mirror.c plus patches on pokemon_sprite, battle_display,
-# battle_io_command, battle_anim_system, ov12_022380BC, unk_02094EDC).
-# Static Platinum sprites are pixel-identical before and after.
-# The fourteenth bump's note, kept for the record:
-# Verified 2026-08-31: pincheck read at 7 of 199 paths moved, patchcheck
-# every hunk on exact context, fused builds and links with no SKIP, the five
-# fused checks (crowd, heap, name, label, ceiling) green, abicheck green,
-# engine suite determinism/hd3d/save_lab/battle_math green. This bump crosses
-# six commits. Five are the port's own: the modfs hooks moved into pc/patches
-# (map_header, narc, area_data, map_prop_material_shape, our hunks on those
-# files still land exact), the WM manager answers behind PXI tag 10 and the
-# base comm_manager/communication_system patches it replaced are gone (ours
-# still land exact), plus ci.sh and mirror housekeeping. The sixth is the
-# battle stand-in fix: BattleMonOBJData_New put an OBJ copy of every battler
-# over its PokemonSprite for the ball throw and never hid the sprite under
-# it, so a Gen 5 loop showed a static copy sitting on top of itself during
-# every switch; the copy now draws nothing (pc/patches/src/battle_anim).
-# The thirteenth bump's note, kept for the record:
-# Verified 2026-08-27 (the thirteenth bump that day): pincheck 189 paths
-# unchanged, patchcheck every hunk on exact context, fused builds and
-# links, boot and crowd checks green, abicheck green. This bump crosses
-# ONE commit touching one file the surface does not carry: the PC_PROF
-# sampler reads the program counter per architecture instead of glibc's
-# i386 gregs[14], which bionic ARM does not have, the fix that lets the
-# ANDROID fused build compile at all. Nothing the Linux or Windows builds
-# compile changed behaviour; the android APK carrying it has been through
-# the whole picker-to-Sinnoh session on the device.
-# The twelfth bump's note, kept for the record:
-# pincheck 189 paths
-# unchanged, patchcheck every hunk on exact context, fused builds and
-# links, abicheck green, the five fused checks re-run. This bump adds the
-# LAST cold-PE fix: SDK_WEAK_SYMBOL (the SDK's own weak terminators,
-# OS_Terminate was the holdout) is strong on PE via the nitro/types.h
-# shadow, keyed on _WIN32 OR PC_HIDE_WIN32 because the Windows build
-# hides _WIN32 from exactly the TUs that use it. The first true cold
-# Windows fused links, debug and release, closed on this machine with
-# pc_sleep_ns inside; engine suite 34/34.
-2d23b1136c065424e80c268f1f1124f7f14e60cb
+# This is the engine/pokeplatinum submodule's own commit, so a fresh clone with
+# `--recurse-submodules` is already at it.
+277a05f77e39ba69fbcf33a2e07e0ebd2b2b1b4d
