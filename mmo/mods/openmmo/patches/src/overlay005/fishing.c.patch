@@ -1,0 +1,114 @@
+--- a/src/overlay005/fishing.c
++++ b/src/overlay005/fishing.c
+@@ -125,10 +125,37 @@
+     case 0:
+         MapObjectMan_PauseAllMovement(fieldSystem->mapObjMan);
+         fishingContext->fishEncounterDTO = NULL;
++        /* openmmo: with a session the roll is the server's, the way a step
++         * into grass is. The cast goes up and the task waits (state 2) for
++         * the verdict; the minigame then plays exactly as it does here.
++         * Without a session nothing answers and the engine rolls its own.
++         * mods/openmmo/src/openmmo_fishing.c. */
++        {
++            extern int openmmo_fishing_cast(FieldSystem *fs, int rodType);
++
++            if (openmmo_fishing_cast(fieldSystem, fishingContext->rodType)) {
++                fishingContext->state = 2;
++                break;
++            }
++        }
+         fishingContext->isFishEncountered = WildEncounters_TryFishingEncounter(fieldSystem, fishingContext->rodType, &fishingContext->fishEncounterDTO);
+         fishingContext->sysTask = StartFishingTask(fieldSystem, fishingContext->rodType, fishingContext->isFishEncountered);
+-        fishingContext->state++;
++        fishingContext->state = 1;
++        break;
++    case 2: {
++        /* openmmo: the server's verdict. A bite plays the minigame with no
++         * DTO yet, the fight is opened by the reel-in that lands. */
++        extern int openmmo_fishing_verdict(FieldSystem *fs);
++        int verdict = openmmo_fishing_verdict(fieldSystem);
++
++        if (verdict == 0) {
++            break;
++        }
++        fishingContext->isFishEncountered = (verdict > 0);
++        fishingContext->sysTask = StartFishingTask(fieldSystem, fishingContext->rodType, fishingContext->isFishEncountered);
++        fishingContext->state = 1;
+         break;
++    }
+     case 1:
+         if (IsDoneFishing(fishingContext->sysTask) == TRUE) {
+             int caughtFish = HasCaughtFish(fishingContext->sysTask);
+@@ -136,6 +163,26 @@
+             FishingSysTask_Free(fishingContext->sysTask);
+ 
+             if (caughtFish == TRUE) {
++                /* openmmo: a server-rolled fish is the server's battle to
++                 * open; the reel-in is reported and the task waits (state 3).
++                 * A report that could not be sent has no fight coming and no
++                 * transfer to read a party out of, so the line comes back
++                 * empty instead of running the two lines below on a null. */
++                {
++                    extern int openmmo_fishing_hooked(FieldSystem *fs);
++                    int hooked = openmmo_fishing_hooked(fieldSystem);
++
++                    if (hooked > 0) {
++                        fishingContext->state = 3;
++                        break;
++                    }
++                    if (hooked < 0) {
++                        MapObjectMan_UnpauseAllMovement(fieldSystem->mapObjMan);
++                        Heap_Free(fishingContext);
++
++                        return TRUE;
++                    }
++                }
+                 Pokemon *wildFish = Party_GetPokemonBySlotIndex(fishingContext->fishEncounterDTO->parties[1], 0);
+                 FieldSystem_SaveTVSegment_WhatsFishing(fieldSystem, TRUE, fishingContext->fishingRodItemID, wildFish);
+ 
+@@ -147,6 +194,12 @@
+                 return FALSE;
+             }
+ 
++            {
++                extern void openmmo_fishing_lost(FieldSystem *fs);
++
++                openmmo_fishing_lost(fieldSystem);
++            }
++
+             if (fishingContext->fishEncounterDTO != NULL) {
+                 FieldBattleDTO_Free(fishingContext->fishEncounterDTO);
+             }
+@@ -157,6 +210,32 @@
+             return TRUE;
+         }
+         break;
++    case 3: {
++        /* openmmo: the battle behind the reported reel-in. */
++        extern int openmmo_fishing_battle(FieldSystem *fs, FieldBattleDTO **out);
++        extern void openmmo_encounter_mark_started(void);
++        int got = openmmo_fishing_battle(fieldSystem, &fishingContext->fishEncounterDTO);
++
++        if (got == 0) {
++            break;
++        }
++        if (got > 0) {
++            Pokemon *wildFish = Party_GetPokemonBySlotIndex(fishingContext->fishEncounterDTO->parties[1], 0);
++            FieldSystem_SaveTVSegment_WhatsFishing(fieldSystem, TRUE, fishingContext->fishingRodItemID, wildFish);
++
++            GameRecords_IncrementRecordValue(SaveData_GetGameRecords(fieldSystem->saveData), RECORD_CAUGHT_FISH);
++
++            openmmo_encounter_mark_started();
++            Encounter_StartVsWild(fieldSystem, taskMan, fishingContext->fishEncounterDTO);
++            Heap_Free(fishingContext);
++
++            return FALSE;
++        }
++        MapObjectMan_UnpauseAllMovement(fieldSystem->mapObjMan);
++        Heap_Free(fishingContext);
++
++        return TRUE;
++    }
+     }
+ 
+     return FALSE;

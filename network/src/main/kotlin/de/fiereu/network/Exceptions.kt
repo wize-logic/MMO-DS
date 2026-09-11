@@ -28,7 +28,16 @@ class StaleClientHelloException(val skewSeconds: Long) :
 class AlreadyGreetedException :
     HandshakeException("a second ClientHello on a session that has already been answered")
 
+class UngreetedClientReadyException :
+    HandshakeException("a ClientReady on a session that has not been greeted")
+
 class InvalidServerSignatureException :
-    HandshakeException("ServerHello signature does not match trusted root key")
+    HandshakeException(
+        "ServerHello signature does not match trusted root key over the point, the checksum size " +
+            "and this session's ClientHello timestamp")
+
+class WeakChecksumSizeException(val size: Int, val minimum: Int) :
+    HandshakeException(
+        "ServerHello negotiated checksum size $size, below the $minimum-byte keyed minimum")
 
 class HandlerRegistrationException(message: String) : NetworkException(message)

@@ -3,6 +3,7 @@ package de.fiereu.openmmo.net.game.packets
 import de.fiereu.bytecodec.*
 import de.fiereu.openmmo.common.ContestConditions
 import de.fiereu.openmmo.common.ContestType
+import de.fiereu.openmmo.common.MON_STATUS_MASK
 
 /** What an engine-run scene left each party member as. */
 data class BattleOutcomeMove(val id: Int, val pp: Int)
@@ -21,6 +22,27 @@ data class BattleOutcomeMon(
     val conditions: ContestConditions = ContestConditions.NONE,
     val sheen: Int = 0,
     val superContestRibbons: Long = 0L,
+    /**
+     * The National Dex species the engine currently holds this monster as, which is how an
+     * evolution reaches the record: the engine runs its own evolution screen and changes the
+     * species there, and without this the report says a level 16 Charmander and a relog hands one
+     * back.
+     */
+    val species: Int = 0,
+    /** How much the monster likes its trainer now, 0..255, or -1 for a client making no claim. */
+    val friendship: Int = -1,
+    /**
+     * The wire id of the item the monster is carrying now, 0 for nothing, or -1 for a client making
+     * no claim.
+     */
+    val heldItemId: Int = -1,
+    /** Whether the engine still holds this monster as an egg. */
+    val isEgg: Boolean = false,
+    /**
+     * What the scene left the monster suffering from: the client engine's own condition word, 0 for
+     * a healthy one.
+     */
+    val status: Int = 0,
 )
 
 data class BattleOutcomePacket(
@@ -45,6 +67,11 @@ private val BattleOutcomeMonCodec =
         val conditions = ContestType.entries.map { t -> field(U8) { it.conditions[t] and 0xFF } }
         val sheen = field(U8) { it.sheen and 0xFF }
         val superContestRibbons = field(S64LE) { it.superContestRibbons }
+        val species = field(U16LE) { it.species }
+        val friendship = field(S16LE) { it.friendship.toShort() }
+        val heldItemId = field(S16LE) { it.heldItemId.toShort() }
+        val isEgg = field(Bool) { it.isEgg }
+        val status = field(U16LE) { it.status and MON_STATUS_MASK }
         return BattleOutcomeMon(
             id,
             level,
@@ -59,6 +86,11 @@ private val BattleOutcomeMonCodec =
             conditions = ContestConditions.ofList(conditions),
             sheen = sheen,
             superContestRibbons = superContestRibbons,
+            species = species,
+            friendship = friendship.toInt(),
+            heldItemId = heldItemId.toInt(),
+            isEgg = isEgg,
+            status = status and MON_STATUS_MASK,
         )
       }
     }

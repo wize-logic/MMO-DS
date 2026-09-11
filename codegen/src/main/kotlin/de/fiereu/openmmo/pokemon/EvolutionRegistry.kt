@@ -1,5 +1,7 @@
 package de.fiereu.openmmo.pokemon
 
+import de.fiereu.openmmo.common.enums.EvolutionMethod
+import de.fiereu.openmmo.common.enums.EvolutionParam
 import de.fiereu.openmmo.common.enums.EvolutionTrigger
 import de.fiereu.openmmo.pokemon.generated.GeneratedEvolutions
 import java.util.concurrent.ConcurrentHashMap
@@ -51,7 +53,80 @@ class EvolutionRegistry @Inject constructor() {
         ?.targetSpeciesId
   }
 
+  /**
+   * Whether a monster stored as [from] could have become [to], at [level] and carrying [beauty].
+   */
+  fun isReachable(
+      from: Int,
+      to: Int,
+      level: Int,
+      beauty: Int = 0,
+      friendship: Int = 0,
+      heldItemId: Int = 0,
+      heldItemPreventsEvolution: Boolean = false,
+  ): Boolean {
+    if (from == to || to <= 0) return false
+    // The Everstone gate, in the shape the game applies it: the species is checked first, the hold
+    // effect second, and a stone used on the monster is exempt. So a monster reported as evolved
+    // while the record still has an Everstone on it can only have got there by a stone.
+    val everstone = heldItemPreventsEvolution && from != KADABRA
+    val seen = mutableSetOf(from)
+    var frontier = setOf(from)
+    repeat(MAX_EVOLUTION_STEPS) {
+      val next = mutableSetOf<Int>()
+      for (dexId in frontier) {
+        for (evolution in get(dexId)) {
+          val target = evolution.targetSpeciesId
+          if (target <= 0 || target in seen) continue
+          if (everstone && evolution.method.trigger != EvolutionTrigger.ITEM_USED) continue
+          if (!permits(evolution, level, beauty, friendship, heldItemId)) continue
+          if (target == to) return true
+          next += target
+        }
+      }
+      if (next.isEmpty()) return false
+      seen += next
+      frontier = next
+    }
+    return false
+  }
+
+  /** What the record alone can say about one entry. Anything it cannot speak to is allowed. */
+  private fun permits(
+      evolution: EvolutionDef,
+      level: Int,
+      beauty: Int,
+      friendship: Int,
+      heldItemId: Int,
+  ): Boolean =
+      when (evolution.method) {
+        EvolutionMethod.NONE,
+        EvolutionMethod.LEVEL_SHEDINJA -> false
+        EvolutionMethod.LEVEL_HAPPINESS,
+        EvolutionMethod.LEVEL_HAPPINESS_DAY,
+        EvolutionMethod.LEVEL_HAPPINESS_NIGHT ->
+            friendship >= EvolutionCandidate.FRIENDSHIP_TO_EVOLVE
+        // The day and night halves are one entry each and the report carries no clock, so a Gliscor
+        // and a Weavile are both held to their own item and not to the hour.
+        EvolutionMethod.TRADE_WITH_HELD_ITEM,
+        EvolutionMethod.LEVEL_WITH_HELD_ITEM_DAY,
+        EvolutionMethod.LEVEL_WITH_HELD_ITEM_NIGHT -> evolution.param == heldItemId
+        else ->
+            when (evolution.method.param) {
+              EvolutionParam.LEVEL -> evolution.param <= level
+              EvolutionParam.BEAUTY -> evolution.param <= beauty
+              else -> true
+            }
+      }
+
   companion object {
     private const val KADABRA = 64
+
+    /**
+     * How many evolutions deep one report may reach. No species is more than two evolutions from
+     * its first stage, so this is that plus room, and it is what stops the walk above rather than
+     * the data: a table with a cycle in it would otherwise never finish.
+     */
+    const val MAX_EVOLUTION_STEPS = 3
   }
 }

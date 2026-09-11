@@ -300,6 +300,27 @@ size_t mmo_net_available(const mmo_net *n)
     return n->rx.len - n->rx.head;
 }
 
+size_t mmo_net_pending(const mmo_net *n)
+{
+    return n->tx.len - n->tx.head;
+}
+
+/* Everything queued, actually out. */
+size_t mmo_net_drain(mmo_net *n, int ms)
+{
+    int waited = 0;
+
+    while (mmo_net_pending(n) > 0) {
+        if (mmo_net_pump(n) != 0)
+            break; /* the link is gone; nothing more will leave */
+        if (mmo_net_pending(n) == 0 || waited >= ms)
+            break;
+        mmo_plat_sleep_us(1000);
+        waited++;
+    }
+    return mmo_net_pending(n);
+}
+
 void mmo_net_close(mmo_net *n)
 {
     if (n->fd >= 0)

@@ -112,8 +112,12 @@ int entity_tests_run(void)
     openmmo_entity_mgr_init(&m, 1);
     openmmo_entity_spawn(&m, 1, 0, 0, OPENMMO_DIR_EAST, kAp);
     step(&m, out); /* consume SPAWN */
-    openmmo_entity_set_target(&m, 1, 3, 0, OPENMMO_DIR_EAST, 2);
+    /* One tile at a time, which is what a walking peer's steps look like as
+     * they arrive: a target further out is the catching-up case below and is
+     * deliberately not paced at a walk. */
+    openmmo_entity_set_target(&m, 1, 1, 0, OPENMMO_DIR_EAST, 2);
     next_event(&m, &ev, 16); /* first step */
+    openmmo_entity_set_target(&m, 1, 2, 0, OPENMMO_DIR_EAST, 2);
     int gap = next_event(&m, &ev, 16); /* second step */
     CHECK(gap == 7, "speed 2 leaves 7 idle ticks between steps (period 8)");
 
@@ -241,6 +245,96 @@ int entity_tests_run(void)
         n = openmmo_entity_snapshot(&m, out, OPENMMO_ENTITY_NETID_CEIL);
         CHECK(n == 1 && out[0].slot == 1,
             "a slot marked to leave is not in the snapshot");
+    }
+
+    printf("a peer whose tiles outrun a walk is stepped and drawn as running:\n");
+    {
+        int t, steps = 0, ran = 0, walked = 0;
+
+        openmmo_entity_mgr_init(&m, 4);
+        openmmo_entity_spawn(&m, 1, 0, 0, OPENMMO_DIR_EAST, kAp);
+        step(&m, out); /* the SPAWN */
+
+        /* One tile owed is a walking peer and stays a walk. */
+        openmmo_entity_set_target(&m, 1, 1, 0, OPENMMO_DIR_EAST, -1);
+        CHECK(next_event(&m, &ev, 4) == 0
+              && ev.kind == OPENMMO_ENTITY_EV_STEP
+              && ev.speed == OPENMMO_ENTITY_SPEED_WALK,
+            "one tile behind is a walk");
+        CHECK(next_event(&m, &ev, 8) == -1,
+            "and the walk's eight frames are still gated");
+
+        /* Two tiles owed is a peer moving faster than a walk draws them: the
+         * step is timed and reported at the run cadence, so the gap closes. */
+        openmmo_entity_set_target(&m, 1, 3, 0, OPENMMO_DIR_EAST, -1);
+        CHECK(next_event(&m, &ev, 8) >= 0
+              && ev.kind == OPENMMO_ENTITY_EV_STEP
+              && ev.speed == OPENMMO_ENTITY_SPEED_RUN,
+            "two tiles behind runs");
+        CHECK(next_event(&m, &ev, 4) == 3,
+            "a run leaves 3 idle ticks between steps (period 4)");
+
+        /* A peer given a running pace at the wire's own word is not slowed to
+         * a walk once it has caught up, and one given a faster pace than a run
+         * keeps it. */
+        openmmo_entity_mgr_init(&m, 4);
+        openmmo_entity_spawn(&m, 2, 0, 0, OPENMMO_DIR_EAST, kAp);
+        step(&m, out);
+        openmmo_entity_set_target(&m, 2, 4, 0, OPENMMO_DIR_EAST,
+                                  OPENMMO_ENTITY_SPEED_FASTEST);
+        for (t = 0; t < 40 && steps < 4; t++) {
+            n = step(&m, out);
+            if (n > 0 && out[0].kind == OPENMMO_ENTITY_EV_STEP) {
+                steps++;
+                if (out[0].speed == OPENMMO_ENTITY_SPEED_FASTEST) ran++;
+                if (out[0].speed == OPENMMO_ENTITY_SPEED_WALK) walked++;
+            }
+        }
+        CHECK(steps == 4 && ran == 4 && walked == 0,
+            "a pace the wire called faster than a run is left alone");
+    }
+
+    printf("a whole pose is set down, not walked to:\n");
+    {
+        openmmo_entity_mgr_init(&m, 4);
+        openmmo_entity_spawn(&m, 1, 2, 2, OPENMMO_DIR_SOUTH, kAp);
+        step(&m, out);
+        CHECK(openmmo_entity_place(&m, 1, 20, 30, OPENMMO_DIR_WEST) == 0,
+            "a pose lands on a live slot");
+        n = step(&m, out);
+        CHECK(n == 1 && out[0].kind == OPENMMO_ENTITY_EV_PLACE
+              && out[0].x == 20 && out[0].z == 30
+              && out[0].dir == OPENMMO_DIR_WEST,
+            "the next tick places the peer on the tile, facing the pose");
+        CHECK(step(&m, out) == 0, "and nothing follows it");
+
+        /* A pose that beats the spawn out is simply where the spawn happens. */
+        openmmo_entity_mgr_init(&m, 4);
+        openmmo_entity_spawn(&m, 1, 2, 2, OPENMMO_DIR_SOUTH, kAp);
+        openmmo_entity_place(&m, 1, 9, 9, OPENMMO_DIR_NORTH);
+        n = step(&m, out);
+        CHECK(n == 1 && out[0].kind == OPENMMO_ENTITY_EV_SPAWN
+              && out[0].x == 9 && out[0].z == 9,
+            "a pose before the spawn moves the spawn");
+
+        /* A step target further out than any burst of steps explains is set
+         * down rather than paraded across the map. */
+        openmmo_entity_mgr_init(&m, 4);
+        openmmo_entity_spawn(&m, 1, 0, 0, OPENMMO_DIR_SOUTH, kAp);
+        step(&m, out);
+        openmmo_entity_set_target(&m, 1, 40, 0, OPENMMO_DIR_EAST, -1);
+        CHECK(next_event(&m, &ev, 4) == 0
+              && ev.kind == OPENMMO_ENTITY_EV_PLACE && ev.x == 40,
+            "a target forty tiles out is placed");
+
+        /* ...and one a run of steps does explain is still walked. */
+        openmmo_entity_mgr_init(&m, 4);
+        openmmo_entity_spawn(&m, 1, 0, 0, OPENMMO_DIR_SOUTH, kAp);
+        step(&m, out);
+        openmmo_entity_set_target(&m, 1, 6, 0, OPENMMO_DIR_EAST, -1);
+        CHECK(next_event(&m, &ev, 4) == 0
+              && ev.kind == OPENMMO_ENTITY_EV_STEP && ev.x == 1,
+            "a target six tiles out is walked");
     }
 
     if (failures) {

@@ -1,19 +1,15 @@
 #!/usr/bin/env bash
-# Install every OpenMMO service under systemd, so the whole product starts and stops
-# with one command and comes back after a reboot.
+# Install every OpenMMO service on this machine under systemd, so that the
+# whole product starts and stops with one command and comes back on its own
+# after a crash or a reboot:
 #
 #   sudo systemctl start openmmo.target      # databases, login, game, website
 #   sudo systemctl stop  openmmo.target
 #   systemctl status 'openmmo-*'
 #   journalctl -u openmmo-game -f
-#
 #   sudo ./deploy/install.sh                 # build, install, enable
 #   sudo ./deploy/install.sh --no-build      # install what is already built
 #   sudo ./deploy/install.sh --start         # ...and start the target afterwards
-#
-# Idempotent. Existing /etc/openmmo/*.env files are kept, never overwritten:
-# edit those in place, they are the configuration of the installed servers, and
-# the repository .env is only ever the template they were first written from.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,9 +45,9 @@ warn() { printf '\033[33m[openmmo]\033[0m %s\n' "$1"; }
 
 listening() { ss -ltn 2>/dev/null | grep -q ":$1 "; }
 
-# Which pid holds a port, and whether systemd started it. Cutting a hand-started
-# server over to a unit is the one step this cannot do on its own: killing a live
-# server drops the players on it.
+# Which pid holds a port, and whether systemd is the one that started it. The
+# cutover from a hand-started server to a unit is the one step this script
+# cannot take on its own: killing a live server drops the players on it.
 holder_is_systemd() {
   local pid
   pid=$(ss -ltnp 2>/dev/null | sed -n "s/.*:$1 .*pid=\([0-9]*\).*/\1/p" | head -1)
@@ -75,9 +71,10 @@ done
 say "service account and directories"
 id -u openmmo >/dev/null 2>&1 || adduser --system --group --no-create-home openmmo
 install -d -o root -g root -m 0755 /opt/openmmo /opt/openmmo/bin
-# Group openmmo on the directory. Nothing in it is group readable, the env files stay
-# root:root, but a process cannot open a file it cannot walk to and the signing key
-# lives here.
+# Group openmmo on the directory, not because anything in it is group readable,
+# the env files stay root:root, but because a process cannot open a file it
+# cannot walk to, and the signing key lives here. systemd reads EnvironmentFile
+# as root before it drops privileges; the key is read by the server itself.
 install -d -o root -g openmmo -m 0750 /etc/openmmo
 
 say "programs -> /opt/openmmo"
@@ -88,20 +85,23 @@ for module in login game; do
 done
 install -o root -g root -m 0755 "$here/wait-for-db.sh" /opt/openmmo/bin/wait-for-db
 
-# Both servers sign with the same key and a client pins the public half, so the
-# installed copy has to be the exact bytes already in use. Anything else and every
-# existing client refuses the ServerHello.
+# Both servers sign with the same key, and a client pins the public half, so the
+# installed copy has to be the very bytes the servers were already using,
+# anything else and every existing client refuses the ServerHello.
 say "signing key -> /etc/openmmo/game.private.pem"
 install -o root -g openmmo -m 0640 \
   "$repo/server.game/src/main/resources/game.private.pem" /etc/openmmo/game.private.pem
 
-# The environment files. Only the variables each server reads, taken from .env, with
-# empty assignments dropped: an empty value is not an unset one.
+# The environment files. Only the variables each server actually reads, taken
+# from .env, with empty assignments dropped: an empty value is not an unset one,
+# it replaces the default with nothing and the server refuses to start.
 java_home="$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")"
 env_from() {
-  # Drop assignments with nothing on the right. The test anchors the whole line:
-  # `grep -v '=$'` would also throw away a base64 secret, which ends in the padding
-  # character, leaving the server on the secret this repository ships with.
+  # Drop assignments with nothing on the right: an empty value is not an unset
+  # one, it replaces the default with nothing. The test has to anchor the whole
+  # line, `grep -v '=$'` also throws away a base64 secret, which ends in the
+  # padding character, and a login server without its session secret silently
+  # falls back to the one this repository ships with.
   grep -E "^($1)=" "$repo/.env" | sed -E '/^[A-Za-z_][A-Za-z0-9_]*=[[:space:]]*$/d' || true
 }
 write_env() {
@@ -132,8 +132,8 @@ done
 systemctl daemon-reload
 systemctl enable openmmo.target openmmo-db.service openmmo-login.service openmmo-game.service >/dev/null
 
-# The website is its own deployment, since it also owns the static pages and the
-# virtual host. Run it here so one command still installs the lot.
+# The website is its own deployment: it also owns the static pages and the
+# apache virtual host. Run it here so that one command still installs the lot.
 say "website (deploy/../web/deploy.sh)"
 "$repo/web/deploy.sh" --no-build
 

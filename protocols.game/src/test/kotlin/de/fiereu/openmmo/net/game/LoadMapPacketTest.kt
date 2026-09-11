@@ -7,9 +7,12 @@ import de.fiereu.openmmo.common.test.assertBytesRoundtrip
 import de.fiereu.openmmo.common.test.decodeBytes
 import de.fiereu.openmmo.common.test.encodeToBytes
 import de.fiereu.openmmo.common.test.fixture
+import de.fiereu.openmmo.common.utils.GzipTooLargeException
+import de.fiereu.openmmo.common.utils.gzipCompress
 import de.fiereu.openmmo.net.game.packets.LoadMapPacket
 import de.fiereu.openmmo.net.game.packets.LoadMapPacketCodec
 import de.fiereu.openmmo.net.game.packets.MapData
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 
@@ -70,6 +73,49 @@ class LoadMapPacketTest :
         LoadMapPacketCodec.assertBytesRoundtrip(bytes)
       }
 
+      // The GBA branch carries a gzip blob whose compressed side a frame bounds and whose
+      // unpacked side nothing did.
+      test("a gzip bomb inside a map is refused rather than unpacked") {
+        val bomb = ByteArray(20 * 1024 * 1024).gzipCompress()
+        val head =
+            byteArrayOf(
+                0x03, // deleteCache | reloadPlayer
+                0x00, // region 0, a GBA region
+                0x01, // bank
+                0x02, // map
+                0x00, // reserved
+            )
+        val body =
+            le32(1) + // width
+                le32(1) + // height
+                le32(0) + // paletteIdx1
+                le32(0) + // paletteIdx2
+                byteArrayOf(
+                    0x01, // borderWidth
+                    0x01, // borderHeight
+                    0x00,
+                    0x00, // the unnamed halfword
+                    0x00, // the unnamed byte
+                    Lighting.entries.indexOf(Lighting.REGULAR).toByte(),
+                    Weather.entries.indexOf(Weather.REGULAR_WEATHER).toByte(),
+                    MapType.entries.indexOf(MapType.INSIDE).toByte(),
+                    0x00, // encounter type
+                    0x00,
+                    0x00, // the one border tile
+                    0x01, // a compressed blob follows
+                ) +
+                le32(bomb.size) +
+                bomb +
+                byteArrayOf(
+                    0x00, // no connections
+                    0x00, // no trailer
+                )
+
+        // Small enough to arrive in one frame, and twenty megabytes on the way out.
+        (bomb.size < 0xFFFF) shouldBe true
+        shouldThrow<GzipTooLargeException> { LoadMapPacketCodec.decodeBytes(head + body) }
+      }
+
       test("an NDS map with no pairs is eleven bytes long") {
         val packet =
             LoadMapPacket(
@@ -85,3 +131,12 @@ class LoadMapPacketTest :
         LoadMapPacketCodec.encodeToBytes(packet).size shouldBe 11
       }
     })
+
+/** A signed 32-bit little endian field, which is how this packet writes its sizes. */
+private fun le32(value: Int): ByteArray =
+    byteArrayOf(
+        (value and 0xFF).toByte(),
+        ((value shr 8) and 0xFF).toByte(),
+        ((value shr 16) and 0xFF).toByte(),
+        ((value shr 24) and 0xFF).toByte(),
+    )

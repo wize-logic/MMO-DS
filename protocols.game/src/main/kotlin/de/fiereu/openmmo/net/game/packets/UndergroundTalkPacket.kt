@@ -93,6 +93,70 @@ data class UndergroundTalkPacket(
 
     /** The player who was faced. Runs `UndergroundTalkResponse_Start`. */
     const val ROLE_RESPONDER = 1
+
+    /* Fishing rides here too. */
+
+    /** c2s: the rod was cast at the tile the player faces. `payload[0]` is the rod, 1..3. */
+    const val KIND_FISHING_CAST = 5
+
+    /** c2s: the minigame's reel-in landed; the held roll becomes the battle. No payload. */
+    const val KIND_FISHING_HOOKED = 6
+
+    /** c2s: the fish got away or the line was reeled in early; the held roll is dropped. */
+    const val KIND_FISHING_LOST = 7
+
+    /** s2c: the cast's answer. `payload[0]` is 1 for a bite worth playing for, 0 for nothing. */
+    const val KIND_FISHING_VERDICT = 8
+
+    /**
+     * c2s: A on an Apricorn tree, with the tree's index in `payload[0]`. The lines are the client's
+     * own; the record of who picked what today, and the fruit, are the server's.
+     */
+    const val KIND_APRICORN_PICK = 9
+
+    /**
+     * s2c: the pick's answer: `payload[0]` is 0 for no Apricorn Box, 1 for a tree already picked
+     * today, 2 plus the kind (0 red .. 6 black) for a fruit now in the bag.
+     */
+    const val KIND_APRICORN_VERDICT = 10
+
+    /**
+     * c2s: a rock in front of the player was smashed, on a ported map. No payload: the rock is the
+     * one the player faces, which this server knows.
+     */
+    const val KIND_ROCK_SMASH = 11
+
+    /**
+     * s2c: the smash's answer. `payload[0]` is [ROCK_NOTHING], [ROCK_BATTLE] for a wild battle the
+     * server has opened, or [ROCK_ITEM] with the item's id in the next two bytes, little- endian,
+     * an item the client's own obtain routine then reports, as a gift would.
+     */
+    const val KIND_ROCK_SMASH_VERDICT = 12
+
+    /**
+     * c2s: the tree in front of the player was headbutted, on a ported map. No payload, for the
+     * same reason: the tree is the one faced.
+     */
+    const val KIND_HEADBUTT = 13
+
+    /** s2c: the headbutt's answer. `payload[0]` is [ROCK_NOTHING] or [ROCK_BATTLE]. */
+    const val KIND_HEADBUTT_VERDICT = 14
+
+    /**
+     * c2s: the scripted wild fight the server dealt on a press (a static site) ended won, or with
+     * the Pokemon caught, on the client's engine, which is where a wild fight is fought; the
+     * server's own instance only ever hears run at the end of one. No payload.
+     */
+    const val KIND_STATIC_WON = 15
+
+    /** [KIND_ROCK_SMASH_VERDICT], [KIND_HEADBUTT_VERDICT]: nothing came of it. */
+    const val ROCK_NOTHING = 0
+
+    /** [KIND_ROCK_SMASH_VERDICT], [KIND_HEADBUTT_VERDICT]: a wild battle is on its way. */
+    const val ROCK_BATTLE = 1
+
+    /** [KIND_ROCK_SMASH_VERDICT]: an item was in the rubble; its id follows. */
+    const val ROCK_ITEM = 2
   }
 }
 

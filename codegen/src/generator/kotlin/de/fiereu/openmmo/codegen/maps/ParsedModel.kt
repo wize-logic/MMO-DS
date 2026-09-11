@@ -37,18 +37,34 @@ data class ParsedMap(
     val onFrameScripts: List<ParsedFrameScript>,
     // Tile triggers from map.json coord_events.
     val coordScripts: List<ParsedCoordScript>,
+    // The tiles of the map's headbutt trees, in the map's own frame, and what a smashed rock may
+    // leave behind. Both are a ported map's; every other parser leaves them empty.
+    val headbuttTrees: List<ParsedHeadbuttTree> = emptyList(),
+    val rubble: ParsedRubble? = null,
+    // The header's own `isFlyAllowed`. False everywhere else: the GBA regions have no such field
+    // and a ported map is not a Sinnoh Fly's origin.
+    val flyAllowed: Boolean = false,
     /**
      * Fully qualified name of the generated [de.fiereu.openmmo.maps.TerrainPlane] this map is
      * placed on, for the DS regions whose geometry belongs to a shared matrix. Empty for the GBA
      * regions, which carry their own block data.
      */
     val terrainRef: String = "",
+    // Whether the map holds a tall-grass tile; only a cave map is asked.
+    val hasGrass: Boolean = false,
+    /**
+     * `static:<species>:<level>` for a fight this map's scripts stage that no person and no sign on
+     * the map carries, and "" for every other map. See [PlatinumNdsParser.readStaticSites].
+     */
+    val staticSite: String = "",
 )
 
 /** One land data file's terrain attribute plane, as it is stored: little endian u16 a tile. */
 data class ParsedTerrainChunk(
     val name: String,
     val encoded: String,
+    /** Whether anything grows in it; a cave map is the only thing that asks. */
+    val hasGrass: Boolean = false,
 )
 
 /** A grid of [ParsedTerrainChunk] names, and the altitudes the matrix stores beside them. */
@@ -62,6 +78,8 @@ data class ParsedTerrainMatrix(
     val altitudes: List<Int>,
     /** The map header id that owns each cell, row major, the matrix's own `headers` grid. */
     val headers: List<Int>,
+    /** Whether any cell of it holds a grass tile. */
+    val hasGrass: Boolean = false,
 )
 
 /** Everything one region's parse produced: its maps, and the terrain they are placed on. */
@@ -72,6 +90,44 @@ data class ParsedRegion(
     /** Behaviour per source attribute byte, indexed by the byte. Empty for the GBA regions. */
     val tileBehaviors: List<String> = emptyList(),
     val terrainPackage: String = "",
+    /** The source cartridge's shelves, for a region whose marts are not this game's. */
+    val marts: ParsedMarts? = null,
+    /**
+     * Which table a headbutt tree rolls, by how many regular trees its map has (1..5, five standing
+     * for five or more), then the trainer id's last digit, then the tree's index: the source's
+     * `sRareTreeLUT_*`, as -1 nothing, 0 common, 1 rare.
+     */
+    val headbuttLuts: Map<Int, List<List<Int>>> = emptyMap(),
+    /**
+     * The cartridge's spawn table, for a DS region whose respawns are a table rather than scripts.
+     */
+    val spawnLocations: List<ParsedSpawnLocation> = emptyList(),
+    /** Where [spawnLocations] is rendered; empty when there are none. */
+    val spawnPackage: String = "",
+    /** The rotating pairs of the region's two daily maps, or null where it has none. */
+    val dailyEncounters: ParsedDailyEncounters? = null,
+    /** Where [dailyEncounters] is rendered; empty when there are none. */
+    val dailyPackage: String = "",
+)
+
+/**
+ * The species lists that belong to no map's own encounter archive: the extra archive's Trophy
+ * Garden sixteen and the Great Marsh's two lists of thirty-two.
+ */
+data class ParsedDailyEncounters(
+    val marshNationalDex: List<Int>,
+    val marshLocal: List<Int>,
+    val marshAreaHeaders: List<Int>,
+    val marshAreaBits: Int,
+    val trophyGardenMons: List<Int>,
+    val trophyGardenHeader: Int,
+    val regionId: Int,
+)
+
+/** Both mart tables of a source cartridge, read out of its own scrcmd source. */
+data class ParsedMarts(
+    val commonTiers: List<Pair<Int, Int>>,
+    val specialties: List<List<Int>>,
 )
 
 data class ParsedHealLocation(
@@ -81,6 +137,21 @@ data class ParsedHealLocation(
     val map: Int,
     val x: Int,
     val y: Int,
+)
+
+/**
+ * One row of Platinum's `sSpawnLocations[]` (`src/spawn_locations.c`): where a white out lands and
+ * where Fly does, in the engine's own 1-based order.
+ */
+data class ParsedSpawnLocation(
+    val id: Int,
+    val heal: ParsedHealLocation,
+    val flyHeader: Int,
+    val flyX: Int,
+    val flyZ: Int,
+    val isWarpPos: Boolean,
+    /** The row's `FLAG_FIRST_ARRIVAL_*` id: the flag that says the player has stood there. */
+    val firstArrivalFlagId: Int,
 )
 
 data class ParsedFrameScript(
@@ -140,6 +211,8 @@ data class ParsedNpc(
     // How far a trainer sees along its facing, and which trainer it is where the object says so.
     val sightRange: Int = 0,
     val trainerId: Int = 0,
+    // Which shelf this person sells: -1 nothing, 0 the ordinary mart, 1+ a numbered shop.
+    val martShelf: Int = -1,
 )
 
 data class ParsedBgEvent(
@@ -177,4 +250,19 @@ data class ParsedEncounterSlot(
     val minLevel: Int,
     val maxLevel: Int,
     val weight: Int,
+)
+
+// One tile of a headbutt tree: which tree it belongs to, and whether that tree is a secret one.
+data class ParsedHeadbuttTree(
+    val x: Int,
+    val y: Int,
+    val tree: Int,
+    val secret: Boolean,
+)
+
+// A map's rubble: the odds out of a hundred that a smashed rock leaves an item, and the eight
+// items its table draws from, as references into the generated item registry.
+data class ParsedRubble(
+    val odds: Int,
+    val items: List<String>,
 )

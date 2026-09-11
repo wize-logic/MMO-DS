@@ -43,7 +43,7 @@ typedef struct {
     mmo_character_list list;
     int               cursor;
     int               scroll;
-    char              name[MMO_CHAR_NAME_MAX + 1];
+    char              name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
     int               gender;     /* 0 boy, 1 girl */
     int               region;     /* wire region id */
     int               appear;     /* catalog index, offered */
@@ -52,10 +52,28 @@ typedef struct {
     int               submitted;  /* 1 once A on the body finished the creator */
     int               acting;     /* list index the action menu is about, or -1 */
     int               deleting;   /* 1 once the delete confirmation was taken */
+    int               fixed;      /* the list is all there is: see mmo_creator_fix_list */
+    int               direct_new; /* the create row is one press: see mmo_creator_direct_new */
     char              refused[64]; /* why the last create came back, or empty */
 } mmo_creator;
 
 void mmo_creator_reset(mmo_creator *c);
+
+/*
+ * The list is the whole screen: no NEW CHARACTER row, no action menu, and A on a row is the
+ * pick itself.
+ */
+void mmo_creator_fix_list(mmo_creator *c, int on);
+
+/*
+ * The row past the end is a NEW GAME the caller starts itself, not the four steps of the
+ * creator.
+ */
+void mmo_creator_direct_new(mmo_creator *c, int on);
+
+/* 1 when A was pressed on that row and the caller's own new game is what
+ * happens next. */
+int mmo_creator_wants_new(const mmo_creator *c);
 
 /* Seat the account's list and open the select step. An empty list is a
  * new player's first screen: one row, NEW CHARACTER. A later call (the
@@ -80,7 +98,7 @@ int mmo_creator_back(mmo_creator *c);
 
 /* Commit the typed name (Latin-1, at most 32). Empty or too long is
  * refused and the step stays NAME. */
-int mmo_creator_set_name(mmo_creator *c, const char *latin1);
+int mmo_creator_set_name(mmo_creator *c, const char *name);
 
 /* Hide the screens (a pick or a create has gone on the wire). */
 void mmo_creator_begin_wait(mmo_creator *c);
@@ -114,5 +132,9 @@ int mmo_creator_get_row(const mmo_creator *c, int vis, mmo_creator_row *out);
  * wants the full list; the visible pair above stays for the suite. */
 int mmo_creator_row_count(const mmo_creator *c);
 int mmo_creator_row_at(const mmo_creator *c, int idx, mmo_creator_row *out);
+
+/* The walking graphics id of look row `idx` on the look step, or -1 off it:
+ * what a preview beside the list draws. */
+int mmo_creator_appear_gfx_at(const mmo_creator *c, int idx);
 
 #endif /* OPENMMO_CREATOR_H */

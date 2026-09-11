@@ -16,17 +16,33 @@
 #              build, and root's build leaves root-owned objects in mmo/build
 #              that your next ordinary build cannot overwrite. Both are
 #              refused before the build starts rather than after it.
-#              into the launchers (feed_pin.h) beside the server pin, so a
-#              player configures nothing: unzip, run, and every Play fetches
-#              <URL>/linux or <URL>/windows. Plain http on purpose, the
-#              signature is the trust, so behind Cloudflare
-#              the path needs a rule exempting it from Always Use HTTPS.
-#   linux/ windows/                   the two signed channels the launchers poll
-#   openmmo-<v>-linux-x86_64.zip      the first install a player downloads,
-#   openmmo-<v>-windows-x86.zip       with the channel and key baked in
-#   *.sha256                          beside each zip, as always
+#              for a server on a laptop). It is baked into the launchers
+#              (feed_pin.h) beside the server pin, so a player configures
+#              Nothing: unzip, run, and every Play fetches <URL>/linux or
+#              <URL>/windows. The signature is the trust either way
+#; an https channel is verified against the roots
+#              the launcher compiles in and needs no rule at the proxy. One
+#              Carry-over: a launcher from before 2026-09-05 speaks plain
+#              http only and refuses a redirect, so the http path has to
+#              stay open until every installed one has updated itself once.
+#              The read-back at the end says whether it still is.
+#   linux/ windows/ android/          the signed channels the clients poll
+#   openmmo-windows.zip               the first install a player downloads,
+#   openmmo-linux.zip                 with the channel and key baked in. No
+#   openmmo-android.apk               revision in the name: a player picks
+#                                     "Windows", not r1186 (owner, 2026-09-07);
+#                                     the version is the page's footer and
+#                                     the archive's own revision.txt. The
+#                                     versioned copies stay in build/dist
+#   openmmo-*.sha256                  the archive's digest, beside each, in
+#                                     sha256sum's format under the same name
 #   feed-key.pem                      the public key, for anyone configuring
 #                                     a build-tree launcher by hand
+#   download.html                     the page a player lands on, listing the
+#                                     downloads that are actually there. It is
+#                                     download.html and not index.html because
+#                                     index.html belongs to whoever owns the
+#                                     folder; link it or serve it as the index
 #   --host linux|windows|android   just the one (repeat it to name a set)
 #   --version V            name the release yourself (default: git describe)
 #   --min-revision N       the repair floor feedgen writes (default: 0)
@@ -57,8 +73,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-say() { printf '\033[1mpublish:\033[0m %s\n' "$1"; }
-bad() { printf '\033[31mpublish:\033[0m %s\n' "$1" >&2; }
+say()  { printf '\033[1mpublish:\033[0m %s\n' "$1"; }
+warn() { printf '\033[33mpublish:\033[0m %s\n' "$1" >&2; }
+bad()  { printf '\033[31mpublish:\033[0m %s\n' "$1" >&2; }
 
 if [[ ! -f "$KEY" ]]; then
     bad "no private key at $(realpath -m -- "$KEY")"
@@ -67,9 +84,11 @@ if [[ ! -f "$KEY" ]]; then
     exit 1
 fi
 case "$URL" in
-    http://*) ;;
-    https://*) bad "the launcher speaks plain http (the signature is the trust; mmo/FEED.md), bake the http:// address"; exit 1;;
-    *) bad "$URL is not an http:// URL"; exit 1;;
+    https://*) ;;
+    http://*)  warn "$URL is plain http: every fetch a player's launcher makes"
+               warn "will be readable on the path. Fine for a server on a laptop;"
+               warn "a release bakes an https:// address (mmo/FEED.md)";;
+    *) bad "$URL is not an https:// or http:// URL"; exit 1;;
 esac
 command -v openssl >/dev/null || { bad "no openssl"; exit 1; }
 command -v rsync   >/dev/null || { bad "no rsync, apt install rsync"; exit 1; }
@@ -112,7 +131,7 @@ for h in "${HOSTS[@]}"; do
     missing=""
     [[ -d "${NDK:-$HOME/.local/opt/android-ndk-r27c}" ]] \
         || missing="the NDK at ${NDK:-$HOME/.local/opt/android-ndk-r27c}"
-    if [[ ! -x "${APKSIGNER:-$HOME/.local/opt/android-sdk/build-tools/34.0.0/apksigner}" ]]; then
+    if [[ ! -x "${APKSIGNER:-$HOME/.local/opt/android-sdk/build-tools/35.0.0/apksigner}" ]]; then
         missing="${missing:+$missing and }apksigner"
     fi
     # The third dependency, and the one nothing else names: a static armeabi-v7a
@@ -173,17 +192,35 @@ if ! TMPDIR="$WORK" RELEASE_FEED_URL="$URL" \
     exit 1
 fi
 
+# A channel lands in three steps, and the order is the point.
+sync_channel() {
+    local host=$1 doc
+
+    mkdir -p "$DEST/$host" || return 1
+    rsync -a --checksum "$WORK/chan-$host/files/" "$DEST/$host/files/" \
+        || return 1
+    for doc in update_feed.txt update_feed.sig256 \
+               main_feed.txt main_feed.sig256; do
+        rsync -a --ignore-times "$WORK/chan-$host/$doc" \
+              "$DEST/$host/$doc" || return 1
+    done
+    rsync -a --checksum --delete "$WORK/chan-$host/files/" \
+          "$DEST/$host/files/" || return 1
+}
+
 for host in "${HOSTS[@]}"; do
     if [[ "$host" == android ]]; then
-        # The ANDROID channel is a statement, NOT an install. The desktop
+        # The ANDROID channel is an install of one file. The desktop
         # channels describe a folder the launcher rewrites file by file; an
         # app cannot do that to itself, because on Android the package
-        # installer owns the APK and nothing else may replace it. So this
-        # channel carries the one file, signed and hashed like any other, and
-        # what it is for is answering "what is current", to a player
-        # checking, to whatever asks next. Same documents, same signature,
-        # same layout as the other two, so nothing downstream needs a second
-        # shape to read.
+        # installer owns the APK. So this channel carries the one file,
+        # signed and hashed like any other, and the app's front door fetches
+        # exactly that file when the revision here is ahead of its own,
+        # proves it against this inventory, and hands it to the installer
+        #. Same documents, same
+        # signature, same layout as the other two, so nothing downstream
+        # needs a second shape to read, and the .apk must be the only
+        # entry with that suffix, because the app takes the first.
         apk=("$ROOT"/build/dist/openmmo-"$VERSION"-android-*.apk)
         if [[ ! -f "${apk[0]}" ]]; then
             bad "no android APK for $VERSION in $ROOT/build/dist"
@@ -191,10 +228,10 @@ for host in "${HOSTS[@]}"; do
         fi
         rm -rf "$WORK/inst-android"
         mkdir -p "$WORK/inst-android" || exit 1
-        # Named by the release, not `openmmo.apk`: a phone's download folder
-        # is a pile of everyone's files and an APK that names its revision is
-        # one a player can tell apart from the one already on the device.
-        cp -f "${apk[0]}" "$WORK/inst-android/$(basename "${apk[0]}")" || exit 1
+        # Under the stable name the download page also uses. Nobody sees this
+        # one: the app fetches it by its .apk suffix into a private file, and
+        # the revision rides in the channel's own main_feed.txt.
+        cp -f "${apk[0]}" "$WORK/inst-android/openmmo-android.apk" || exit 1
         # The revision, which feedgen requires and package.sh writes for the
         # hosts that go through it. This host does not, an APK is already
         # the package, so the same line is written here, from the same
@@ -213,13 +250,7 @@ for host in "${HOSTS[@]}"; do
             bad "feedgen failed for android"
             exit 1
         fi
-        mkdir -p "$DEST/android"
-        rsync -a --delete "$WORK/chan-android/files/" \
-              "$DEST/android/files/" || exit 1
-        for doc in main_feed.txt main_feed.sig256 update_feed.txt \
-                   update_feed.sig256; do
-            cp "$WORK/chan-android/$doc" "$DEST/android/$doc" || exit 1
-        done
+        sync_channel android || exit 1
         continue
     fi
 
@@ -234,45 +265,148 @@ for host in "${HOSTS[@]}"; do
         bad "feedgen failed for $host"
         exit 1
     fi
-    # Files first, the four documents last: a launcher that reads mid-copy
-    # sees a feed whose files are all still there, or fails closed on hashes.
-    mkdir -p "$DEST/$host"
-    rsync -a --delete "$WORK/chan-$host/files/" "$DEST/$host/files/" || exit 1
-    for doc in main_feed.txt main_feed.sig256 update_feed.txt update_feed.sig256; do
-        cp "$WORK/chan-$host/$doc" "$DEST/$host/$doc" || exit 1
-    done
+    sync_channel "$host" || exit 1
 done
 
 # The zips are the first install; everything after arrives through the feed.
+# One name per host, and the name never changes.
+stable_name() {  # stable_name <host> -> openmmo-<host>.<ext>
+    case $1 in
+        android) printf 'openmmo-android.apk';;
+        *)       printf 'openmmo-%s.zip' "$1";;
+    esac
+}
 for stale in "$DEST"/openmmo-*; do
     [[ -e "$stale" ]] || continue
     case "$(basename "$stale")" in
-        openmmo-"$VERSION"-*) continue;;
+        openmmo-windows.zip|openmmo-linux.zip|openmmo-android.apk|\
+        openmmo-windows.sha256|openmmo-linux.sha256|openmmo-android.sha256) continue;;
     esac
     rm -f "$stale"
 done
-for f in "$ROOT"/build/dist/openmmo-"$VERSION"-*.zip \
-         "$ROOT"/build/dist/openmmo-"$VERSION"-*.apk \
-         "$ROOT"/build/dist/openmmo-"$VERSION"-*.sha256; do
-    # A glob that matched nothing is a host this run did not build, which is
-    # ordinary: `--host linux` publishes one. A glob that matched and then
-    # would not copy is not.
-    [[ -e "$f" ]] || continue
-    cp -f "$f" "$DEST/" || { bad "could not copy $(basename "$f") into $DEST"; exit 1; }
+for host in "${HOSTS[@]}"; do
+    src=("$ROOT"/build/dist/openmmo-"$VERSION"-"$host"-*.zip \
+         "$ROOT"/build/dist/openmmo-"$VERSION"-"$host"-*.apk)
+    got=''
+    for f in "${src[@]}"; do [[ -e "$f" ]] && { got="$f"; break; }; done
+    if [[ -z "$got" ]]; then
+        bad "the $VERSION $host download is not in $ROOT/build/dist"
+        exit 1
+    fi
+    name=$(stable_name "$host")
+    cp -f "$got" "$DEST/$name.new" \
+        || { bad "could not copy $(basename "$got") into $DEST"; exit 1; }
+    mv -f "$DEST/$name.new" "$DEST/$name" || exit 1
+    # The digest of the file that is in the folder, named as it is there, so
+    # `sha256sum -c openmmo-<host>.sha256` beside it agrees.
+    ( cd "$DEST" && sha256sum "$name" ) > "$DEST/${name%.*}.sha256" \
+        || { bad "could not write the $host digest"; exit 1; }
 done
-if ! compgen -G "$DEST/openmmo-$VERSION-*" > /dev/null; then
-    bad "the $VERSION downloads are not in $ROOT/build/dist"
-    exit 1
-fi
 cp -f "$WORK/feed-key.pem" "$DEST/feed-key.pem"
 
 rev=$(sed -n 's/.*<revision>\([0-9]*\)<.*/\1/p' "$WORK/chan-${HOSTS[0]}/main_feed.txt")
+# Last, and from DEST rather than from the build: the page offers the files
+# that are in the folder, so it cannot advertise a download this run did not
+# manage to copy.
+if ! "$ROOT/downloadpage.sh" "$DEST" "$VERSION" "$rev"; then
+    bad "the downloads are published but the page was not written"
+    exit 1
+fi
 say "revision $rev is live in $DEST"
+
+# ------------------------------------------------------------- the read-back
+checker=""
+if [[ " ${HOSTS[*]} " == *" linux "* ]]; then
+    staged=("$WORK"/openmmo-dist-*/pkg-linux/openmmo/bin/openmmo-launch)
+    [[ -x "${staged[0]}" ]] && checker="${staged[0]}"
+fi
+if [[ -z "$checker" && -x "$ROOT/build-release/openmmo-launch" ]]; then
+    checker="$ROOT/build-release/openmmo-launch"
+fi
+readback=0
+if [[ -z "$checker" ]]; then
+    warn "no linux launcher to read the channels back with (build the linux"
+    warn "host in this publish, or make -C mmo launcher RELEASE=1), skipped"
+else
+    mkdir -p "$WORK/check"
+    printf 'probe\n' > "$WORK/check/rom.probe"
+    for host in "${HOSTS[@]}"; do
+        want=$(sed -n 's/.*<revision>\([0-9]*\)<.*/\1/p' "$WORK/chan-$host/main_feed.txt")
+        into="$WORK/check/$host"
+        rm -rf "$into"
+        mkdir -p "$into" || exit 1
+        printf 'rom %s\nfeed %s/feed\nfeed-key %s/feed-key.pem\nfeed-url %s/%s\n' \
+            "$WORK/check/rom.probe" "$into" "$WORK" "$URL" "$host" \
+            > "$WORK/check/$host.cfg"
+        say "fetching $URL/$host back into a throwaway install"
+        OPENMMO_ROOT="$into" "$checker" --config "$WORK/check/$host.cfg" \
+            --update > "$WORK/check/$host.log" 2>&1
+        rc=$?
+        # The verdict is the last line: an update says what it is downloading
+        # as it goes, and only then what it did. The revision is read out of
+        # it only when the update itself succeeded, so no failure that happens
+        # to name a number is mistaken for an answer.
+        line=$(tail -1 "$WORK/check/$host.log")
+        got=''
+        [[ $rc -eq 0 ]] && got=$(printf '%s\n' "$line" |
+                                 sed -n 's/.*revision \([0-9]*\).*/\1/p')
+        if [[ -n "$got" && "$got" == "$want" ]]; then
+            if OPENMMO_ROOT="$into" "$checker" --config "$WORK/check/$host.cfg" \
+                   --check-feed >> "$WORK/check/$host.log" 2>&1; then
+                say "$URL/$host serves r$got whole: it installed, and the gate"
+                say "a Play applies accepts what it installed"
+            else
+                bad "$URL/$host serves r$got, but the install it makes is not"
+                bad "one this launcher will start:"
+                bad "  $(tail -1 "$WORK/check/$host.log" | sed 's/^openmmo-launch: //')"
+                readback=1
+            fi
+        elif [[ -n "$got" ]]; then
+            bad "$URL/$host still answers r$got, not the r$want just written:"
+            bad "something between here and the player is caching the channel"
+            bad "documents. Purge $URL/$host/main_feed.txt, update_feed.txt and"
+            bad "their .sig256 at the proxy, then ask again"
+            readback=1
+        elif [[ "$line" == *"speaks plain http"* ]]; then
+            warn "the launcher at $checker predates https and cannot ask --"
+            warn "build the linux host in this publish; the read-back is skipped"
+            break
+        else
+            bad "$URL/$host does not answer as published:"
+            bad "  ${line#openmmo-launch: }"
+            readback=1
+        fi
+        # It has said everything it is going to, and the next host wants the
+        # room: a filled install is the whole release over again on disk.
+        rm -rf "$into"
+    done
+fi
+
+# The PATH A launcher from before 2026-09-05 still dials.
+if [[ "$URL" == https://* ]] && command -v curl > /dev/null; then
+    plain="http://${URL#https://}/${HOSTS[0]}/main_feed.txt"
+    code=$(curl -sS -o /dev/null -w '%{http_code}' --max-redirs 0 --max-time 20 \
+                "$plain" 2>/dev/null || true)
+    case "$code" in
+        200) say "plain http still answers on the update path, so a launcher"
+             say "from before 2026-09-05 (http only, no redirects) can still"
+             say "update itself to this release; close it once none is left";;
+        301|302|303|307|308)
+             warn "plain http on the update path redirects (HTTP $code): a"
+             warn "launcher from before 2026-09-05 refuses a redirect and will"
+             warn "not update itself. Expected once every install is newer than"
+             warn "that; until then, exempt the path from the forced https";;
+        *)   warn "plain http on the update path answers ${code:-nothing}: a"
+             warn "launcher from before 2026-09-05 cannot update through it";;
+    esac
+fi
+
 say "serve that folder at $URL, players download a zip once and are"
 say "current on every Play after; nothing to configure on their side"
 for h in "${HOSTS[@]}"; do
     [[ "$h" == android ]] || continue
-    say "the android build is served as an APK a player installs. It does NOT"
-    say "update itself, the package installer owns an APK, so $URL/android"
-    say "is what says which revision is current, and a new one is a new install."
+    say "the android build is served as an APK a player installs once; every"
+    say "start after asks $URL/android which revision is current, and a newer"
+    say "one is fetched, proved and handed to the package installer in-app."
 done
+exit $readback

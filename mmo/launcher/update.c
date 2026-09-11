@@ -104,9 +104,8 @@ static void url_escape(const char *name, char *out, size_t cap)
 }
 
 /* One document (or signature) off the server, into fresh memory. */
-static void *fetch_doc(const char *host, const char *port, const char *base,
-                       const char *name, size_t cap, long *len,
-                       char *msg, size_t msgcap)
+static void *fetch_doc(const mmo_fetch_origin *o, const char *name,
+                       size_t cap, long *len, char *msg, size_t msgcap)
 {
     char path[MMO_FETCH_PATH], err[MMO_FETCH_ERR];
     void *buf = malloc(cap);
@@ -116,8 +115,8 @@ static void *fetch_doc(const char *host, const char *port, const char *base,
         fail(msg, msgcap, "out of memory", NULL, NULL);
         return NULL;
     }
-    snprintf(path, sizeof path, "%s/%s", base, name);
-    n = mmo_fetch_buf(host, port, path, buf, cap, err, sizeof err);
+    snprintf(path, sizeof path, "%s/%s", o->base, name);
+    n = mmo_fetch_buf(o, path, buf, cap, err, sizeof err);
     if (n < 0) {
         free(buf);
         fail(msg, msgcap, "%.100s cannot be fetched: %.350s", name, err);
@@ -143,7 +142,7 @@ static void docs_free(struct feed_docs *d)
     memset(d, 0, sizeof *d);
 }
 
-static int docs_fetch(const char *host, const char *port, const char *base,
+static int docs_fetch(const mmo_fetch_origin *o,
                       const mmo_rsa_pubkey *key, struct feed_docs *d,
                       mmo_feed_main *m, mmo_feed_update *u,
                       char *msg, size_t msgcap)
@@ -151,19 +150,19 @@ static int docs_fetch(const char *host, const char *port, const char *base,
     char err[192];
 
     memset(d, 0, sizeof *d);
-    d->main_txt = fetch_doc(host, port, base, "main_feed.txt", DOC_CAP,
+    d->main_txt = fetch_doc(o, "main_feed.txt", DOC_CAP,
                             &d->main_len, msg, msgcap);
     if (d->main_txt == NULL)
         return -1;
-    d->main_sig = fetch_doc(host, port, base, "main_feed.sig256", SIG_CAP,
+    d->main_sig = fetch_doc(o, "main_feed.sig256", SIG_CAP,
                             &d->main_siglen, msg, msgcap);
     if (d->main_sig == NULL)
         goto bad;
-    d->upd_txt = fetch_doc(host, port, base, "update_feed.txt", DOC_CAP,
+    d->upd_txt = fetch_doc(o, "update_feed.txt", DOC_CAP,
                            &d->upd_len, msg, msgcap);
     if (d->upd_txt == NULL)
         goto bad;
-    d->upd_sig = fetch_doc(host, port, base, "update_feed.sig256", SIG_CAP,
+    d->upd_sig = fetch_doc(o, "update_feed.sig256", SIG_CAP,
                            &d->upd_siglen, msg, msgcap);
     if (d->upd_sig == NULL)
         goto bad;
@@ -208,11 +207,12 @@ bad:
  * The published revision, and nothing else fetched to learn it. update.h says why an app asks
  * this question rather than the one above it.
  */
-int mmo_update_latest_revision(const char *url, const mmo_rsa_pubkey *key,
+int mmo_update_latest_revision(const char *url, const char *ca,
+                               const mmo_rsa_pubkey *key,
                                int *revision, char *msg, size_t msgcap)
 {
     mmo_feed_main main_feed;
-    char host[MMO_FETCH_HOST], port[16], base[MMO_FETCH_PATH];
+    mmo_fetch_origin o;
     char err[MMO_FETCH_ERR];
     char *txt = NULL, *sig = NULL;
     long txtlen = 0, siglen = 0;
@@ -222,16 +222,14 @@ int mmo_update_latest_revision(const char *url, const mmo_rsa_pubkey *key,
         *revision = 0;
     if (msg != NULL && msgcap > 0)
         msg[0] = '\0';
-    if (mmo_fetch_split(url, host, sizeof host, port, sizeof port,
-                        base, sizeof base, err, sizeof err) != 0)
+    if (mmo_fetch_split(url, &o, err, sizeof err) != 0)
         return fail(msg, msgcap, "%.400s", err, NULL);
+    o.ca = ca;
 
-    txt = fetch_doc(host, port, base, "main_feed.txt", DOC_CAP, &txtlen,
-                    msg, msgcap);
+    txt = fetch_doc(&o, "main_feed.txt", DOC_CAP, &txtlen, msg, msgcap);
     if (txt == NULL)
         goto done;
-    sig = fetch_doc(host, port, base, "main_feed.sig256", SIG_CAP, &siglen,
-                    msg, msgcap);
+    sig = fetch_doc(&o, "main_feed.sig256", SIG_CAP, &siglen, msg, msgcap);
     if (sig == NULL)
         goto done;
     /* The signature first, exactly as docs_fetch and mmo_feed_load do it: a
@@ -301,7 +299,7 @@ static int write_whole(const char *path, const void *data, size_t n)
     return (fclose(f) == 0 && ok) ? 0 : -1;
 }
 
-int mmo_update_run(const char *url, const char *feed_dir,
+int mmo_update_run(const char *url, const char *ca, const char *feed_dir,
                    const mmo_rsa_pubkey *key, const char *root,
                    const char *self_rel,
                    void (*note)(void *ud, const char *line),
@@ -314,7 +312,7 @@ int mmo_update_run(const char *url, const char *feed_dir,
     static int want[MMO_FEED_MAX_FILES];
     mmo_feed_main main_feed;
     struct feed_docs docs;
-    char host[MMO_FETCH_HOST], port[16], base[MMO_FETCH_PATH];
+    mmo_fetch_origin o;
     char path[MMO_LAUNCH_PATH + MMO_FEED_NAME];
     char stage[MMO_LAUNCH_PATH + MMO_FEED_NAME];
     char forcefile[MMO_LAUNCH_PATH + 16];
@@ -343,11 +341,10 @@ int mmo_update_run(const char *url, const char *feed_dir,
     snprintf(forcefile, sizeof forcefile, "%s/.forceupdate", root);
     force = access(forcefile, F_OK) == 0;
 
-    if (mmo_fetch_split(url, host, sizeof host, port, sizeof port,
-                        base, sizeof base, err, sizeof err) != 0)
+    if (mmo_fetch_split(url, &o, err, sizeof err) != 0)
         return fail(msg, msgcap, "%.400s", err, NULL);
-    if (docs_fetch(host, port, base, key, &docs, &main_feed, &upd, msg,
-                   msgcap) != 0)
+    o.ca = ca;
+    if (docs_fetch(&o, key, &docs, &main_feed, &upd, msg, msgcap) != 0)
         return -1;
 
     if (force && note != NULL)
@@ -391,10 +388,10 @@ int mmo_update_run(const char *url, const char *feed_dir,
             note(ud, line);
         }
         url_escape(f->name, esc, sizeof esc);
-        snprintf(fileurl, sizeof fileurl, "%s/files/%s?%s", base, esc,
+        snprintf(fileurl, sizeof fileurl, "%s/files/%s?%s", o.base, esc,
                  f->sha256);
         snprintf(stage, sizeof stage, "%s/update.staging/f%d", root, w);
-        got = mmo_fetch_file(host, port, fileurl, stage, f->size,
+        got = mmo_fetch_file(&o, fileurl, stage, f->size,
                              dl_tick, &t, err, sizeof err);
         if (got < 0) {
             docs_free(&docs);
@@ -424,13 +421,26 @@ int mmo_update_run(const char *url, const char *feed_dir,
         if (is_self) {
             char old[sizeof path + 4];
 
+            /*
+             * A running image cannot be replaced on Windows, but it can be renamed out of the
+             * way, and the `.old` an earlier update left is a destination that already
+             * exists, which is the one case a plain rename() refuses there.
+             */
             snprintf(old, sizeof old, "%s.old", path);
-            remove(old);
-            rename(path, old);
-        } else {
-            remove(path);
+            if (mmo_plat_rename_over(path, old) != 0 &&
+                access(path, F_OK) == 0) {
+                docs_free(&docs);
+                return fail(msg, msgcap, "%.300s is in the way and cannot be "
+                                         "moved aside, close any other "
+                                         "OpenMMO and try again", f->name,
+                            NULL);
+            }
         }
-        if (rename(stage, path) != 0) {
+        /* One call, not remove-then-rename: the replacement either happens or
+         * it does not, and a failure leaves the file that was there. Removing
+         * first opens a window in which the install has neither, and it is
+         * the window a crash or a denied rename stops in. */
+        if (mmo_plat_rename_over(stage, path) != 0) {
             docs_free(&docs);
             return fail(msg, msgcap, "%.300s cannot be replaced, the "
                                      "install may need a repair", f->name,
@@ -481,4 +491,92 @@ install_feed:
                      ? ", the launcher itself among them, for its next start"
                      : "");
     return 0;
+}
+
+/*
+ * The package the android channel carries, fetched and proven. update.h says what for; the
+ * ordering is docs_fetch's, the same as every other read here.
+ */
+int mmo_update_fetch_package(const char *url, const char *ca,
+                             const mmo_rsa_pubkey *key, const char *suffix,
+                             const char *dest,
+                             void (*tick)(void *ud, long got, long total),
+                             void *ud, int *revision,
+                             char *name, size_t namecap,
+                             char *msg, size_t msgcap)
+{
+    mmo_feed_update *upd;
+    mmo_feed_main main_feed;
+    struct feed_docs docs;
+    mmo_fetch_origin o;
+    const mmo_feed_file *f = NULL;
+    char esc[3 * MMO_FEED_NAME], fileurl[MMO_FETCH_PATH + sizeof esc + 80];
+    char err[MMO_FETCH_ERR], have[65];
+    size_t sfx = suffix != NULL ? strlen(suffix) : 0;
+    long got;
+    int i, rc = -1;
+
+    if (revision != NULL)
+        *revision = 0;
+    if (name != NULL && namecap > 0)
+        name[0] = '\0';
+    if (msg != NULL && msgcap > 0)
+        msg[0] = '\0';
+    if (mmo_fetch_split(url, &o, err, sizeof err) != 0)
+        return fail(msg, msgcap, "%.400s", err, NULL);
+    o.ca = ca;
+    upd = malloc(sizeof *upd);
+    if (upd == NULL)
+        return fail(msg, msgcap, "out of memory", NULL, NULL);
+    if (docs_fetch(&o, key, &docs, &main_feed, upd, msg, msgcap) != 0) {
+        free(upd);
+        return -1;
+    }
+
+    /* The one entry that is the package. A channel with two would be a
+     * publish this code was not written for, and guessing between them is
+     * how a player installs the wrong one; the first is taken and named. */
+    for (i = 0; i < upd->n; i++) {
+        size_t n = strlen(upd->f[i].name);
+
+        if (sfx == 0 || (n > sfx &&
+                         strcasecmp(upd->f[i].name + n - sfx, suffix) == 0)) {
+            f = &upd->f[i];
+            break;
+        }
+    }
+    if (f == NULL) {
+        fail(msg, msgcap, "the channel carries no %.20s to install",
+             suffix != NULL ? suffix : "file", NULL);
+        goto done;
+    }
+    if (name != NULL && namecap > 0)
+        snprintf(name, namecap, "%s", f->name);
+    if (revision != NULL)
+        *revision = main_feed.revision;
+
+    url_escape(f->name, esc, sizeof esc);
+    snprintf(fileurl, sizeof fileurl, "%s/files/%s?%s", o.base, esc,
+             f->sha256);
+    got = mmo_fetch_file(&o, fileurl, dest, f->size, tick, ud, err,
+                         sizeof err);
+    if (got < 0) {
+        fail(msg, msgcap, "%.200s cannot be fetched: %.250s", f->name, err);
+        goto done;
+    }
+    if (got != f->size || mmo_feed_hash_file(dest, have) != 0 ||
+        strcasecmp(have, f->sha256) != 0) {
+        remove(dest);
+        fail(msg, msgcap, "%.300s downloaded wrong: the bytes are not the "
+                          "ones the feed signed", f->name, NULL);
+        goto done;
+    }
+    if (msg != NULL && msgcap > 0)
+        snprintf(msg, msgcap, "fetched %.300s, r%d, and it is the file the "
+                              "feed signed", f->name, main_feed.revision);
+    rc = 0;
+done:
+    docs_free(&docs);
+    free(upd);
+    return rc;
 }

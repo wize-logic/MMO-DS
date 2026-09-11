@@ -5,3 +5,12 @@
 	path = engine/pokeplatinum
 	url = https://github.com/wize-logic/pokeplatinum-port
 	branch = main
+
+# The TLS library the update channel speaks https with, pinned upstream and
+# compiled under our own configuration (mmo/launcher/mmo_mbedtls_config.h).
+# `make -C mmo` fetches it on first use.
+[submodule "mmo/third_party/mbedtls"]
+	path = mmo/third_party/mbedtls
+	url = https://github.com/Mbed-TLS/mbedtls
+	branch = mbedtls-3.6
+	shallow = true

@@ -25,6 +25,7 @@
 #include "text.h"
 
 #include "../../../include/charcode.h"
+#include "../../../include/endpoint.h"
 #include "../../../include/client.h"
 #include "../../../include/widget.h"
 
@@ -59,14 +60,14 @@ static int s_pending;
 
 static int want_open(void)
 {
-    const char *env = getenv("OPENMMO_WIDGET");
+    const char *env = openmmo_dev_env("OPENMMO_WIDGET");
 
     if (env == NULL || env[0] == '\0' || env[0] == '0')
         return 0;
     return 1;
 }
 
-static String *latin1(const char *s)
+static String *utf8_string(const char *s)
 {
     mmo_charcode buf[WIDGET_STR_CHARS];
     String *out = String_Init(WIDGET_STR_CHARS, WIDGET_HEAP);
@@ -130,7 +131,7 @@ static int paint_message(FieldSystem *fs, WidgetScreen *ws, const mmo_widget *w)
 {
     const Options *options = SaveData_GetOptions(fs->saveData);
 
-    ws->msgStr = latin1(w->text);
+    ws->msgStr = utf8_string(w->text);
     if (ws->msgStr == NULL)
         return 0;
     FieldMessage_AddWindow(fs->bgConfig, &ws->msgWin, BG_LAYER_MAIN_3);
@@ -148,7 +149,7 @@ static int build_rows(WidgetScreen *ws, const mmo_widget *w, int count)
     if (ws->choices == NULL)
         return 0;
     for (i = 0; i < count; i++) {
-        ws->rowStr[i] = latin1(w->row[i].label);
+        ws->rowStr[i] = utf8_string(w->row[i].label);
         if (ws->rowStr[i] == NULL)
             return 0;
         StringList_AddFromString(ws->choices, ws->rowStr[i], (u32)i);
@@ -346,7 +347,7 @@ static BOOL widget_task(FieldTask *task)
  */
 static int fill_demo(mmo_screen *out)
 {
-    const char *env = getenv("OPENMMO_WIDGET");
+    const char *env = openmmo_dev_env("OPENMMO_WIDGET");
     mmo_option_list demo;
     int i;
 

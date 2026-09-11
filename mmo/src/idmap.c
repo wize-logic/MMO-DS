@@ -29,14 +29,15 @@ u16 mmo_id_species_from_server(u16 dex, const char **why)
     if (dex == 0)
         return trap(why, "species: id 0 is not a species");
     if (dex > MMO_SPECIES_MAX)
-        return trap(why, "species: National Dex number past what the engine can draw");
+        return trap(why, "species: National Dex number past the last species either half names");
     return ok(why, dex);
 }
 
 u16 mmo_id_species_to_server(u16 ds, const char **why)
 {
     /* The engine numbers species by National Dex too, so the range is the same
-     * in both directions. */
+     * in both directions. Whether the client has a picture for one is a
+     * different question and a different bound; see the header. */
     if (ds == 0)
         return trap(why, "species: id 0 is not a species");
     if (ds > MMO_SPECIES_MAX)
@@ -150,6 +151,12 @@ int mmo_id_text_to_server(u16 bank, u16 entry, u32 *wire, const char **why)
               | ((u32)bank << MMO_TEXT_BANK_SHIFT) | (u32)entry;
     ok(why, 0);
     return 0;
+}
+
+/* Is this a bank the engine's text archive actually has? */
+int mmo_id_text_bank_valid(int bank)
+{
+    return bank >= 0 && bank < MMO_TEXT_BANK_COUNT;
 }
 
 /* A Platinum header is the two map bytes concatenated. Twinleaf bedroom is

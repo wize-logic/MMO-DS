@@ -1,5 +1,5 @@
---- a/src/scrcmd_system_flags.c
-+++ b/src/scrcmd_system_flags.c
+--- a/src/scrcmd_system_flags.c	2026-09-02 18:51:07.283274191 -0400
++++ b/src/scrcmd_system_flags.c	2026-09-02 18:51:07.322874192 -0400
 @@ -44,6 +44,11 @@
      FieldOverworldState *overworldState = SaveData_GetFieldOverworldState(ctx->fieldSystem->saveData);
      PlayerData *playerData = FieldOverworldState_GetPlayerData(overworldState);
@@ -11,4 +11,26 @@
 +    }
      return FALSE;
  }
+ 
+@@ -52,6 +57,21 @@
+     u16 badgeNum = ScriptContext_GetVar(ctx);
+     u16 *destVar = ScriptContext_GetVarPointer(ctx);
+ 
++    /* openmmo: on a map this client did not ship, the badge asked about is
++     * one of the ported region's sixteen, Johto's then Kanto's, and those
++     * are held on the server's world state, not in TrainerInfo, whose eight
++     * are Sinnoh's. Answered before the assert, which only knows eight
++     * (mods/openmmo/src/openmmo_card.c). */
++    {
++        extern int openmmo_ported_badge(int badge, int *held);
++        int held;
++
++        if (openmmo_ported_badge(badgeNum, &held)) {
++            *destVar = held;
++            return FALSE;
++        }
++    }
++
+     GF_ASSERT(badgeNum < MAX_BADGES);
+     *destVar = TrainerInfo_HasBadge(SaveData_GetTrainerInfo(ctx->fieldSystem->saveData), badgeNum);
  

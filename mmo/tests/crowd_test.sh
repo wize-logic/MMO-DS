@@ -11,7 +11,14 @@
 #      stopped throwing away, is reported, and stops the run under
 #      OPENMMO_ASSERT=fatal;
 #   4. a starved texture pool does not pass unremarked: the map load that runs
-#      short says so, where before this it said nothing at all.
+#      short says so, where before this it said nothing at all;
+#   5. the crowd's own Pokemon: twelve peers each carrying a different species
+#      seat eight followers and no more, the pool is keyed by graphics id and
+#      twelve distinct ones is more of it than a busy map has, and the four
+#      that go without still walk;
+#   6. and when the object table is what runs short, the followers give way
+#      First. A crowd where the last few walk alone is a working game; one where
+#      the next object is a NULL write is not.
 set -eu
 
 ROOT=${1:?usage: crowd_test.sh <mmo-root> <build-dir> <engine-dir>}
@@ -21,6 +28,7 @@ ENGINE=${3:?usage: crowd_test.sh <mmo-root> <build-dir> <engine-dir>}
 FUSED="$BUILD/fused/pokeplatinum"
 ROM="${PC_ROM:-$ENGINE/build/rom/pokeplatinum.us.nds}"
 SETTLE="$ENGINE/pc/replays/lab-settle.txt"
+SRC4="${OPENMMO_GEN4_ROM:-$(CDPATH= cd -- "$ROOT/.." && pwd)/roms/pokesoulsilver.nds}"
 
 if [ ! -x "$FUSED" ]; then
     echo "crowd: SKIP (no fused build: run \`make -C mmo fused\`)"
@@ -113,6 +121,71 @@ if grep -qE '^openmmo: (engine assertion failed|a heap is full|the overworld tex
 else
     bad "a starved texture pool is reported rather than passing unremarked (exit $rc)"
     tail -3 "$tmp/tex.log" | sed 's/^/       /'
+fi
+
+# --- 5 and 6. the crowd's own Pokemon ---------------------------------------
+#
+# OPENMMO_FAKE_FOLLOWERS gives each synthetic peer a distinct follower graphics
+# id, which is the case that costs: a crowd wears one of two trainer models and
+# costs the texture pool two slots, and twelve different Pokemon cost it twelve.
+PKG="${OPENMMO_FOLLOWER_PKG:-}"
+if [ -z "$PKG" ] && [ -f "$SRC4" ] && command -v python3 >/dev/null 2>&1; then
+    if python3 "$ROOT/tools/portfollow.py" --rom "$SRC4" \
+            --pkg "$tmp/mods/followers" > "$tmp/fill.log" 2>&1; then
+        PKG="$tmp/mods/followers"
+    fi
+fi
+if [ -z "$PKG" ]; then
+    echo "  SKIP the crowd's own Pokemon (no follower package; set"
+    echo "       OPENMMO_FOLLOWER_PKG or OPENMMO_GEN4_ROM)"
+else
+    MODS_DIR=$(dirname "$PKG")
+    MODS_ID=$(basename "$PKG")
+
+    # A SAVE OF ITS OWN, and the reason is check 3 above: that boot is MEANT to
+    # abort, and it aborts in the middle of writing the save every boot here
+    # shares. The next run over that image dies before the field is up, which
+    # reads as a follower fault and is not one.
+    fboot() {
+        _crowd=$1; _log=$2; shift 2
+        env "$@" \
+            OPENMMO_FAKE_CROWD="$_crowd" OPENMMO_FAKE_FOLLOWERS=1 \
+            PC_MODS_DIR="$MODS_DIR" PC_MODS="$MODS_ID" \
+            PC_ROM="$ROM" PC_SAVE="$tmp/follow.sav" PC_LAB="$tmp/min.lab" \
+            PC_LAB_AT=1800 PC_FRAMES=2600 PC_PACE=0 PC_INPUT="$SETTLE" \
+            "$FUSED" > "$_log" 2>&1 && echo 0 || echo $?
+    }
+
+    rc=$(fboot 12 "$tmp/follow.log")
+    seated=$(grep -c 'walks with gfx' "$tmp/follow.log" || true)
+    if [ "$rc" -eq 0 ] && [ "$seated" -eq 8 ] \
+        && grep -q '8 peer followers are drawn already' "$tmp/follow.log" \
+        && grep -q 'crowd of 12 requested at ([0-9-]*,[0-9-]*), 12 live' "$tmp/follow.log"; then
+        ok "eight of twelve peers walk with a Pokemon, and all twelve still draw"
+    else
+        bad "eight of twelve peers walk with a Pokemon, and all twelve still draw"
+        echo "       exit $rc, $seated seated"
+        grep -E 'walks with gfx|drawn already|crowd of' "$tmp/follow.log" \
+            | tail -3 | sed 's/^/       /'
+    fi
+
+    # The object table, not the pool. 32 slots is short enough that the map's
+    # own objects and a crowd of twelve cannot both fit, so the followers are
+    # the first thing given up, and players are still drawn afterwards.
+    rc=$(fboot 12 "$tmp/followobj.log" OPENMMO_MAP_OBJECTS=32)
+    seated=$(grep -c 'walks with gfx' "$tmp/followobj.log" || true)
+    live=$(sed -n 's/^openmmo: crowd of 12 requested at ([0-9-]*,[0-9-]*), \([0-9]*\) live/\1/p' \
+        "$tmp/followobj.log" | head -1)
+    if [ "$rc" -eq 0 ] && [ "$seated" -eq 0 ] \
+        && grep -q 'peer followers give way to players' "$tmp/followobj.log" \
+        && [ -n "$live" ] && [ "$live" -gt 0 ]; then
+        ok "a short object table gives the followers up first, and $live players still draw"
+    else
+        bad "a short object table gives the followers up first"
+        echo "       exit $rc, $seated seated, '$live' players live"
+        grep -E 'give way|walks with gfx|crowd of' "$tmp/followobj.log" \
+            | tail -3 | sed 's/^/       /'
+    fi
 fi
 
 [ "$fail" -eq 0 ] || { echo "crowd: FAILED"; exit 1; }

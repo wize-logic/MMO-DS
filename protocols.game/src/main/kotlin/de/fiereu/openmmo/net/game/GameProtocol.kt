@@ -59,7 +59,11 @@ object GameProtocol : Protocol() {
     c2s<PokemonListAddPacket>(0x0Fu, PokemonListAddPacketCodec)
     s2c<EntityPresencePacket>(0x0Fu, EntityPresencePacketCodec)
 
-    bidi<LoadMapPacket>(0x10u, LoadMapPacketCodec)
+    // s2c only: a map is something the server hands out. The official client's c2s 0x10 is a
+    // one-byte packet
+    // and nothing on this side reads a map from a client, so registering it both ways only exposed
+    // the decoder below to anyone who had opened a socket.
+    s2c<LoadMapPacket>(0x10u, LoadMapPacketCodec)
 
     c2s<PartyMemberSelectPacket>(0x11u, PartyMemberSelectPacketCodec)
     s2c<NpcUpdatePacket>(0x11u, NpcUpdatePacketCodec)
@@ -643,6 +647,10 @@ object GameProtocol : Protocol() {
     // all, so
     // there is no official shape to follow.
     bidi<UndergroundTalkPacket>(0xC9u, UndergroundTalkPacketCodec)
+
+    // A save file coming back online.
+    c2s<OfflineSaveReportPacket>(0xCAu, OfflineSaveReportPacketCodec)
+    s2c<OfflineImportResultPacket>(0xCEu, OfflineImportResultPacketCodec)
     c2s<BagDeltaPacket>(0xDDu, BagDeltaPacketCodec)
     c2s<MoneyDeltaPacket>(0xDEu, MoneyDeltaPacketCodec)
     c2s<PokemonReleasePacket>(0xDFu, PokemonReleasePacketCodec)

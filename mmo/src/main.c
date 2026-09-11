@@ -22,6 +22,8 @@
 #include "cartridge.h"
 #include "platform.h"
 #include "imports.h"
+#include "offline_chain.h"
+#include "offline_import.h"
 #include "region.h"
 #include "appearance.h"
 #include "battle_anim.h"
@@ -171,12 +173,25 @@ static int usage(const char *argv0)
         "                    if left off); report the party and bag the server\n"
         "                    sends back\n"
         "  storage --user U --pass W \\\n"
-        "          [--deposit PARTY_SLOT | --withdraw PC_SLOT] [--to SLOT]\n"
-        "                    join and report the server-owned party and PC; with a\n"
-        "                    move, send it and report both containers again once\n"
-        "                    the server has sent them back. --to names the\n"
-        "                    destination slot (the first free one if left off); a\n"
-        "                    taken one is the swap the box screen draws\n"
+        "          [--deposit PARTY_SLOT | --withdraw PC_SLOT |\n"
+        "           --board PARTY_SLOT | --collect DAYCARE_SLOT |\n"
+        "           --add SPECIES [--level N] |\n"
+        "           --release PARTY_SLOT | --release-pc PC_SLOT]\n"
+        "          [--to SLOT] [--box N]\n"
+        "                    join and report the server-owned party, PC and day\n"
+        "                    care; with a move, send it and report the containers\n"
+        "                    again once the server has sent them back. --board\n"
+        "                    hands a party member over the day care counter and\n"
+        "                    --collect takes one back. --to names the destination\n"
+        "                    slot (the first free one if left off); a taken one is\n"
+        "                    the swap the box screen draws. --add asks the\n"
+        "                    developer's /party for a monster of that species;\n"
+        "                    --release lets a party member go, --release-pc a\n"
+        "                    stored one. Slots are the wire's, 0-based, over one\n"
+        "                    flat PC; with --box N the PC slots (--to on a\n"
+        "                    deposit, --withdraw, --release-pc) count from 1\n"
+        "                    inside that box instead, and a deposit with no --to\n"
+        "                    takes the first free slot of that box\n"
         "  movelearn --user U --pass W [--slot N]\n"
         "                    join and answer the server's move offer: report the\n"
         "                    four moves the monster is choosing between, drop slot\n"
@@ -213,6 +228,7 @@ static int usage(const char *argv0)
         "                    unavailable one is greyed out. No server\n"
         "  appearances       print the bodies a character can look like, with the\n"
         "                    reason each greyed row is not offered. No server\n"
+        "  import-save --report FILE [--chain FILE] [--character N]\n"
         "  imports [DIR...] [--found MANIFEST]\n"
         "                    print what each content package takes out of a\n"
         "                    cartridge and whether one has filled it; exits\n"
@@ -298,6 +314,32 @@ static void print_party(const openmmo_party *p)
                nature_name(m->nature), m->ability_slot,
                m->ability_unrenderable ? " (hidden: no engine ability)" : "",
                m->friendship, m->form);
+        /*
+         * Only when it is carrying something: a line of "holding nothing" under every party
+         * member would bury the rest, the same bargain the contest line takes.
+         */
+        if (m->held_item)
+            printf("    holding: wire %d -> engine %u%s\n", m->held_item,
+                   (unsigned)m->held_item_engine,
+                   m->held_item_engine ? "" : " (no engine id)");
+        /* Where it was caught, printed only when the record said. */
+        if (m->caught_location_label > 0)
+            printf("    caught: location label %d\n",
+                   m->caught_location_label);
+        else if (m->caught_map_header >= 0)
+            printf("    caught: engine map header %d\n", m->caught_map_header);
+        /* Only when it is suffering from something, the same bargain again. The
+         * word is the engine's own, printed as the bits it is: a Center clears
+         * every one of them and a healthy party prints no line at all. */
+        if (m->status)
+            printf("    status: %s%s%s%s%s%s0x%03x\n",
+                   (m->status & 0x07) ? "asleep " : "",
+                   (m->status & 0x08) ? "poisoned " : "",
+                   (m->status & 0x10) ? "burned " : "",
+                   (m->status & 0x20) ? "frozen " : "",
+                   (m->status & 0x40) ? "paralysed " : "",
+                   (m->status & 0x80) ? "badly poisoned " : "",
+                   (unsigned)m->status);
         printf("    IV %d/%d/%d/%d/%d/%d  EV %d/%d/%d/%d/%d/%d (hp/atk/def/spe/spa/spd)\n",
                m->iv[0], m->iv[1], m->iv[2], m->iv[3], m->iv[4], m->iv[5],
                m->ev[0], m->ev[1], m->ev[2], m->ev[3], m->ev[4], m->ev[5]);
@@ -1031,7 +1073,7 @@ static int cmd_create(int argc, char **argv)
         fprintf(stderr, "create: --name is required\n");
         return 2;
     }
-    if (strlen(cfg.create_name) > MMO_CHAR_NAME_MAX) {
+    if (mmo_utf16_units(cfg.create_name) > MMO_CHAR_NAME_MAX) {
         fprintf(stderr, "create: a name is longer than 32 characters\n");
         return 2;
     }
@@ -1364,7 +1406,9 @@ typedef struct {
     int got_blob;
     int blob_from;
     int asked;
+    int requeued;
     int refused;
+    int left;
     int peer_gone;
     int failed;
 } contest_side;
@@ -1454,7 +1498,7 @@ static int drive_contest(const openmmo_config *ca, const openmmo_config *cb,
                          int rank, int type, int drop)
 {
     enum { PH_JOIN, PH_REFUSED, PH_QUEUE, PH_SEATED, PH_RELAY, PH_RESULT,
-           PH_DONE } ph = PH_JOIN;
+           PH_DROP, PH_SETTLE, PH_DONE } ph = PH_JOIN;
     contest_side a = { .tag = "A", .c = openmmo_client_new() };
     contest_side b = { .tag = "B", .c = openmmo_client_new() };
     int b_started = 0, phase_frames = 0, rc = 1;
@@ -1464,6 +1508,9 @@ static int drive_contest(const openmmo_config *ca, const openmmo_config *cb,
      * few seconds behind, so waiting to be seated is the one step that takes
      * longer than a round trip. At the 2ms pacing below this is ~50 seconds. */
     const int SEAT_WAIT = 25000;
+    /* A refusal comes back within one round trip, so this is only long enough
+     * that a loopback which hiccups is not read as a pass. */
+    const int SETTLE_WAIT = 500;
 
     if (!a.c || !b.c) {
         fprintf(stderr, "error: out of memory\n");
@@ -1550,12 +1597,13 @@ static int drive_contest(const openmmo_config *ca, const openmmo_config *cb,
 
         case PH_SEATED: {
             if (drop) {
-                /* B is gone. The server hears the socket close and tells
-                 * everyone still seated, which is what the engine reads as
-                 * CommSys_IsPlayerConnected turning false for that seat. */
-                openmmo_client_disconnect(b.c);
-                printf("B: left without finishing\n");
-                ph = PH_RELAY;
+                /* A plays its contest out and says so while B is still seated,
+                 * so B is the seat the result is waiting on when it goes. */
+                static const u8 alone[2] = { 0, 1 };
+
+                openmmo_client_contest_result(a.c, alone, 2);
+                printf("A: reported the placements while B was still in\n");
+                ph = PH_DROP;
                 phase_frames = 0;
                 break;
             }
@@ -1574,21 +1622,36 @@ static int drive_contest(const openmmo_config *ca, const openmmo_config *cb,
             break;
         }
 
-        case PH_RELAY:
-            if (drop) {
-                if (a.peer_gone) {
-                    printf("contest: a seat that walked out was announced to"
-                           " the one still in it\n");
-                    rc = 0;
-                    goto done;
-                }
-                if (phase_frames > STEP_WAIT) {
-                    fprintf(stderr, "error: B left and A was never told; every"
-                                    " barrier after this would wait forever\n");
-                    goto done;
-                }
+        case PH_DROP:
+            /* Far enough after the report that the server has taken it: the two
+             * travel on different sockets, so nothing but the gap orders them. */
+            if (!b.left) {
+                if (phase_frames < 100)
+                    break;
+                b.left = 1;
+                /* B is gone. The server hears the socket close and tells
+                 * everyone still seated, which is what the engine reads as
+                 * CommSys_IsPlayerConnected turning false for that seat. */
+                openmmo_client_disconnect(b.c);
+                printf("B: left without finishing\n");
+                phase_frames = 0;
                 break;
             }
+            if (a.peer_gone) {
+                printf("contest: a seat that walked out was announced to the"
+                       " one still in it\n");
+                ph = PH_SETTLE;
+                phase_frames = 0;
+                break;
+            }
+            if (phase_frames > STEP_WAIT) {
+                fprintf(stderr, "error: B left and A was never told; every"
+                                " barrier after this would wait forever\n");
+                goto done;
+            }
+            break;
+
+        case PH_RELAY:
             if (b.got_blob) {
                 if (b.blob_from != a.seat) {
                     fprintf(stderr, "error: B was told the blob came from seat"
@@ -1623,6 +1686,29 @@ static int drive_contest(const openmmo_config *ca, const openmmo_config *cb,
             phase_frames = 0;
             break;
         }
+
+        case PH_SETTLE:
+            if (!a.requeued) {
+                a.requeued = 1;
+                a.asked = 1;
+                openmmo_client_contest_queue(a.c, rank, type, 0);
+                phase_frames = 0;
+                break;
+            }
+            if (a.refused) {
+                fprintf(stderr, "error: A is still in a contest nobody is left"
+                                " to finish; the result it reported was never"
+                                " taken\n");
+                goto done;
+            }
+            if (phase_frames > SETTLE_WAIT) {
+                printf("contest: the seat that stayed was released once it"
+                       " reported\n");
+                openmmo_client_contest_cancel(a.c);
+                rc = 0;
+                goto done;
+            }
+            break;
 
         case PH_DONE:
             if (phase_frames > 120) {
@@ -2347,6 +2433,24 @@ done:
 
 /* --- storage: the party and the PC, and a monster moved between them --------- */
 
+/* Who the server says is boarding at the day care. Printed with the other two
+ * because a boarder is neither in the party nor in the PC and the whole point of
+ * the container is that it can be seen to be somewhere. */
+static void print_daycare(const openmmo_client *c)
+{
+    const openmmo_storage *d = openmmo_client_daycare(c);
+
+    if (!d->valid) {
+        printf("  daycare: no container received\n");
+        return;
+    }
+    printf("  daycare: %d boarding\n", d->count);
+    for (int i = 0; i < d->count; i++)
+        printf("    slot %d: #%d %s lv%d (id %lld)\n", d->mon[i].slot,
+               d->mon[i].dex_id, d->mon[i].nickname, d->mon[i].level,
+               (long long)d->mon[i].id);
+}
+
 static void print_containers(const openmmo_client *c, const char *when)
 {
     const openmmo_party *p = openmmo_client_party(c);
@@ -2369,6 +2473,7 @@ static void print_containers(const openmmo_client *c, const char *when)
         printf("    slot %d: #%d %s lv%d (id %lld)\n", s->mon[i].slot,
                s->mon[i].dex_id, s->mon[i].nickname, s->mon[i].level,
                (long long)s->mon[i].id);
+    print_daycare(c);
 }
 
 /* The lowest slot in a container nothing sits on. -1 if it is full. */
@@ -2378,8 +2483,12 @@ static int first_free_slot(const openmmo_client *c, int container)
         const openmmo_party *p = openmmo_client_party(c);
         return p->count < OPENMMO_PARTY_MAX ? p->count : -1;
     }
-    const openmmo_storage *s = openmmo_client_storage(c);
-    for (int slot = 0; slot < OPENMMO_STORAGE_MAX; slot++) {
+    const openmmo_storage *s = container == OPENMMO_CONTAINER_DAYCARE
+                                   ? openmmo_client_daycare(c)
+                                   : openmmo_client_storage(c);
+    int slots = container == OPENMMO_CONTAINER_DAYCARE ? OPENMMO_DAYCARE_MAX
+                                                       : OPENMMO_STORAGE_MAX;
+    for (int slot = 0; slot < slots; slot++) {
         int taken = 0;
         for (int i = 0; i < s->count; i++)
             if (s->mon[i].slot == slot) { taken = 1; break; }
@@ -2389,14 +2498,60 @@ static int first_free_slot(const openmmo_client *c, int container)
     return -1;
 }
 
-static int drive_storage(const openmmo_config *cfg, int deposit, int withdraw,
-                         int to_slot)
+/* The monster sitting on `slot` of a container, or NULL. The PC is sparse, so
+ * a slot is looked up rather than indexed. */
+static const openmmo_party_mon *mon_at(const openmmo_client *c, int container,
+                                       int slot)
+{
+    if (container == OPENMMO_CONTAINER_PARTY) {
+        const openmmo_party *p = openmmo_client_party(c);
+        for (int i = 0; i < p->count; i++)
+            if (p->mon[i].slot == slot)
+                return &p->mon[i];
+        return NULL;
+    }
+    {
+        const openmmo_storage *s = openmmo_client_storage(c);
+        for (int i = 0; i < s->count; i++)
+            if (s->mon[i].slot == slot)
+                return &s->mon[i];
+    }
+    return NULL;
+}
+
+/* The first empty slot of box `box` (counted from one, the way the box screen
+ * numbers them). -1 when the box is full. */
+static int first_free_in_box(const openmmo_client *c, int box)
+{
+    int base = (box - 1) * OPENMMO_BOX_SIZE;
+
+    for (int slot = base; slot < base + OPENMMO_BOX_SIZE; slot++)
+        if (mon_at(c, OPENMMO_CONTAINER_PC, slot) == NULL)
+            return slot;
+    return -1;
+}
+
+/* One storage gesture, as the command line named it. Slots are the wire's
+ * (0-based, the PC one flat list) unless `box` is given, in which case
+ * `to_slot`, `withdraw` and `release_pc` count from one inside that box. */
+typedef struct {
+    int deposit, withdraw, board, collect, to_slot;
+    int box;            /* 1-based, or -1 for "the flat PC" */
+    const char *add;    /* a species for /party, or NULL */
+    int add_level;      /* -1 = the server's default */
+    int release;        /* party slot to let go, or -1 */
+    int release_pc;     /* PC slot to let go, or -1 */
+} storage_move;
+
+static int drive_storage(const openmmo_config *cfg, const storage_move *m)
 {
     openmmo_client *c = openmmo_client_new();
     if (!c) { fprintf(stderr, "error: out of memory\n"); return 1; }
     setvbuf(stdout, NULL, _IOLBF, 0);
 
     int rc = 1, sent = 0, joined = 0;
+    int deposit = m->deposit, withdraw = m->withdraw, board = m->board,
+        collect = m->collect, to_slot = m->to_slot;
     openmmo_client_start(c, cfg);
 
     for (int f = 0; f < MAX_FRAMES; f++) {
@@ -2422,6 +2577,7 @@ static int drive_storage(const openmmo_config *cfg, int deposit, int withdraw,
                  * of the pair has landed. */
                 if (sent && ev.kind == OPENMMO_EV_STORAGE) {
                     print_containers(c, "after the move");
+                    rc = 0;
                     goto done;
                 }
                 break;
@@ -2435,17 +2591,85 @@ static int drive_storage(const openmmo_config *cfg, int deposit, int withdraw,
         }
 
         if (joined && !sent) {
-            if (deposit < 0 && withdraw < 0)
+            if (m->add != NULL) {
+                /* The developer's /party puts a rolled monster in the party
+                 * and resends every container, so the round trip closes the
+                 * same way a move does. */
+                char line[96];
+
+                if (m->add_level > 0)
+                    snprintf(line, sizeof line, "/party %s %d", m->add,
+                             m->add_level);
+                else
+                    snprintf(line, sizeof line, "/party %s", m->add);
+                printf("saying: %s\n", line);
+                if (openmmo_client_send_chat(c, line) != 0) {
+                    fprintf(stderr, "error: could not send the line\n");
+                    goto done;
+                }
+                sent = 1;
+                rc = 1;
+                continue;
+            }
+            if (m->release >= 0 || m->release_pc >= 0) {
+                int container = m->release >= 0 ? OPENMMO_CONTAINER_PARTY
+                                                : OPENMMO_CONTAINER_PC;
+                int slot = m->release >= 0 ? m->release : m->release_pc;
+                const openmmo_party_mon *mon;
+
+                if (container == OPENMMO_CONTAINER_PC && m->box > 0)
+                    slot = (m->box - 1) * OPENMMO_BOX_SIZE + slot - 1;
+                mon = mon_at(c, container, slot);
+                if (mon == NULL) {
+                    fprintf(stderr, "error: nothing sits on %s slot %d\n",
+                            container == OPENMMO_CONTAINER_PARTY ? "party"
+                                                                 : "pc",
+                            slot);
+                    goto done;
+                }
+                printf("releasing %s slot %d: #%d %s lv%d (id %lld)\n",
+                       container == OPENMMO_CONTAINER_PARTY ? "party" : "pc",
+                       slot, mon->dex_id, mon->nickname, mon->level,
+                       (long long)mon->id);
+                if (openmmo_client_send_pokemon_release(c, mon->id) != 0) {
+                    fprintf(stderr, "error: the client refused that release\n");
+                    goto done;
+                }
+                sent = 1;
+                rc = 1;
+                continue;
+            }
+            if (deposit < 0 && withdraw < 0 && board < 0 && collect < 0)
                 goto done;                /* report only */
-            int from_c = deposit >= 0 ? OPENMMO_CONTAINER_PARTY
-                                      : OPENMMO_CONTAINER_PC;
-            int to_c = deposit >= 0 ? OPENMMO_CONTAINER_PC
-                                    : OPENMMO_CONTAINER_PARTY;
-            int from_s = deposit >= 0 ? deposit : withdraw;
+            int from_c = OPENMMO_CONTAINER_PARTY, to_c = OPENMMO_CONTAINER_PC;
+            int from_s = deposit;
+
+            if (withdraw >= 0) {
+                from_c = OPENMMO_CONTAINER_PC;
+                to_c = OPENMMO_CONTAINER_PARTY;
+                from_s = withdraw;
+                if (m->box > 0)
+                    from_s = (m->box - 1) * OPENMMO_BOX_SIZE + withdraw - 1;
+            } else if (board >= 0) {
+                to_c = OPENMMO_CONTAINER_DAYCARE;
+                from_s = board;
+            } else if (collect >= 0) {
+                from_c = OPENMMO_CONTAINER_DAYCARE;
+                to_c = OPENMMO_CONTAINER_PARTY;
+                from_s = collect;
+            }
             /* Named or the first free one. Naming a taken slot is the swap the
              * box screen draws, and it is the gesture that once wedged the
-             * server's flusher, so it has to be drivable from here. */
-            int to_s = to_slot >= 0 ? to_slot : first_free_slot(c, to_c);
+             * server's flusher, so it has to be drivable from here. A box
+             * named on a deposit narrows "first free" to that box. */
+            int to_s;
+
+            if (to_c == OPENMMO_CONTAINER_PC && m->box > 0)
+                to_s = to_slot >= 0
+                           ? (m->box - 1) * OPENMMO_BOX_SIZE + to_slot - 1
+                           : first_free_in_box(c, m->box);
+            else
+                to_s = to_slot >= 0 ? to_slot : first_free_slot(c, to_c);
             if (to_s < 0) {
                 fprintf(stderr, "error: the destination container is full\n");
                 goto done;
@@ -2483,21 +2707,56 @@ static int cmd_storage(int argc, char **argv)
     cfg.mode = OPENMMO_MODE_GAME_JOIN;
     parse_opts(argc, argv, &cfg);
 
-    int deposit = -1, withdraw = -1, to_slot = -1;
+    storage_move m = { -1, -1, -1, -1, -1, -1, NULL, -1, -1, -1 };
+    int named = 0;
     for (int i = 0; i < argc; i++) {
         int has_next = (i + 1 < argc);
-        if (strcmp(argv[i], "--deposit") == 0 && has_next)
-            deposit = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--withdraw") == 0 && has_next)
-            withdraw = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--to") == 0 && has_next)
-            to_slot = atoi(argv[++i]);
+        if (strcmp(argv[i], "--deposit") == 0 && has_next) {
+            m.deposit = atoi(argv[++i]);
+            named++;
+        } else if (strcmp(argv[i], "--withdraw") == 0 && has_next) {
+            m.withdraw = atoi(argv[++i]);
+            named++;
+        } else if (strcmp(argv[i], "--board") == 0 && has_next) {
+            m.board = atoi(argv[++i]);
+            named++;
+        } else if (strcmp(argv[i], "--collect") == 0 && has_next) {
+            m.collect = atoi(argv[++i]);
+            named++;
+        } else if (strcmp(argv[i], "--to") == 0 && has_next) {
+            m.to_slot = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--box") == 0 && has_next) {
+            m.box = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--add") == 0 && has_next) {
+            m.add = argv[++i];
+            named++;
+        } else if (strcmp(argv[i], "--level") == 0 && has_next) {
+            m.add_level = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--release") == 0 && has_next) {
+            m.release = atoi(argv[++i]);
+            named++;
+        } else if (strcmp(argv[i], "--release-pc") == 0 && has_next) {
+            m.release_pc = atoi(argv[++i]);
+            named++;
+        }
     }
-    if (deposit >= 0 && withdraw >= 0) {
-        fprintf(stderr, "error: --deposit and --withdraw are one move each\n");
+    if (named > 1) {
+        fprintf(stderr, "error: --deposit, --withdraw, --board, --collect,"
+                        " --add, --release and --release-pc are one move"
+                        " each\n");
         return 1;
     }
-    return drive_storage(&cfg, deposit, withdraw, to_slot);
+    if (m.box == 0 || m.box > OPENMMO_STORAGE_MAX / OPENMMO_BOX_SIZE) {
+        fprintf(stderr, "error: --box counts boxes from 1 to %d\n",
+                OPENMMO_STORAGE_MAX / OPENMMO_BOX_SIZE);
+        return 1;
+    }
+    /* A release is a statement the game client makes about a box screen it
+     * ran itself, and the server only hears it from a client that says it
+     * runs the field scripts; this one never walks, so saying so is safe. */
+    if (m.release >= 0 || m.release_pc >= 0)
+        cfg.local_scripts = 1;
+    return drive_storage(&cfg, &m);
 }
 
 /* Join as a developer, open a mart via /shop, and optionally buy or sell. */
@@ -5320,6 +5579,162 @@ static int cmd_evolve(int argc, char **argv)
     return drive_evolve(&cfg, accept);
 }
 
+/* --- import-save: a save file offered to the server as this character -------- */
+static int drive_import_save(const openmmo_config *cfg, const char *report_path,
+                             const char *chain_path)
+{
+    openmmo_client *c;
+    u8 *report = NULL;
+    u8 *chain = NULL;
+    size_t len = 0;
+    size_t chain_len = 0;
+    s32 play_seconds = 0;
+    char sha[65];
+    int rc = 1, sent = 0, offered_chain = 0;
+
+    /* Line buffered before anything is written, not after: setvbuf on a stream
+     * that has already been printed to is undefined, and what it did here was
+     * drop everything said so far when the output was a file. */
+    setvbuf(stdout, NULL, _IOLBF, 0);
+    if (mmo_import_report_read(report_path, &report, &len) != 0)
+        return 1;
+    /* Read before the session opens, so a chain that is not one is a refusal
+     * here rather than a session torn down half way through an upload. */
+    if (chain_path != NULL &&
+        mmo_chain_read(chain_path, &chain, &chain_len) != 0) {
+        free(report);
+        return 1;
+    }
+    sha[0] = '\0';
+    if (mmo_import_report_stamp(report, len, &play_seconds, sha, NULL) != 0) {
+        free(report);
+        free(chain);
+        return 1;
+    }
+    printf("offering %s: %zu bytes, %d seconds played, save %s\n",
+           report_path, len, play_seconds, sha[0] ? sha : "(unhashed)");
+    if (chain != NULL)
+        printf("with %zu bytes of session records from %s\n", chain_len,
+               chain_path);
+
+    c = openmmo_client_new();
+    if (!c) {
+        fprintf(stderr, "error: out of memory\n");
+        free(report);
+        free(chain);
+        return 1;
+    }
+    openmmo_client_start(c, cfg);
+
+    for (int f = 0; f < MAX_FRAMES; f++) {
+        openmmo_client_pump(c);
+
+        openmmo_event ev;
+        while (openmmo_client_poll_event(c, &ev)) {
+            switch (ev.kind) {
+            case OPENMMO_EV_STATUS:
+                printf("-> %s\n", openmmo_status_name(ev.status));
+                break;
+            case OPENMMO_EV_CHAT:
+                print_chat_line(NULL, &ev);
+                break;
+            case OPENMMO_EV_JOINED:
+                if (!sent) {
+                    if (openmmo_client_send_offline_report(c, report, len) != 0) {
+                        fprintf(stderr, "error: the save could not be sent\n");
+                        goto done;
+                    }
+                    sent = 1;
+                    printf("save offered; waiting for the answer\n");
+                }
+                break;
+            case OPENMMO_EV_FAILED:
+                fprintf(stderr, "error: %s\n", ev.message); goto done;
+            case OPENMMO_EV_DISCONNECTED:
+                fprintf(stderr, "session ended: %s\n", ev.message); goto done;
+            default:
+                break;
+            }
+        }
+        if (sent) {
+            const openmmo_import_answer *a = openmmo_client_import_answer(c);
+
+            if (a != NULL && a->status != MMO_IMPORT_STATUS_NONE) {
+                static const char *const WORD[MMO_IMPORT_STATUS_COUNT] = {
+                    "landed", "try again", "refused",
+                    "check queued", "check declined",
+                    "copy kept", "copy declined", "records kept"
+                };
+
+                printf("%s: %s\n", WORD[a->status], a->message);
+                for (int i = 0; i < a->nnotes; i++)
+                    printf("  %s\n", a->notes[i]);
+                if (a->nnotes_sent > a->nnotes)
+                    printf("  (and %d more)\n", a->nnotes_sent - a->nnotes);
+                /* The save's answer first, then the records behind it, on the
+                 * same channel and with an answer of their own. Only when the
+                 * save landed and the server said it would look. */
+                if (a->status == MMO_IMPORT_STATUS_LANDED && !offered_chain &&
+                    chain != NULL) {
+                    if (!a->wants_chain) {
+                        printf("the server is not checking offline play, so"
+                               " the session records were not sent\n");
+                        rc = 0;
+                        goto done;
+                    }
+                    offered_chain = 1;
+                    if (openmmo_client_send_offline_chain(c, chain,
+                                                          chain_len) != 0) {
+                        fprintf(stderr, "error: the session records could not"
+                                " be sent\n");
+                        goto done;
+                    }
+                    printf("session records offered; waiting for the answer\n");
+                    continue;
+                }
+                rc = (a->status == MMO_IMPORT_STATUS_LANDED ||
+                      a->status == MMO_IMPORT_STATUS_CHECK_QUEUED ||
+                      a->status == MMO_IMPORT_STATUS_CHAIN_KEPT) ? 0 : 2;
+                goto done;
+            }
+        }
+        usleep(2000);
+    }
+    fprintf(stderr, "error: no answer to the save before the frame budget ran out\n");
+
+done:
+    openmmo_client_disconnect(c);
+    openmmo_client_free(c);
+    free(report);
+    free(chain);
+    return rc;
+}
+
+static int cmd_import_save(int argc, char **argv)
+{
+    openmmo_config cfg;
+    const char *report = NULL;
+    const char *chain = NULL;
+
+    memset(&cfg, 0, sizeof cfg);
+    cfg.user = "admin";
+    cfg.pass = "admin";
+    cfg.mode = OPENMMO_MODE_GAME_JOIN;
+    for (int i = 0; i < argc; i++) {
+        if (strcmp(argv[i], "--report") == 0 && i + 1 < argc)
+            report = argv[++i];
+        else if (strcmp(argv[i], "--chain") == 0 && i + 1 < argc)
+            chain = argv[++i];
+    }
+    parse_opts(argc, argv, &cfg);
+    if (report == NULL) {
+        fprintf(stderr, "import-save: --report FILE names the save report to"
+                " offer (the game writes one beside its save)\n");
+        return 2;
+    }
+    return drive_import_save(&cfg, report, chain);
+}
+
 static int cmd_flags(int argc, char **argv)
 {
     openmmo_config cfg;
@@ -7029,6 +7444,8 @@ int main(int argc, char **argv)
         return cmd_regions(argc - 2, argv + 2);
     if (strcmp(argv[1], "appearances") == 0)
         return cmd_appearances(argc - 2, argv + 2);
+    if (strcmp(argv[1], "import-save") == 0)
+        return cmd_import_save(argc - 2, argv + 2);
     if (strcmp(argv[1], "imports") == 0)
         return cmd_imports(argc - 2, argv + 2);
     if (strcmp(argv[1], "cartridges") == 0)

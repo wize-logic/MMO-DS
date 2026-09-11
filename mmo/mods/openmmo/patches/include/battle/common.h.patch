@@ -1,0 +1,19 @@
+--- a/include/battle/common.h
++++ b/include/battle/common.h
+@@ -21,8 +21,14 @@
+ #define FOLLOW_ME_USER(side) (battleCtx->sideConditions[side].followMeUser)
+ #define FOLLOW_ME_MON(side)  (battleCtx->battleMons[FOLLOW_ME_USER(side)])
+ 
+-#define CURRENT_MOVE_DATA (battleCtx->aiContext.moveTable[battleCtx->moveCur])
+-#define MOVE_DATA(move)   (battleCtx->aiContext.moveTable[move])
++/* openmmo: the AI's copy of the move table is a struct member sized MAX_MOVES
++ * and a fill appends moves past it, so a read past 467 goes to the appended
++ * members instead (mods/openmmo/src/openmmo_moves.c). Everything this game
++ * ships is still read out of the copy. */
++struct MoveTable;
++struct MoveTable *openmmo_move_data(struct MoveTable *table, int move);
++#define CURRENT_MOVE_DATA (*openmmo_move_data(battleCtx->aiContext.moveTable, battleCtx->moveCur))
++#define MOVE_DATA(move)   (*openmmo_move_data(battleCtx->aiContext.moveTable, (move)))
+ 
+ #define LOAD_SUBSEQ(script) (BattleSystem_LoadScript(battleCtx, NARC_INDEX_BATTLE__SKILL__SUB_SEQ, script))
+ 

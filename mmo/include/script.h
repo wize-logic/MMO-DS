@@ -20,7 +20,7 @@ typedef struct {
     openmmo_script_op op;
     int  arg;         /* AWAIT_STATUS: openmmo_status; AWAIT_EVENT: openmmo_event_kind;
                        * FRAMES: count (>0); MOVE: facing DIR_* (0..3) */
-    char text[128];   /* CHAT: the line to send */
+    char text[MMO_TEXT_BYTES(MMO_CHAT_TEXT_MAX)]; /* CHAT: the line to send */
     int  line;        /* 1-based source line, for the executor's trace */
 } openmmo_script_action;
 

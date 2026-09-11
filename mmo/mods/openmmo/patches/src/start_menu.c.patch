@@ -1,6 +1,6 @@
---- a/src/start_menu.c
-+++ b/src/start_menu.c
-@@ -296,6 +296,99 @@
+--- a/src/start_menu.c	2026-09-03 12:44:54.381523041 -0400
++++ b/src/start_menu.c	2026-09-03 12:45:41.192995386 -0400
+@@ -296,6 +296,152 @@
      FieldSystem_CreateTask(fieldSystem, StartMenu_Main, menu);
  }
  
@@ -44,6 +44,49 @@
 +    return FALSE;
 +}
 +
++/* HeartGold's Pokegear (mods/openmmo/src/openmmo_pokegear.c): a child
++ * application of the field like the rest, and one that can end with a Fly,
++ * which is a task of the field's own the way a used item's is, the
++ * NEW_TASK hand-off below, the same road the bag's Explorer Kit takes. */
++static BOOL StartMenu_ExitOpenmmoPokegear(FieldTask *fieldTask)
++{
++    FieldSystem *fieldSystem = FieldTask_GetFieldSystem(fieldTask);
++    StartMenu *menu = FieldTask_GetEnv(fieldTask);
++    extern int openmmo_pokegear_fly_wanted(const void *args, void **taskFn, void **taskData);
++    extern void openmmo_pokegear_free_args(void *args);
++    void *fn = NULL;
++    void *data = NULL;
++
++    if (openmmo_pokegear_fly_wanted(menu->taskData, &fn, &data)) {
++        openmmo_pokegear_free_args(menu->taskData);
++        FieldSystem_StartFieldMap(fieldSystem);
++        menu->callback = fn;
++        menu->taskData = data;
++        menu->state = START_MENU_STATE_NEW_TASK;
++        return FALSE;
++    }
++    openmmo_pokegear_free_args(menu->taskData);
++    menu->taskData = NULL;
++    FieldSystem_StartFieldMap(fieldSystem);
++    menu->state = START_MENU_STATE_REINIT;
++    return FALSE;
++}
++
++static BOOL StartMenu_OpenmmoPokegear(FieldTask *fieldTask)
++{
++    FieldSystem *fieldSystem = FieldTask_GetFieldSystem(fieldTask);
++    StartMenu *menu = FieldTask_GetEnv(fieldTask);
++    extern void *openmmo_pokegear_launch(FieldSystem *fs);
++
++    menu->taskData = openmmo_pokegear_launch(fieldSystem);
++    if (menu->taskData == NULL) {
++        menu->state = START_MENU_STATE_REINIT;
++        return FALSE;
++    }
++    menu->callback = StartMenu_ExitOpenmmoPokegear;
++    return FALSE;
++}
++
 +void StartMenu_OpenApp(FieldSystem *fieldSystem, int app, int slot)
 +{
 +    StartMenu *menu = StartMenu_New();
@@ -69,6 +112,13 @@
 +        menu->callback = StartMenu_OpenPokedex;
 +        break;
 +    case 3:
++        /* Whose card: the screen command's slot byte names the region
++         * (mods/openmmo/src/openmmo_card.c). */
++        {
++            extern void openmmo_card_set_region(int region);
++
++            openmmo_card_set_region(slot);
++        }
 +        menu->callback = StartMenu_TrainerCase;
 +        break;
 +    case 4:
@@ -78,6 +128,9 @@
 +        sOpenmmoSummarySlot = slot;
 +        sOpenmmoSummaryRoot = TRUE;
 +        menu->callback = StartMenu_OpenmmoSummary;
++        break;
++    case 6:
++        menu->callback = StartMenu_OpenmmoPokegear;
 +        break;
 +    default:
 +        Heap_Free(menu);
@@ -100,7 +153,7 @@
  void StartMenu_OpenUnionRoom(FieldSystem *fieldSystem)
  {
      StartMenu *menu = StartMenu_New();
-@@ -450,6 +543,10 @@
+@@ -450,6 +596,10 @@
          StartMenu_Evolve(fieldTask);
          break;
      case START_MENU_STATE_REINIT:
@@ -111,7 +164,7 @@
          if (FieldSystem_IsRunningFieldMap(fieldSystem)) {
              MapObjectMan_PauseAllMovement(fieldSystem->mapObjMan);
              StartMenu_InitMenu(fieldTask);
-@@ -469,6 +566,8 @@
+@@ -469,6 +619,8 @@
              sub_0203B2EC(menu, fieldSystem);
              Heap_Free(menu);
              MapObjectMan_UnpauseAllMovement(fieldSystem->mapObjMan);
@@ -120,7 +173,7 @@
              return TRUE;
          }
          break;
-@@ -483,11 +582,13 @@
+@@ -483,11 +635,13 @@
          if (IsScreenFadeDone()) {
              FieldTask_InitJump(fieldTask, menu->callback, menu->taskData);
              Heap_Free(menu);
@@ -134,7 +187,7 @@
          return TRUE;
      case START_MENU_STATE_END:
          sub_0203B2EC(menu, fieldSystem);
-@@ -498,6 +599,7 @@
+@@ -498,6 +652,7 @@
          Bg_ScheduleTilemapTransfer(fieldSystem->bgConfig, BG_LAYER_MAIN_3);
          Heap_Free(menu);
          MapObjectMan_UnpauseAllMovement(fieldSystem->mapObjMan);
@@ -142,7 +195,7 @@
          return TRUE;
      case START_MENU_STATE_REINIT_WAIT_FOR_FADE:
          if (IsScreenFadeDone()) {
-@@ -841,9 +943,11 @@
+@@ -841,9 +996,11 @@
      FieldSystem *fieldSystem = FieldTask_GetFieldSystem(fieldTask);
      StartMenu *menu = FieldTask_GetEnv(fieldTask);
  
@@ -157,7 +210,22 @@
  
      menu->callback(fieldTask);
      menu->state = START_MENU_STATE_APP_RUN;
-@@ -1504,6 +1608,12 @@
+@@ -1275,7 +1432,13 @@
+ 
+     menu->taskData = TrainerCase_New(HEAP_ID_FIELD2);
+ 
+-    TrainerCase_Init(TRUE, TRUE, 0, TRAINER_APPEARANCE_DEFAULT, fieldSystem, (TrainerCase *)menu->taskData);
++    /* The face on the card is the body the player picked, where the card
++     * has a picture of it (mods/openmmo/src/openmmo_card.c). */
++    {
++        extern int openmmo_card_appearance(void);
++
++        TrainerCase_Init(TRUE, TRUE, 0, (u8)openmmo_card_appearance(), fieldSystem, (TrainerCase *)menu->taskData);
++    }
+     FieldSystem_OpenTrainerCase(fieldSystem, (TrainerCase *)menu->taskData);
+ 
+     menu->callback = StartMenu_ExitTrainerCase;
+@@ -1504,6 +1667,12 @@
          StartMenu_SetCallback(menu, StartMenu_ExitPartyMenu);
      } break;
      default:

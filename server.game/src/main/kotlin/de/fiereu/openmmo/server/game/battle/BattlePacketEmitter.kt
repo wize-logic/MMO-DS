@@ -141,56 +141,51 @@ class BattlePacketEmitter @Inject constructor(private val interestManager: Inter
               ?.send(
                   EntityMovePpPacket(
                       event.attackerId, event.moveSlot.toByte(), event.ppLeft.toByte()))
-          // The move's outcome rides inside the move event so the client animates it. A hit carries
-          // the target's resulting hp, a stat change carries the affected stat and its signed stage
-          // delta. A capped change reports no delta, so it stays unanimated.
-          val targets =
-              when (val next = events.getOrNull(i + 1)) {
+          // The move's outcome rides inside the move event so the client animates it. A hit
+          // carries the target's resulting hp, a stat change carries the affected stat and its
+          // signed stage delta.
+          val targets = mutableListOf<BattleEffectTarget>()
+          val next = events.getOrNull(i + 1)
+          if (next is BattleEvent.MoveWithoutTarget) {
+            i++
+            targets += failTarget(battle, event.attackerId, next)
+          } else {
+            val order = mutableListOf<Long>()
+            val subEvents = mutableMapOf<Long, MutableList<BattleActionEvent>>()
+            val outcome = mutableMapOf<Long, Int>()
+            fun bucket(id: Long): MutableList<BattleActionEvent> =
+                subEvents.getOrPut(id) {
+                  order += id
+                  mutableListOf()
+                }
+            run@ while (true) {
+              when (val e = events.getOrNull(i + 1)) {
                 is BattleEvent.DamageDealt -> {
-                  i++
-                  // The client faints the target on hp reaching 0, as the real server does, so no
-                  // faint sub-event is sent here.
-                  val subEvents =
-                      mutableListOf(
-                          BattleActionEvent(
-                              null, null, BattleEventBody.HpUpdate(next.newHp.toShort())))
-                  // A secondary stage change rides under the same target as the damage, the way
-                  // the captured Rock Tomb does. One aimed elsewhere gets a target of its own.
-                  var elsewhere = emptyList<BattleEffectTarget>()
-                  val secondary = events.getOrNull(i + 1)
-                  if (secondary is BattleEvent.StageChanged && !secondary.failed) {
-                    i++
-                    val body =
-                        BattleEventBody.StatChange(
-                            statIndex(secondary.stat), secondary.delta.toShort())
-                    if (secondary.targetId == next.targetId) {
-                      subEvents += BattleActionEvent(null, null, body)
-                    } else {
-                      elsewhere = listOf(target(secondary.targetId, DEFAULT_TARGET_MOVE, body))
-                    }
-                  }
-                  val outcome = HP_TARGET_MOVE.toInt() or effectivenessBit(next.effectiveness)
-                  listOf(BattleEffectTarget(next.targetId, outcome.toShort(), subEvents)) +
-                      elsewhere
+                  bucket(e.targetId) +=
+                      BattleActionEvent(null, null, BattleEventBody.HpUpdate(e.newHp.toShort()))
+                  outcome[e.targetId] = HP_TARGET_MOVE.toInt() or effectivenessBit(e.effectiveness)
                 }
                 is BattleEvent.StageChanged ->
-                    if (!next.failed) {
-                      i++
-                      listOf(
-                          target(
-                              next.targetId,
-                              DEFAULT_TARGET_MOVE,
-                              BattleEventBody.StatChange(
-                                  statIndex(next.stat), next.delta.toShort())))
-                    } else {
-                      emptyList()
+                    if (!e.failed) {
+                      bucket(e.targetId) +=
+                          BattleActionEvent(
+                              null,
+                              null,
+                              BattleEventBody.StatChange(statIndex(e.stat), e.delta.toShort()))
+                      outcome.putIfAbsent(e.targetId, DEFAULT_TARGET_MOVE.toInt())
                     }
-                is BattleEvent.MoveWithoutTarget -> {
-                  i++
-                  listOf(failTarget(battle, event.attackerId, next))
-                }
-                else -> emptyList()
+                // The client faints a monster on its hp reaching 0, as the real server does, so no
+                // faint sub-event is sent here.
+                is BattleEvent.Fainted -> Unit
+                else -> break@run
               }
+              i++
+            }
+            for (id in order) {
+              targets +=
+                  BattleEffectTarget(id, outcome.getValue(id).toShort(), subEvents.getValue(id))
+            }
+          }
           broadcast(
               battle,
               BattleEntityMoveEventPacket(event.attackerId, event.moveId, MOVE_EVENT_KIND, targets))
@@ -371,9 +366,6 @@ class BattlePacketEmitter @Inject constructor(private val interestManager: Inter
         battle.opponent.any { it.entityId == entityId } -> battle.foeSession ?: battle.session
         else -> null
       }
-
-  private fun target(entityId: Long, targetMove: Short, body: BattleEventBody): BattleEffectTarget =
-      BattleEffectTarget(entityId, targetMove, listOf(BattleActionEvent(null, null, body)))
 
   // A missed or failed move carries no target of its own, so it lands on the attacker's opponent.
   // A miss is the target move word on its own with no events under it. The client writes the miss

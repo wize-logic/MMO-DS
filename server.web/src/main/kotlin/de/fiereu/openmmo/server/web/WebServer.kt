@@ -164,10 +164,9 @@ class WebServer(
   private fun clientAddress(exchange: HttpExchange): String {
     val peer = exchange.remoteAddress.address
     if (peer?.isLoopbackAddress != true) return peer?.hostAddress ?: "unknown"
-    // The last entry, not the first. A proxy appends what it saw, so the right hand end is the
-    // address our own proxy vouches for and everything left of it is the caller's to write.
-    // Reading the near end let one caller present as unlimited distinct addresses, which defeats
-    // the per-address limits and fills the key table until it refuses everybody else.
+    // The last entry, not the first. A proxy appends what it saw to whatever arrived, so the
+    // right hand end is the address our own proxy vouches for and everything left of it is the
+    // client's to write.
     val forwarded = exchange.requestHeaders.getFirst("X-Forwarded-For")?.substringAfterLast(',')
     return forwarded?.trim()?.takeIf(String::isNotEmpty) ?: peer.hostAddress
   }

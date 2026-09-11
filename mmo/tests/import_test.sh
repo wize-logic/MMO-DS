@@ -154,6 +154,237 @@ else
     echo "  SKIP (cannot regenerate the item-icon table: $(tail -1 "$tmp/icons.log"))"
 fi
 
+# The icon table is the one Gen 5 thing that did cross.
+if [ ! -f "$ROOT/POKE_ICONS" ]; then
+    bad "mmo/POKE_ICONS is committed beside the tool that reads it"
+elif ! command -v python3 >/dev/null 2>&1; then
+    echo "  SKIP (no python3 to regenerate the icon table)"
+elif [ ! -f "$SRC5" ]; then
+    echo "  SKIP (no Gen 5 cartridge at $SRC5)"
+elif [ ! -f "$ROM" ]; then
+    echo "  SKIP (no built image at $ROM)"
+elif python3 "$ROOT/tools/porticons.py" --rom "$SRC5" --engine "$ENGINE" \
+        --host-rom "$ROM" --out "$tmp/POKE_ICONS" > "$tmp/icongen.log" 2>&1; then
+    if cmp -s "$tmp/POKE_ICONS" "$ROOT/POKE_ICONS"; then
+        ok "the committed icon table is what a Gen 5 cartridge generates"
+    else
+        bad "the committed icon table is what a Gen 5 cartridge generates"
+        echo "       regenerate: python3 mmo/tools/porticons.py --rom <black>"
+    fi
+else
+    bad "the icon port's own checks hold on this cartridge"
+    tail -3 "$tmp/icongen.log"
+fi
+
+# The species fill's own checks: the personal entries this game already has
+# rebuilt out of the cartridge's, the name bank rewritten unchanged byte for
+# byte, every letter of a ported name witnessed by a species both games hold,
+# the evolution members of all 493 shared species rebuilt byte for byte bar
+# the one row Gen 5 added, and the 123 ability names both games hold spelled
+# identically on each side.
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "  SKIP (no python3 to check the species fill)"
+elif [ ! -f "$SRC5" ]; then
+    echo "  SKIP (no Gen 5 cartridge at $SRC5)"
+elif [ ! -f "$ROM" ]; then
+    echo "  SKIP (no built image at $ROM)"
+elif python3 "$ROOT/tools/portspecies.py" --rom "$SRC5" --engine "$ENGINE" \
+        --host-rom "$ROM" --check > "$tmp/species.log" 2>&1; then
+    ok "the species fill's oracles hold on this cartridge"
+else
+    bad "the species fill's oracles hold on this cartridge"
+    tail -4 "$tmp/species.log"
+fi
+
+# The C fill'S own oracle, on the two images and no Python at all.
+if [ ! -x "$BUILD/openmmo-launch" ]; then
+    echo "  SKIP (no launcher built to run the species oracle)"
+elif [ ! -f "$SRC5" ]; then
+    echo "  SKIP (no Gen 5 cartridge at $SRC5; set OPENMMO_GEN5_ROM)"
+elif [ ! -f "$ROM" ]; then
+    echo "  SKIP (no built image at $ROM to hold the shared range against)"
+elif "$BUILD/openmmo-launch" --check-species "$SRC5" "$ROM" \
+        > "$tmp/cspecies.log" 2>&1; then
+    want="compared 493
+9 477
+12 5
+13 1
+14 8
+15 5"
+    if [ "$(cat "$tmp/cspecies.log")" = "$want" ]; then
+        ok "the C species fill rebuilds all 493 shared species as the tool does"
+    else
+        bad "the C species fill rebuilds all 493 shared species as the tool does"
+        echo "       want: $(echo "$want" | tr '\n' ' ')"
+        echo "       have: $(tr '\n' ' ' < "$tmp/cspecies.log")"
+    fi
+else
+    bad "the C species oracle refused"
+    echo "       $(tail -1 "$tmp/cspecies.log")"
+fi
+
+# And the C fill writes what the tool writes, byte for byte, into a copy.
+if [ ! -x "$BUILD/openmmo-launch" ]; then
+    echo "  SKIP (no launcher built to run the species fill)"
+elif [ ! -f "$SRC5" ]; then
+    echo "  SKIP (no Gen 5 cartridge at $SRC5; set OPENMMO_GEN5_ROM)"
+elif [ ! -f "$ROM" ]; then
+    echo "  SKIP (no built image at $ROM to grow the name bank from)"
+elif [ ! -d "$ROOT/mods/imports/narc/poketool/personal/pl_personal.narc" ]; then
+    echo "  SKIP (mods/imports is not filled; nothing to hold the C fill against)"
+elif "$BUILD/openmmo-launch" --compose-species "$SRC5" "$ROM" \
+        "$tmp/spc" > "$tmp/cfill.log" 2>&1; then
+    same=0
+    for arc in poketool/personal/pl_personal.narc poketool/personal/wotbl.narc \
+               poketool/personal/evo.narc poketool/icongra/pl_poke_icon.narc; do
+        if ! diff -r "$ROOT/mods/imports/narc/$arc" "$tmp/spc/narc/$arc" \
+                > /dev/null 2>&1; then
+            same=1
+            echo "       $arc differs"
+        fi
+    done
+    for bank in 412 413; do
+        if ! cmp -s "$ROOT/mods/imports/narc/msgdata/pl_msg.narc/$bank" \
+                    "$tmp/spc/narc/msgdata/pl_msg.narc/$bank"; then
+            same=1
+            echo "       name bank $bank differs"
+        fi
+    done
+    # The animation carry rides the same door: it is 52 MB of the cartridge's
+    # own bytes with no composition in between, so it either matches or it does
+    # not, and an LZ11 decompressor that drifts would show here first.
+    if "$BUILD/openmmo-launch" --compose-anim "$SRC5" "$tmp/spc" \
+            >> "$tmp/cfill.log" 2>&1; then
+        if ! diff -r "$ROOT/mods/imports/narc/poketool/pokegra/mmo_anim.narc" \
+                     "$tmp/spc/narc/poketool/pokegra/mmo_anim.narc" \
+                > /dev/null 2>&1; then
+            same=1
+            echo "       mmo_anim.narc differs"
+        fi
+    else
+        same=1
+        echo "       the animation carry refused: $(tail -1 "$tmp/cfill.log")"
+    fi
+    if [ "$same" = 0 ]; then
+        ok "the C species fill writes what the tool writes, every byte"
+    else
+        bad "the C species fill writes what the tool writes, every byte"
+    fi
+else
+    bad "the C species fill refused"
+    echo "       $(tail -1 "$tmp/cfill.log")"
+fi
+
+# And the whole package, through the seam a play press uses.
+if [ ! -x "$BUILD/openmmo-launch" ]; then
+    echo "  SKIP (no launcher built to run the fill)"
+elif [ ! -f "$SRC5" ]; then
+    echo "  SKIP (no Gen 5 cartridge at $SRC5; set OPENMMO_GEN5_ROM)"
+elif [ ! -f "$ROM" ]; then
+    echo "  SKIP (no built image at $ROM for the fill to append to)"
+elif [ ! -d "$ROOT/mods/imports/narc/poketool/pokegra/pl_pokegra.narc" ]; then
+    echo "  SKIP (mods/imports is not filled; nothing to hold the fill against)"
+else
+    mkdir -p "$tmp/inst/bin" "$tmp/inst/mods"
+    : > "$tmp/inst/bin/pokeplatinum"
+    printf 'rom %s\nrom-bw %s\nmods-dir %s\n' \
+        "$ROM" "$SRC5" "$tmp/inst/mods" > "$tmp/inst/launcher.cfg"
+    if OPENMMO_ROOT="$tmp/inst" "$BUILD/openmmo-launch" \
+            --config "$tmp/inst/launcher.cfg" --fill-imports \
+            > "$tmp/fillseam.log" 2>&1; then
+        made="$tmp/inst/mods/imports"
+        bad_arc=0
+        for arc in poketool/pokegra/pl_pokegra.narc poketool/pokegra/height.narc \
+                   poketool/waza/pl_waza_tbl.narc wazaeffect/we.arc \
+                   battle/skill/waza_seq.narc; do
+            if ! diff -r "$ROOT/mods/imports/narc/$arc" "$made/narc/$arc" \
+                    > /dev/null 2>&1; then
+                bad_arc=1
+                echo "       $arc differs"
+            fi
+        done
+        # The banks the moves and the abilities grow, and the cry pack, which
+        # comes off the same cartridge through the sound archive instead.
+        for bank in 0 646 647 648 610 611 612; do
+            if ! cmp -s "$ROOT/mods/imports/narc/msgdata/pl_msg.narc/$bank" \
+                        "$made/narc/msgdata/pl_msg.narc/$bank"; then
+                bad_arc=1
+                echo "       message bank $bank differs"
+            fi
+        done
+        if ! cmp -s "$ROOT/mods/imports/cries.bin" "$made/cries.bin"; then
+            bad_arc=1
+            echo "       cries.bin differs"
+        fi
+        if [ "$bad_arc" = 0 ]; then
+            ok "the fill writes the whole package the tools write, every byte"
+        else
+            bad "the fill writes the whole package the tools write, every byte"
+        fi
+
+        # And it is asked every press and answers from the stamp. A gate on the
+        # folder existing is what let `followers` and `hgss` claim the same 189
+        # members; a gate on the stamp refills when the build moves and costs a
+        # stat when it has not. The second press must not rewrite a byte.
+        sleep 1
+        touch "$tmp/inst/mark"
+        if OPENMMO_ROOT="$tmp/inst" "$BUILD/openmmo-launch" \
+                --config "$tmp/inst/launcher.cfg" --fill-imports \
+                >> "$tmp/fillseam.log" 2>&1 \
+           && [ -z "$(find "$made" -newer "$tmp/inst/mark" -print -quit)" ]; then
+            ok "a second press reads the stamp and rewrites nothing"
+        else
+            bad "a second press reads the stamp and rewrites nothing"
+            echo "       $(tail -2 "$tmp/fillseam.log")"
+        fi
+        rm -rf "$tmp/inst/mods"
+    else
+        bad "the fill refused at the seam"
+        echo "       $(tail -1 "$tmp/fillseam.log")"
+    fi
+fi
+
+# And the header the client compiles is what that tool emits.
+if [ ! -f "$ROOT/src/species_port.gen.h" ]; then
+    bad "mmo/src/species_port.gen.h is committed beside the fill that writes it"
+elif ! command -v python3 >/dev/null 2>&1; then
+    echo "  SKIP (no python3 to regenerate the species port header)"
+elif [ ! -f "$SRC5" ]; then
+    echo "  SKIP (no Gen 5 cartridge at $SRC5; set OPENMMO_GEN5_ROM)"
+elif python3 "$ROOT/tools/portspecies.py" --header --out "$tmp/species_port.gen.h" \
+        --rom "$SRC5" --engine "$ENGINE" \
+        > "$tmp/hdr.log" 2>&1 \
+        && cmp -s "$tmp/species_port.gen.h" "$ROOT/src/species_port.gen.h"; then
+    ok "the committed species port header is what the fill tool emits"
+    # Every one of this game's machines is accounted for, paired or explicitly
+    # not: the count is the tool's own, so a change in it is a change in what
+    # the two games share and wants saying rather than absorbing.
+    if grep -q 'MMO_PORTED_MACHINES       100' "$ROOT/src/species_port.gen.h"; then
+        ok "and it accounts for all 100 of this game's machines"
+    else
+        bad "and it accounts for all 100 of this game's machines"
+    fi
+    # The move fill freezes one of its own, and it needs no cartridge at all:
+    # mmo/MOVE_ANIMS is a repository file saying which Gen 4 animation each
+    # ported move borrows, and the fill on a player's machine has no checkout to
+    # read it from. Held here beside the species one for the same reason.
+    if [ ! -f "$ROOT/src/move_port.gen.h" ]; then
+        bad "mmo/src/move_port.gen.h is committed beside the fill that writes it"
+    elif python3 "$ROOT/tools/portmoves.py" --header \
+            --out "$tmp/move_port.gen.h" >> "$tmp/hdr.log" 2>&1 \
+            && cmp -s "$tmp/move_port.gen.h" "$ROOT/src/move_port.gen.h"; then
+        ok "the committed move port header is what its tool emits"
+    else
+        bad "the committed move port header is what its tool emits"
+        echo "       regenerate: python3 mmo/tools/portmoves.py --header"
+        tail -2 "$tmp/hdr.log"
+    fi
+else
+    bad "the committed species port header is what the fill tool emits"
+    echo "       regenerate: python3 mmo/tools/portspecies.py --header"
+    tail -2 "$tmp/hdr.log"
+fi
+
 if [ ! -f "$ROOT/TRAINER_GFX" ]; then
     bad "mmo/TRAINER_GFX is committed beside the recipe that reads it"
 elif ! command -v python3 >/dev/null 2>&1; then
@@ -215,6 +446,30 @@ elif python3 "$ROOT/tools/gen_followers.py" --header "$tmp/follower_index.gen.h"
 else
     bad "tools/gen_followers.py --header refused"
     echo "       $(tail -1 "$tmp/folhdr.log")"
+fi
+
+# And the tables a fill needs out of a checkout, which is the half a player's
+# machine cannot do for itself: which source member draws each follower, and
+# the source game's own follow mode and map section per map header. Frozen so
+# the launcher can fill a package from a cartridge alone, and gated here for
+# the same reason as the header above, nothing about a .gen.h says it is old.
+if [ ! -f "$ROOT/src/follower_fill.gen.h" ]; then
+    bad "src/follower_fill.gen.h is committed beside the code that reads it"
+elif ! command -v python3 >/dev/null 2>&1; then
+    echo "  SKIP (no python3 to regenerate the follower fill tables)"
+elif [ -z "$hg4" ] || [ ! -d "$hg4" ]; then
+    echo "  SKIP (no heartgold checkout to regenerate the follower fill tables)"
+elif python3 "$ROOT/tools/portfollow.py" --fill-header "$tmp/follower_fill.gen.h" \
+        --heartgold "$hg4" > "$tmp/folfill_hdr.log" 2>&1; then
+    if cmp -s "$tmp/follower_fill.gen.h" "$ROOT/src/follower_fill.gen.h"; then
+        ok "the committed follower fill tables are what their tree generates"
+    else
+        bad "the committed follower fill tables are what their tree generates"
+        echo "       regenerate: python3 mmo/tools/portfollow.py --fill-header"
+    fi
+else
+    bad "tools/portfollow.py --fill-header refused"
+    echo "       $(tail -1 "$tmp/folfill_hdr.log")"
 fi
 
 # The band has two owners and they have to agree. The porter allocates
@@ -304,6 +559,188 @@ else
         tail -2 "$tmp/folfill.log" | sed 's/^/       /'
     fi
 
+    # The two fills are held together, which is the whole argument for
+    # shipping the launcher's C one: a player has no Python and no checkout, so
+    # followcompose.c fills the same package from the same cartridge, and the
+    # only way that stays true is to fill it both ways and require every byte
+    # to match. Same argument soundtrack_test.sh makes about its own pair.
+    if [ ! -x "$BUILD/openmmo-launch" ]; then
+        echo "  SKIP (no launcher built; make -C mmo launcher)"
+    elif "$BUILD/openmmo-launch" --compose-followers "$SRC4" \
+            "$tmp/cfollowers" > "$tmp/folc.log" 2>&1; then
+        if diff -r "$tmp/followers/.cooked" "$tmp/cfollowers/.cooked" \
+                > "$tmp/foldiff.log" 2>&1 \
+           && cmp -s "$tmp/followers/mod.toml" "$tmp/cfollowers/mod.toml"; then
+            ok "the launcher's fill is the porter's, byte for byte"
+        else
+            bad "the launcher's fill is the porter's, byte for byte"
+            head -3 "$tmp/foldiff.log" | sed 's/^/       /'
+        fi
+    else
+        bad "the launcher's own follower fill runs"
+        tail -2 "$tmp/folc.log" | sed 's/^/       /'
+    fi
+
+    # The BASE is allocated, NOT A constant, and this is the check that a
+    # follower package and a ported region can be loaded together at all. Both
+    # append to data/mmodel/mmodel.narc; pc_modfs claims by absolute index and
+    # refuses both a collision and a gap, so the follower fill has to start one
+    # past whatever else is loaded, and has to go back to the image's own
+    # count when nothing else is. A synthetic sibling claiming 470..658 stands
+    # in for `hgss` here, so the check needs no second cartridge and does not
+    # care whether this machine has a ported region.
+    mkdir -p "$tmp/sib/other/.cooked/narc/data/mmodel/mmodel.narc"
+    i=470
+    while [ "$i" -le 658 ]; do
+        : > "$tmp/sib/other/.cooked/narc/data/mmodel/mmodel.narc/$i"
+        i=$((i + 1))
+    done
+    printf 'id = "other"\n' > "$tmp/sib/other/mod.toml"
+
+    if [ ! -x "$BUILD/openmmo-launch" ]; then
+        echo "  SKIP (no launcher built; make -C mmo launcher)"
+    else
+        got=$("$BUILD/openmmo-launch" --follower-base "$tmp/sib" "other")
+        if [ "$got" = "659 201" ]; then
+            ok "the fill allocates past a package that claims 470..658"
+        else
+            bad "the fill allocates past a package that claims 470..658" \
+                "wanted '659 201', got '$got'"
+        fi
+        got=$("$BUILD/openmmo-launch" --follower-base "$tmp/sib" "nothing")
+        if [ "$got" = "470 201" ]; then
+            ok "and falls back to the image's own count when nothing claims"
+        else
+            bad "and falls back to the image's own count when nothing claims" \
+                "wanted '470 201', got '$got'"
+        fi
+        # The package must not allocate around itself: a refill would walk up
+        # the archive a band at a time and the second one would leave a hole.
+        mkdir -p "$tmp/sib/followers/.cooked/narc/data/mmodel/mmodel.narc"
+        : > "$tmp/sib/followers/.cooked/narc/data/mmodel/mmodel.narc/1037"
+        got=$("$BUILD/openmmo-launch" --follower-base "$tmp/sib" "other,followers")
+        if [ "$got" = "659 201" ]; then
+            ok "and a refill does not allocate around its own last fill"
+        else
+            bad "and a refill does not allocate around its own last fill" \
+                "wanted '659 201', got '$got'"
+        fi
+    fi
+
+    # A REFILL AT A new BASE leaves nothing of the old one. This is the bug the
+    # allocation created and the one that made the moved base a lie: a fill
+    # writes members by index, so a refill at a different base adds a band
+    # rather than replacing one. Measured before the fix: 757 members instead
+    # of 568, the stale 470..658 still claiming the ported region's, and the
+    # stamp saying the collision had been fixed.
+    if [ ! -x "$BUILD/openmmo-launch" ]; then
+        :
+    elif "$BUILD/openmmo-launch" --compose-followers "$SRC4" "$tmp/refill" \
+            470 201 > "$tmp/refill1.log" 2>&1 \
+         && "$BUILD/openmmo-launch" --compose-followers "$SRC4" "$tmp/refill" \
+            659 201 > "$tmp/refill2.log" 2>&1; then
+        d="$tmp/refill/.cooked/narc/data/mmodel/mmodel.narc"
+        n=$(ls "$d" | wc -l)
+        lo=$(ls "$d" | sort -n | head -1)
+        hi=$(ls "$d" | sort -n | tail -1)
+        if [ "$n" = "568" ] && [ "$lo" = "659" ] && [ "$hi" = "1226" ]; then
+            ok "a refill at a new base leaves none of the old one behind"
+        else
+            bad "a refill at a new base leaves none of the old one behind" \
+                "$n members running $lo..$hi, wanted 568 running 659..1226"
+        fi
+        if [ "$(cat "$tmp/refill/composed.txt")" = "v2 566 659 201" ]; then
+            ok "and the stamp names the base it was actually filled at"
+        else
+            bad "and the stamp names the base it was actually filled at" \
+                "$(cat "$tmp/refill/composed.txt")"
+        fi
+    else
+        bad "a package refills over itself"
+        tail -1 "$tmp/refill2.log" | sed 's/^/       /'
+    fi
+
+    # And the two fills still agree AT the moved BASE, which is the half that
+    # says the allocation is the same arithmetic on both sides and not two.
+    if [ ! -x "$BUILD/openmmo-launch" ]; then
+        :
+    elif python3 "$ROOT/tools/portfollow.py" --rom "$SRC4" \
+            --pkg "$tmp/movedpy" --heartgold "$hg4" --after "$tmp/sib/other" \
+            > "$tmp/folmoved.log" 2>&1 \
+         && "$BUILD/openmmo-launch" --compose-followers "$SRC4" \
+            "$tmp/movedc" 659 201 > "$tmp/folmovedc.log" 2>&1; then
+        if diff -r "$tmp/movedpy/.cooked" "$tmp/movedc/.cooked" \
+                > "$tmp/movediff.log" 2>&1; then
+            ok "both fills agree at the moved base, byte for byte"
+        else
+            bad "both fills agree at the moved base, byte for byte"
+            head -3 "$tmp/movediff.log" | sed 's/^/       /'
+        fi
+    else
+        bad "both fills run at a moved base"
+        tail -1 "$tmp/folmoved.log" "$tmp/folmovedc.log" | sed 's/^/       /'
+    fi
+
+    # And it is reached: filled at Play out of the player's own cartridge and
+    # named in the mods list without anybody typing it, which is the half that
+    # makes it a shipped feature rather than a developer's recipe.
+    if grep -Fq 'followcompose.c' "$ROOT/Makefile" \
+       && grep -Fq 'mmo_followcompose_ensure' "$ROOT/launcher/launcher.c" \
+       && grep -Fq '"followers"' "$ROOT/launcher/launch_plan.c"; then
+        ok "the launcher fills and names the package at Play"
+    else
+        bad "the launcher fills and names the package at Play" \
+            "followcompose is not built in, or start_play no longer asks it"
+    fi
+
+    # And the handheld does both too. Linking the filler is not calling it:
+    # the app linked followcompose.c cleanly for a whole afternoon while its
+    # front door composed only the soundtrack, so an RG556 got no follower and
+    # nothing said so. Both halves are named here because either one alone is
+    # the same silence, a fill nobody loads, or a name with nothing behind it.
+    if grep -Fq 'followcompose.c' "$ROOT/Makefile.android" \
+       && grep -Fq 'mmo_followcompose_ensure' \
+                "$ROOT/android/src/mmo_frontdoor_launch.c" \
+       && grep -Fq 'fdl_compose_followers' "$ROOT/android/src/mmo_frontdoor.c" \
+       && grep -Fq '"followers"' "$ROOT/android/src/mmo_frontdoor.c"; then
+        ok "and the handheld's front door fills and names it too"
+    else
+        bad "and the handheld's front door fills and names it too" \
+            "the app links the filler without calling it, or never names the package"
+    fi
+
+    # And a package can be put there AT all, which is a separate claim from
+    # naming one. The app's mods folder used to be created by whichever
+    # composer ran first, through mkdir's 0755, and the device's storage layer
+    # left it group r-x, so `adb push` and every file manager were refused
+    # while the folder sat plainly in `ls`, and a handheld that had pressed
+    # Play once could never be handed a content package. One folder, made at
+    # the door, at the mode the directory above it already has.
+    if grep -Fq 'fd_mods_root' "$ROOT/android/src/mmo_frontdoor.c" \
+       && grep -Eq 'mkdir\(out, 0770\)|chmod\(out, 0770\)' \
+                "$ROOT/android/src/mmo_frontdoor.c"; then
+        ok "and the handheld's packages folder can be written into"
+    else
+        bad "and the handheld's packages folder can be written into" \
+            "the app makes mods/ at a mode nothing but the app can write"
+    fi
+
+    # And a world package can be asked for. `hgss` is left out of the
+    # self-naming list on purpose on both platforms, which region a player
+    # walks into is a choice somebody makes, and the desktop makes it in the
+    # typed `mods` row. The app has no typed row, so the choice had nowhere to
+    # live and a staged `hgss` was read by nothing at all. Both halves again:
+    # a row that stores the answer, and a launch that names the package.
+    if grep -Fq '"World"' "$ROOT/android/src/mmo_frontdoor.c" \
+       && grep -Fq 's->world' "$ROOT/android/src/mmo_frontdoor.c" \
+       && grep -Fq 'hgss/mod.toml' "$ROOT/android/src/mmo_frontdoor.c" \
+       && grep -Fq '"hgss"' "$ROOT/android/src/mmo_frontdoor.c"; then
+        ok "and the handheld can ask for the world package"
+    else
+        bad "and the handheld can ask for the world package" \
+            "the app has no World row, or the row names no package"
+    fi
+
     # Every member the tables name is the cartridge's own bytes, and the shiny
     # sequence is the walk with its palette run rewritten and nothing else.
     if python3 - "$ROOT" "$SRC4" "$tmp/followers" > "$tmp/folback.log" 2>&1 \
@@ -360,8 +797,65 @@ for i in range(half):
     if int(b[0]) - int(a[0]) != half:
         raise SystemExit("the shiny band is not the normal band plus %d" % half)
 
-print("%d members, %d gfx rows, %d carried, sequences %s and %s"
-      % (len(members), len(gfx), len(carried), seq[0][0], seq[1][0]))
+# The talk'S header, and the two tables A FOLLOWER'S rules come out of.
+# The follow mode is HeartGold's own two-bit field carried per source header,
+# so what is checked is that it decodes to the three values that field has and
+# nothing else, a byte outside them would be a header this reader misparsed
+# rather than a map with an opinion we have not seen.
+talk = pkg / ".cooked/narc/openmmo/follow_talk.narc"
+if talk.is_dir():
+    head = (talk / "0").read_bytes()
+    if len(head) < 56:
+        raise SystemExit("the talk header is %d bytes, not 56" % len(head))
+    magic, version = struct.unpack_from("<IH", head, 0)
+    if magic != 0x3154464F:
+        raise SystemExit("the talk header's magic is %08x" % magic)
+    tp_base = struct.unpack_from("<H", head, 34)[0]
+    mode_base = struct.unpack_from("<H", head, 38)[0]
+    ball = struct.unpack_from("<HHH", head, 50)
+    tp = (talk / str(tp_base)).read_bytes()
+    modes = (talk / str(mode_base)).read_bytes()
+
+    # HeartGold's tp_param, four bytes a sprite: byte 1 is the size flag and
+    # byte 2 the walk-dip class, both read by the follower's own step code.
+    if len(tp) != 4 * (len(gfx) // 2):
+        raise SystemExit("%d tp_param bytes for %d sprites"
+                         % (len(tp), len(gfx) // 2))
+    large = sum(1 for i in range(0, len(tp), 4) if tp[i + 1])
+    if large != 31:
+        raise SystemExit("%d large followers by tp_param, and HeartGold has 31"
+                         % large)
+    fx = pkg / ".cooked/narc/data/mmodel/fldeff.narc"
+    for member, magic4 in zip(ball, (b"BMD0", b"BMD0", b"BTA0")):
+        got = (fx / str(member)).read_bytes()[:4]
+        if got != magic4:
+            raise SystemExit("ball effect member %d is %r, not %r"
+                             % (member, got, magic4))
+
+    seen = {}
+    diglett = 0
+    for v in modes:
+        if v == 0xFF:
+            continue
+        if v & 0x04:
+            diglett += 1
+        seen[v & 0x03] = seen.get(v & 0x03, 0) + 1
+    if 3 in seen:
+        raise SystemExit("a follow mode of 3, and the field is two bits of"
+                         " three values")
+    if not (seen.get(0) and seen.get(1) and seen.get(2)):
+        raise SystemExit("the follow modes are %r and all three should occur"
+                         % seen)
+    if diglett != 11:
+        raise SystemExit("%d maps turn a Diglett away and the Bell Tower is 11"
+                         % diglett)
+    print("%d members, %d gfx rows, %d carried, sequences %s and %s;"
+          " talk v%d, %d tp_param bytes (%d large), follow modes %r, %d Bell Tower"
+          % (len(members), len(gfx), len(carried), seq[0][0], seq[1][0],
+             version, len(tp), large, seen, diglett))
+else:
+    print("%d members, %d gfx rows, %d carried, sequences %s and %s"
+          % (len(members), len(gfx), len(carried), seq[0][0], seq[1][0]))
 PY
     then
         ok "every planted member is the cartridge's own bytes ($(cat "$tmp/folback.log"))"
@@ -370,13 +864,18 @@ PY
         tail -2 "$tmp/folback.log" | sed 's/^/       /'
     fi
 
-    # And the whole thing loads. 568 members and 1,132 cooked rows is a bigger
-    # package than anything else in this repo hands the port.
+    # And the whole thing loads. Nearly two thousand members and 1,132 cooked
+    # rows is a bigger package than anything else in this repo hands the port:
+    # 568 of art, and the rest the talk's five tables and its message bank.
+    # The number is counted off the package rather than typed here, because it
+    # moves whenever the fill grows and a stale constant would only ever fail
+    # for the wrong reason.
     if [ ! -x "$FUSED" ] || [ ! -f "$ROM" ] \
             || [ ! -f "$ENGINE/pc/replays/lab-settle.txt" ]; then
         echo "  SKIP (no fused build, Platinum image or settle replay to load it with)"
     else
         printf 'name SHORT\n' > "$tmp/fol.lab"
+        members=$(find "$tmp/followers/.cooked/narc" -type f | wc -l)
         rc=0
         # Two of them, one from each band: a sequence is only built when a row
         # asks for it, so a lone normal follower would leave the shiny one
@@ -391,13 +890,13 @@ PY
         if [ "$rc" -ne 0 ]; then
             bad "the whole filled package loads (exit $rc)"
             tail -2 "$tmp/folboot.log" | sed 's/^/       /'
-        elif grep -q '568 members' "$tmp/folboot.log" \
+        elif grep -q "$members members" "$tmp/folboot.log" \
                 && grep -q 'cooked billboard sequence 64' "$tmp/folboot.log" \
                 && grep -q 'cooked billboard sequence 65' "$tmp/folboot.log"
         then
-            ok "the fused build loads all 568 members and both sequences"
+            ok "the fused build loads all $members members and both sequences"
         else
-            bad "the fused build loads all 568 members and both sequences"
+            bad "the fused build loads all $members members and both sequences"
             grep -h 'modfs:\|cooked billboard' "$tmp/folboot.log" | head -3 \
                 | sed 's/^/       /'
         fi
@@ -446,14 +945,29 @@ else
     # verdict; these are readings, and the client's own table says the same.
     if [ -x "$CLIENT" ]; then
         agree=1
+        why=
         for code in CPUE ADAE IRBO; do
             slot=$("$CLIENT" cartridges "$code" 2>/dev/null | head -1 | cut -d' ' -f2)
-            grep -q "$slot" "$ROOT/CARTRIDGES" || agree=0
+            # An empty slot searched for is `grep -q ""`, which matches any file
+            # there is: a client that printed nothing at all would agree with the
+            # registry about every code. And the slot has to be the one on that
+            # code's row rather than a word occurring somewhere in the file,
+            # `platinum` appears on the Pearl row's prose too.
+            if [ -z "$slot" ]; then
+                agree=0
+                why="$why
+       $code: the client named no slot"
+            elif ! grep -q "^$code  *$slot\([ 	]\|$\)" "$ROOT/CARTRIDGES"; then
+                agree=0
+                why="$why
+       $code: the client says $slot, its registry row does not"
+            fi
         done
         if [ "$agree" = 1 ]; then
             ok "the client and the registry name the same slot for a code"
         else
             bad "the client and the registry name the same slot for a code"
+            printf '%s\n' "$why" | sed '/^$/d'
         fi
     else
         echo "  SKIP (no client binary to compare the registry against)"
@@ -691,7 +1205,7 @@ fi
 # A SECOND GEN 4 CARTRIDGE, whose sheets scramble the other way. Diamond used
 # to be refused on the porter's own warning: same container, same depth, same
 # dimensions, and noise on the screen.
-DIA=${OPENMMO_DIAMOND_ROM:-$REPO/roms/pokediamond.nds}
+DIA=${OPENMMO_DIAMOND_ROM:-$(CDPATH= cd -- "$ROOT/.." && pwd)/roms/pokediamond.nds}
 if [ ! -f "$DIA" ]; then
     echo "  SKIP (no Diamond cartridge at $DIA; set OPENMMO_DIAMOND_ROM)"
 elif porter_missing; then
@@ -733,6 +1247,82 @@ else
     else
         bad "and the palette crossed byte for byte, because it is not scrambled"
     fi
+fi
+
+# --- the four player looks -----------------------------------------------
+echo "the four player looks (portlooks.py against lookcompose.c):"
+if [ ! -f "$SRC4" ]; then
+    echo "  SKIP (no Heart Gold or Soul Silver cartridge at $SRC4; set OPENMMO_GEN4_ROM)"
+elif [ ! -f "$SRC5" ]; then
+    echo "  SKIP (no Gen 5 cartridge at $SRC5; set OPENMMO_GEN5_ROM)"
+elif [ ! -f "$ROM" ]; then
+    echo "  SKIP (no Platinum at $ROM)"
+elif python3 "$ROOT/tools/portlooks.py" --hg "$SRC4" --bw "$SRC5" --pt "$ROM" \
+        --pkg "$tmp/looks" > "$tmp/looks.log" 2>&1; then
+    ok "the porter fills a package ($(sed -n '1s/portlooks: //p' "$tmp/looks.log"))"
+    n=$(find "$tmp/looks/.cooked/narc" -type f | wc -l)
+    if [ "$n" -eq 71 ]; then
+        ok "thirty sheets, four fronts, four backs and the class-name bank: 71 members"
+    else
+        bad "thirty sheets, four fronts, four backs and the class-name bank: 71 members (got $n)"
+    fi
+    if [ "$(wc -l < "$tmp/looks/.cooked/generated/player_looks.txt")" -eq 4 ] \
+       && grep -q '^0 105 11 0 ' "$tmp/looks/.cooked/generated/player_looks.txt" \
+       && grep -q '^3 108 14 -1 ' "$tmp/looks/.cooked/generated/player_looks.txt" \
+       && grep -q '^768 470 -1 -1 0$' "$tmp/looks/.cooked/generated/billboard_gfx.txt" \
+       && grep -q '^816 494 -1 -1 97$' "$tmp/looks/.cooked/generated/billboard_gfx.txt"; then
+        ok "the looks name their classes and backs, and every sheet its Platinum like"
+    else
+        bad "the looks name their classes and backs, and every sheet its Platinum like"
+    fi
+    if [ ! -x "$BUILD/openmmo-launch" ]; then
+        echo "  SKIP (no launcher built; make -C mmo launcher)"
+    elif "$BUILD/openmmo-launch" --compose-looks "$SRC4" "$SRC5" "$ROM" \
+            "$tmp/clooks" > "$tmp/clooks.log" 2>&1; then
+        if diff -r "$tmp/looks/.cooked" "$tmp/clooks/.cooked" > "$tmp/lookdiff.log" 2>&1 \
+           && cmp -s "$tmp/looks/mod.toml" "$tmp/clooks/mod.toml" \
+           && cmp -s "$tmp/looks/composed.txt" "$tmp/clooks/composed.txt"; then
+            ok "the launcher's fill is the porter's, byte for byte"
+        else
+            bad "the launcher's fill is the porter's, byte for byte"
+            head -3 "$tmp/lookdiff.log" | sed 's/^/       /'
+        fi
+        # A refill at other bases leaves nothing of the first: the members are
+        # written by index, so this is what makes a moved base true. The class
+        # base stays at 105 here because the name bank it grows has to be
+        # exactly that long, and only a loaded world package makes it longer.
+        if "$BUILD/openmmo-launch" --compose-looks "$SRC4" "$SRC5" "$ROM" \
+                "$tmp/clooks" 500 105 20 > "$tmp/clooks2.log" 2>&1 \
+           && [ "$(find "$tmp/clooks/.cooked/narc" -type f | wc -l)" -eq 71 ] \
+           && [ -f "$tmp/clooks/.cooked/narc/data/mmodel/mmodel.narc/500" ] \
+           && [ ! -f "$tmp/clooks/.cooked/narc/data/mmodel/mmodel.narc/470" ] \
+           && [ -f "$tmp/clooks/.cooked/narc/poketool/trgra/trbgra.narc/100" ] \
+           && [ ! -f "$tmp/clooks/.cooked/narc/poketool/trgra/trbgra.narc/55" ] \
+           && grep -q '^v1 500 105 20$' "$tmp/clooks/composed.txt"; then
+            ok "a refill at new bases replaces the package rather than adding a band"
+        else
+            bad "a refill at new bases replaces the package rather than adding a band"
+            tail -2 "$tmp/clooks2.log" | sed 's/^/       /'
+        fi
+    else
+        bad "the launcher's own look fill runs"
+        tail -2 "$tmp/clooks.log" | sed 's/^/       /'
+    fi
+    # And the fused client claims the package whole: thirty sheets past the
+    # image's 470, four classes past 105, four backs past 11, one bank.
+    if [ ! -x "$FUSED" ]; then
+        echo "  SKIP (no fused client)"
+    elif env PC_ROM="$ROM" PC_SAVE="$tmp/looks.sav" PC_FRAMES=120 PC_PACE=0 \
+            PC_MODS_DIR="$tmp" PC_MODS=looks "$FUSED" > "$tmp/looksboot.log" 2>&1 \
+         && grep -q 'modfs: 0 files, 71 members, order=\[looks\]' "$tmp/looksboot.log"; then
+        ok "the fused client claims all 71 members with no hole"
+    else
+        bad "the fused client claims all 71 members with no hole"
+        grep -E 'modfs|hole|die' "$tmp/looksboot.log" | head -3 | sed 's/^/       /'
+    fi
+else
+    bad "the porter fills a package"
+    tail -2 "$tmp/looks.log" | sed 's/^/       /'
 fi
 
 # --- the driver's own door ------------------------------------------------
@@ -1255,6 +1845,30 @@ else
     else
         bad "the first two blocks of $GEN5_NARC can be read"
     fi
+fi
+
+# The plugin composes Black's loop live out of the fill's cell and animation
+# banks (mods/openmmo/src/openmmo_blackanim.c); the tool composes the same
+# banks to bake the strip.
+ANIM_NARC="$PKG/narc/poketool/pokegra/mmo_anim.narc"
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "  SKIP (no python3 to diff the compositor)"
+elif [ ! -f "$SRC5" ]; then
+    echo "  SKIP (no Gen 5 cartridge at $SRC5)"
+elif [ ! -s "$ANIM_NARC/2340" ]; then
+    echo "  SKIP (no cell banks in the fill: python3 mmo/tools/portspecies.py --rom <black>)"
+elif ! ${CC:-cc} -O1 -I"$ROOT/mods/openmmo/include" \
+        -o "$tmp/blackanim_harness" "$ROOT/tests/blackanim_harness.c" \
+        "$ROOT/src/blackcompose.c" -lm > "$tmp/harness.log" 2>&1; then
+    bad "tests/blackanim_harness.c builds on the host"
+    tail -3 "$tmp/harness.log"
+elif python3 "$ROOT/tools/blackanim_diff.py" --rom "$SRC5" --engine "$ENGINE" \
+        --harness "$tmp/blackanim_harness" --package "$PKG" \
+        390:front 130:front 387:back > "$tmp/animdiff.log" 2>&1; then
+    ok "the plugin's live compositor draws what the tool's compose() draws"
+else
+    bad "the plugin's live compositor draws what the tool's compose() draws"
+    tail -4 "$tmp/animdiff.log"
 fi
 
 if [ "$fail" -ne 0 ]; then

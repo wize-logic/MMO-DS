@@ -1,0 +1,44 @@
+--- a/src/item.c
++++ b/src/item.c
+@@ -48,6 +48,18 @@
+ 
+ u16 Item_FileID(u16 item, enum ItemFileType type)
+ {
++    /* openmmo: an item a fill appended lives past the end of both archives,
++     * where the package put it (mods/openmmo/src/openmmo_items.c). Without a
++     * fill this answers no and the lookup is the engine's own. */
++    {
++        extern int openmmo_item_archive(unsigned item, int type, unsigned *member);
++        unsigned ported;
++
++        if (type <= ITEM_FILE_TYPE_PALETTE && openmmo_item_archive(item, (int)type, &ported)) {
++            return (u16)ported;
++        }
++    }
++
+     switch (type) {
+     case ITEM_FILE_TYPE_DATA:
+         if (item == ITEM_NONE || item == ITEM_RETURN_ID) {
+@@ -109,6 +121,22 @@
+ 
+ void *Item_Load(u16 item, enum ItemFileType type, enum HeapID heapID)
+ {
++    /* openmmo: the same door, ahead of the clamp, a filled item is read
++     * from the member the package appended, not from ITEM_NONE's. */
++    {
++        extern int openmmo_item_archive(unsigned item, int type, unsigned *member);
++        unsigned ported;
++
++        if (type <= ITEM_FILE_TYPE_PALETTE && openmmo_item_archive(item, (int)type, &ported)) {
++            switch (type) {
++            case ITEM_FILE_TYPE_DATA:
++                return NARC_AllocAndReadWholeMemberByIndexPair(NARC_INDEX_ITEMTOOL__ITEMDATA__PL_ITEM_DATA, ported, heapID);
++            default:
++                return NARC_AllocAndReadWholeMemberByIndexPair(NARC_INDEX_ITEMTOOL__ITEMDATA__ITEM_ICON, ported, heapID);
++            }
++        }
++    }
++
+     if (item > NUM_ITEMS) {
+         item = ITEM_NONE;
+     }

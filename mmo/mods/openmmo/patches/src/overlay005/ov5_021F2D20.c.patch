@@ -1,0 +1,83 @@
+--- a/src/overlay005/ov5_021F2D20.c
++++ b/src/overlay005/ov5_021F2D20.c
+@@ -25,6 +25,12 @@
+     FieldEffectManager *unk_10;
+     UnkStruct_ov5_021F2D20 *unk_14;
+     MapObject *unk_18;
++    /* openmmo: HeartGold's grass effect carries where it stands relative
++     * to its object and the facing it was made with; a large follower
++     * facing sideways rustles the tile behind it too (ov01_021FF0E4). */
++    s16 openmmoDx;
++    s16 openmmoDz;
++    s8 openmmoFacing;
+ } UnkStruct_021F2EA4;
+ 
+ typedef struct {
+@@ -158,6 +164,9 @@
+     v2.fieldSystem = FieldEffectManager_GetFieldSystem(v3);
+     v2.unk_14 = FieldEffectManager_GetRendererContext(v3, 19);
+     v2.unk_18 = param0;
++    v2.openmmoDx = 0;
++    v2.openmmoDz = 0;
++    v2.openmmoFacing = -1;
+ 
+     MapObject_GetPosPtr(param0, &v1);
+ 
+@@ -165,6 +174,36 @@
+     v4 = FieldEffectManager_InitAnimManager(v3, &Unk_ov5_022004EC, &v1, param1, &v2, v0);
+ }
+ 
++/* openmmo: HeartGold's ov01_021FF0E4: the same rustle on a named tile,
++ * remembering where that tile is relative to the object and, when asked,
++ * the facing, so it ends when either changes. */
++void openmmo_grass_rustle_at(MapObject *param0, int x, int z, int keepFacing)
++{
++    int v0;
++    VecFx32 v1;
++    UnkStruct_021F2EA4 v2;
++    FieldEffectManager *v3;
++    OverworldAnimManager *v4;
++
++    v3 = MapObject_GetFieldEffectManager(param0);
++
++    v2.unk_00 = x;
++    v2.unk_04 = MapObject_GetY(param0);
++    v2.unk_08 = z;
++    v2.unk_10 = v3;
++    v2.fieldSystem = FieldEffectManager_GetFieldSystem(v3);
++    v2.unk_14 = FieldEffectManager_GetRendererContext(v3, 19);
++    v2.unk_18 = param0;
++    v2.openmmoDx = (s16)(MapObject_GetX(param0) - x);
++    v2.openmmoDz = (s16)(MapObject_GetZ(param0) - z);
++    v2.openmmoFacing = keepFacing ? (s8)MapObject_GetFacingDir(param0) : -1;
++
++    MapObject_GetPosPtr(param0, &v1);
++
++    v0 = MapObject_CalculateTaskPriority(param0, 2);
++    v4 = FieldEffectManager_InitAnimManager(v3, &Unk_ov5_022004EC, &v1, 0, &v2, v0);
++}
++
+ static int ov5_021F2F0C(OverworldAnimManager *param0, void *param1)
+ {
+     int v0, v1;
+@@ -254,13 +293,18 @@
+         {
+             int v5, v6;
+ 
+-            v5 = MapObject_GetX(v2);
+-            v6 = MapObject_GetZ(v2);
++            v5 = MapObject_GetX(v2) - v1->unk_18.openmmoDx;
++            v6 = MapObject_GetZ(v2) - v1->unk_18.openmmoDz;
+ 
+             if ((v1->unk_18.unk_00 != v5) || (v1->unk_18.unk_08 != v6)) {
+                 FieldEffectManager_FinishAnimManager(param0);
+                 return;
+             }
++
++            if (v1->unk_18.openmmoFacing != -1 && v1->unk_18.openmmoFacing != MapObject_GetFacingDir(v2)) {
++                FieldEffectManager_FinishAnimManager(param0);
++                return;
++            }
+         }
+         break;
+     }

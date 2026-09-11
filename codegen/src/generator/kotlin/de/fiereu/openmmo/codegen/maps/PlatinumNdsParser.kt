@@ -1,5 +1,6 @@
 package de.fiereu.openmmo.codegen.maps
 
+import de.fiereu.openmmo.codegen.story.FlagVarParser
 import java.io.File
 import java.util.Base64
 import kotlinx.serialization.json.Json
@@ -28,6 +29,10 @@ class PlatinumNdsParser(
   // Init script archives by id, for the same reason: 113 headers name the empty one.
   private val initScripts = mutableMapOf<String, InitScripts>()
 
+  // Script archives by id, read for the fights their entries stage. Cached because several
+  // headers share one and because most of them stage nothing at all.
+  private val staticSites = mutableMapOf<String, Map<Int, Pair<Int, Int>>>()
+
   fun parseAll(): ParsedRegion {
     val defines = readTerrainDefines()
     val terrainOffset = defines.getValue("TERRAIN_ATTRIBUTES_OFFSET")
@@ -42,6 +47,11 @@ class PlatinumNdsParser(
 
     val headerIds = readHeaderIds()
     val headerFields = readHeaderFields()
+    val spawns = readSpawnLocations(headerIds)
+    // The engine's own rule (GetMapBlackOutWarpId): entering a row's black-out map sets the
+    // respawn to that row, when the row says it is a warp position.
+    val spawnByHeader =
+        spawns.filter { it.isWarpPos }.associateBy { (it.heal.bank shl 8) or it.heal.map }
     val speciesIds = readEnumTable("species.txt")
     val graphicsIds = readEnumTable("object_events_gfx.txt")
     val movementIds = readEnumTable("movement_types.txt")
@@ -74,23 +84,86 @@ class PlatinumNdsParser(
               matrix = matrices.getValue(fields.getValue("mapMatrixID")),
               events = events.getValue(name),
               tables = tables,
+              spawn = spawnByHeader[id],
           )
         }
 
+    val staged =
+        maps.sumOf { map ->
+          map.visibleNpcs.count { it.script.startsWith(STATIC_MARK) } +
+              map.bgEvents.count { it.script.startsWith(STATIC_MARK) }
+        }
+    val loose = maps.count { it.staticSite.isNotEmpty() }
     println(
         "[maps] ${region.name}: ${maps.size} headers over ${matrices.size} matrices, " +
             "${chunks.size} land data chunks, ${maps.sumOf { it.warps.size }} warps, " +
-            "${maps.sumOf { it.visibleNpcs.size }} objects")
+            "${maps.sumOf { it.visibleNpcs.size }} objects, $staged staged fight(s) " +
+            "and $loose on a map rather than on a person")
     return ParsedRegion(
         maps = maps,
         terrainChunks = chunks.values.sortedBy { it.name },
         terrainMatrices = matrices.values.sortedBy { it.name },
         tileBehaviors = behaviors,
         terrainPackage = "$GENERATED_PACKAGE.${region.name}.terrain",
+        spawnLocations = spawns,
+        spawnPackage = "$GENERATED_PACKAGE.${region.name}",
+        dailyEncounters = readDailyEncounters(headerIds, speciesIds),
+        dailyPackage = "$GENERATED_PACKAGE.${region.name}",
     )
   }
 
   // ---------------------------------------------------------------- sources
+
+  /**
+   * `src/spawn_locations.c`'s `sSpawnLocations[]`, one row per Pokemon Center (and the player's
+   * house, Pal Park and the League's two), in the engine's 1-based order: `Location_InitBlackOut`
+   * indexes it with the save's `blackOutWarpId`, and `GetMapBlackOutWarpId` sets that id on entry
+   * to a row's map.
+   */
+  private fun readSpawnLocations(headerIds: Map<String, Int>): List<ParsedSpawnLocation> {
+    val file = File(rootDir, "src/spawn_locations.c")
+    require(file.exists()) { "${file.path} is missing; the respawn table comes out of it" }
+    val row =
+        Regex(
+            """\{\s*(MAP_HEADER_\w+),\s*(\w+),\s*(\w+),\s*(MAP_HEADER_\w+),\s*(\w+),\s*(\w+),""" +
+                """\s*(\w+),\s*(\w+),\s*(\w+)\s*\}""")
+    fun num(s: String): Int =
+        if (s.startsWith("0x", ignoreCase = true)) s.substring(2).toInt(16) else s.toInt()
+    val rows =
+        row.findAll(file.readText()).mapIndexed { index, m ->
+          val (healName, x, z, flyName, flyX, flyZ, isWarpPos) = m.destructured
+          val healHeader =
+              headerIds[healName] ?: error("$healName in ${file.path} is not a map header")
+          val flyHeader =
+              headerIds[flyName] ?: error("$flyName in ${file.path} is not a map header")
+          // The row's gate. The table names it `FIRST_ARRIVAL_X`; the flag it is checked against is
+          // `FLAG_FIRST_ARRIVAL_X` in the same dump every other flag id here comes from
+          // (`SystemFlag_HandleFirstArrivalToZone` adds the base for the same answer).
+          val arrivalName = m.groupValues[9]
+          val flagName = "FLAG_$arrivalName"
+          val flagId =
+              firstArrivalFlagIds[flagName]
+                  ?: error("$flagName, named by $arrivalName in ${file.path}, is not a known flag")
+          ParsedSpawnLocation(
+              id = index + 1,
+              heal =
+                  ParsedHealLocation(
+                      healLocationId = healName,
+                      region = region.regionId,
+                      bank = healHeader shr 8,
+                      map = healHeader and 0xFF,
+                      x = num(x),
+                      y = num(z)),
+              flyHeader = flyHeader,
+              flyX = num(flyX),
+              flyZ = num(flyZ),
+              isWarpPos = num(isWarpPos) != 0,
+              firstArrivalFlagId = flagId)
+        }
+    val parsed = rows.toList()
+    require(parsed.isNotEmpty()) { "${file.path} holds no spawn rows this reader recognises" }
+    return parsed
+  }
 
   private fun readTerrainDefines(): Map<String, Int> {
     val file = File(rootDir, "include/constants/field/map.h")
@@ -116,6 +189,14 @@ class PlatinumNdsParser(
   }
 
   private fun readHeaderIds(): Map<String, Int> = PlatinumHeaders.ids(rootDir)
+
+  /**
+   * Every flag id in the decomp's own enum dump, read once. The spawn table is the only thing here
+   * that needs one, and it needs twenty of them.
+   */
+  private val firstArrivalFlagIds: Map<String, Int> by lazy {
+    FlagVarParser.ndsFlags(rootDir).associate { it.name to it.numericId }
+  }
 
   private fun readHeaderFields(): Map<String, Map<String, String>> = PlatinumHeaders.fields(rootDir)
 
@@ -302,6 +383,76 @@ class PlatinumNdsParser(
   private fun scriptId(token: String, file: File): String = constant(token, file).toString()
 
   /**
+   * The fights a map's own scripts stage, by the script entry that reaches one: `entry index ->
+   * (national dex id, level)`.
+   */
+  private fun readStaticSites(
+      fields: Map<String, String>,
+      speciesIds: Map<String, Int>,
+  ): Map<Int, Pair<Int, Int>> {
+    val archive = fields["scriptsArchiveID"] ?: return emptyMap()
+    return staticSites.getOrPut(archive) {
+      val file = File(fieldDir, "scripts/$archive.s")
+      if (!file.exists()) return@getOrPut emptyMap()
+      val text = file.readText()
+      if (!STATIC_BATTLE.containsMatchIn(text)) return@getOrPut emptyMap()
+
+      val entries = SCRIPT_ENTRY.findAll(text).map { it.groupValues[1] }.toList()
+      val labels = SCRIPT_LABEL.findAll(text).associate { it.groupValues[1] to it.range.first }
+      val ordered = labels.entries.sortedBy { it.value }
+      val bodies =
+          ordered.withIndex().associate { (index, entry) ->
+            val end = ordered.getOrNull(index + 1)?.value ?: text.length
+            entry.key to text.substring(entry.value, end)
+          }
+
+      fun walk(label: String, seen: MutableSet<String>): Set<Pair<Int, Int>> {
+        if (!seen.add(label)) return emptySet()
+        val body = bodies[label] ?: return emptySet()
+        val here =
+            STATIC_BATTLE.findAll(body)
+                .map { match ->
+                  val species = match.groupValues[1]
+                  val dexId =
+                      requireNotNull(speciesIds[species]) {
+                        "${file.path} stages a fight against $species, which is not in " +
+                            "generated/species.txt"
+                      }
+                  dexId to constant(match.groupValues[2], file)
+                }
+                .toSet()
+        return here + SCRIPT_JUMP.findAll(body).flatMap { walk(it.groupValues[1], seen) }
+      }
+
+      val byEntry =
+          entries
+              .withIndex()
+              .mapNotNull { (index, label) ->
+                val reached = walk(label, mutableSetOf())
+                require(reached.size <= 1) {
+                  "${file.path}'s entry $label reaches ${reached.size} different fights " +
+                      "($reached); nothing here can say which one the press deals"
+                }
+                reached.singleOrNull()?.let { (index + 1) to it }
+              }
+              .toMap()
+
+      // A fight in the file that no entry reaches is a jump form this walk does not follow, and a
+      // silently unmarked site would be a fight the client computed on its own. Say so instead.
+      val staged = STATIC_BATTLE.findAll(text).map { it.groupValues[1] }.toSet()
+      val marked = byEntry.values.map { it.first }.toSet()
+      require(staged.size == marked.size) {
+        "${file.path} stages ${staged.size} fight(s) ($staged) but only ${marked.size} of them is " +
+            "reachable from a script entry; the walk is missing a jump"
+      }
+      byEntry
+    }
+  }
+
+  /** The mark a site's script carries here, in place of the script id nothing looks up for it. */
+  private fun staticMark(site: Pair<Int, Int>): String = "$STATIC_MARK${site.first}:${site.second}"
+
+  /**
    * A decimal or hex literal, or one of the few named constants the tables use. An unknown name
    * stops the build rather than becoming a zero that quietly matches a fresh save.
    */
@@ -365,10 +516,22 @@ class PlatinumNdsParser(
       matrix: ParsedTerrainMatrix,
       events: JsonObject,
       tables: Tables,
+      spawn: ParsedSpawnLocation?,
   ): ParsedMap {
     val mapType = fields["mapType"] ?: "MAP_TYPE_NONE"
     val archive = readEncounterArchive(fields)
     val init = readInitScripts(fields)
+    val sites = readStaticSites(fields, tables.speciesIds)
+    val npcs =
+        readNpcs(
+            events,
+            tables.graphicsIds,
+            tables.movementIds,
+            tables.trainerTypes,
+            tables.trainerIds,
+            sites,
+        )
+    val bgEvents = readBgEvents(events, sites)
     return ParsedMap(
         regionName = region.name,
         sourceName = name.removePrefix("MAP_HEADER_").lowercase(),
@@ -392,24 +555,42 @@ class PlatinumNdsParser(
         lighting = "Lighting.REGULAR",
         weather = weatherRef(fields["weather"]),
         mapType = PLATINUM_MAP_TYPES[mapType] ?: "MapType.UNKNOWN_0x00",
+        flyAllowed = fields["isFlyAllowed"] == "TRUE",
         encounterType = "EncounterType.RANDOM",
         connections = emptyList(),
         warps = readWarps(events, tables.headerIds, tables.eventsByHeader),
-        visibleNpcs =
-            readNpcs(
-                events,
-                tables.graphicsIds,
-                tables.movementIds,
-                tables.trainerTypes,
-                tables.trainerIds,
-            ),
-        bgEvents = readBgEvents(events),
+        visibleNpcs = npcs,
+        bgEvents = bgEvents,
         onTransitionScript = init.onTransition,
-        healLocation = null,
+        // Platinum keeps no `setrespawn`: the respawn is a table row keyed by the map whose entry
+        // sets it, and every Sinnoh map read null here, so a white out went to Twinleaf for the
+        // whole run and an honest one was refused as an impossible position.
+        healLocation = spawn?.heal,
         onFrameScripts = init.onFrame,
         coordScripts = readCoordScripts(events),
         terrainRef = "$GENERATED_PACKAGE.${region.name}.terrain.${matrix.name.uppercase()}",
+        staticSite = looseSite(name, sites, npcs, bgEvents),
     )
+  }
+
+  /**
+   * The fight a map's scripts stage that nobody on the map carries, or "" when every one of them is
+   * on a person or a sign.
+   */
+  private fun looseSite(
+      name: String,
+      sites: Map<Int, Pair<Int, Int>>,
+      npcs: List<ParsedNpc>,
+      bgEvents: List<ParsedBgEvent>,
+  ): String {
+    if (sites.isEmpty()) return ""
+    val carried = (npcs.map { it.script } + bgEvents.map { it.script }).toSet()
+    val loose = sites.values.map(::staticMark).toSet() - carried
+    require(loose.size <= 1) {
+      "$name stages $loose, none of which is on a person or a sign; nothing here can say which " +
+          "one a press that resolves to no one deals"
+    }
+    return loose.firstOrNull() ?: ""
   }
 
   private fun weatherRef(weather: String?): String {
@@ -455,6 +636,7 @@ class PlatinumNdsParser(
       movementIds: Map<String, Int>,
       trainerTypes: Map<String, Int>,
       trainerIds: Map<String, Int>,
+      sites: Map<Int, Pair<Int, Int>>,
   ): List<ParsedNpc> =
       events["object_events"]?.jsonArray.orEmpty().mapIndexed { index, element ->
         val obj = element.jsonObject
@@ -482,7 +664,14 @@ class PlatinumNdsParser(
             facing =
                 FACING_BY_DIR[obj["initial_dir"]?.jsonPrimitive?.intOrNull ?: 0]
                     ?: "Direction.DOWN",
-            script = obj["script"]?.jsonPrimitive?.intOrNull?.toString() ?: "0",
+            // A person whose own script stages a wild fight carries the fight in place of the
+            // script id, because that fight is the server's to deal and nothing here looks the
+            // script up for one: the client plays the scene on its own engine and asks across
+            // at the command that would have computed the battle.
+            script =
+                obj["script"]?.jsonPrimitive?.intOrNull?.let { id ->
+                  sites[id]?.let(::staticMark) ?: id.toString()
+                } ?: "0",
             hideFlag = if (hidden.toIntOrNull() != null) "" else "${region.name}/$hidden",
             rawMovementId = movementIds[movement] ?: 0,
             sightRange = obj["data"]?.jsonArray?.firstOrNull()?.jsonPrimitive?.intOrNull ?: 0,
@@ -490,14 +679,25 @@ class PlatinumNdsParser(
         )
       }
 
-  private fun readBgEvents(events: JsonObject): List<ParsedBgEvent> =
+  /**
+   * A map's signs and its interactable scenery. Three of this game's staged fights are one of these
+   * rather than a person, the orbs on the Spear Pillar, the Old Chateau's television, the Hallowed
+   * Tower, so a bg event carries the same mark a person does.
+   */
+  private fun readBgEvents(
+      events: JsonObject,
+      sites: Map<Int, Pair<Int, Int>>,
+  ): List<ParsedBgEvent> =
       events["bg_events"]?.jsonArray.orEmpty().map { element ->
         val obj = element.jsonObject
         ParsedBgEvent(
             x = obj.getValue("x").jsonPrimitive.int,
             y = obj.getValue("z").jsonPrimitive.int,
             facingDir = obj["player_facing_dir"]?.jsonPrimitive?.contentOrNull ?: "",
-            script = obj["script"]?.jsonPrimitive?.intOrNull?.toString() ?: "0",
+            script =
+                obj["script"]?.jsonPrimitive?.intOrNull?.let { id ->
+                  sites[id]?.let(::staticMark) ?: id.toString()
+                } ?: "0",
         )
       }
 
@@ -519,11 +719,7 @@ class PlatinumNdsParser(
 
   // ------------------------------------------------------------ encounters
 
-  /**
-   * The map's encounter archive, or null where it has none or holds no fixed tables. The Great
-   * Marsh and the Trophy Garden rotate their tables daily and store them in a shape of their own;
-   * nothing here invents a fixed table for them.
-   */
+  /** The map's encounter archive, or null where it has none or holds no fixed tables. */
   private fun readEncounterArchive(fields: Map<String, String>): JsonObject? {
     val archive = fields["wildEncountersArchiveID"] ?: return null
     return archives.getOrPut(archive) {
@@ -537,6 +733,81 @@ class PlatinumNdsParser(
         null
       }
     }
+  }
+
+  /**
+   * The extra archive's members 8, 9 and 10, which belong to no map: the Trophy Garden's sixteen
+   * and the Great Marsh's two lists of thirty-two.
+   */
+  private fun readDailyEncounters(
+      headerIds: Map<String, Int>,
+      speciesIds: Map<String, Int>,
+  ): ParsedDailyEncounters {
+    fun archive(name: String): Pair<File, JsonObject> {
+      val file = File(fieldDir, "encounters/$name.json")
+      require(file.exists()) { "${file.path} is missing; the daily pairs come out of it" }
+      return file to json.parseToJsonElement(file.readText()).jsonObject
+    }
+    fun species(file: File, obj: JsonObject, key: String): List<Int> {
+      val names = obj[key]?.jsonArray ?: error("${file.path} no longer carries \"$key\"")
+      return names.map { element ->
+        val name = element.jsonPrimitive.contentOrNull
+        speciesIds[name] ?: error("unknown species $name in ${file.path}")
+      }
+    }
+    fun header(name: String): Int =
+        headerIds[name] ?: error("$name is no longer a map header; the daily pairs are keyed by it")
+
+    val (marshFile, marsh) = archive(MARSH_LOOKOUT_ARCHIVE)
+    val (trophyFile, trophy) = archive(TROPHY_GARDEN_ARCHIVE)
+    val nationalDex = species(marshFile, marsh, "after_national_dex")
+    val local = species(marshFile, marsh, "before_national_dex")
+    val trophyMons = species(trophyFile, trophy, "daily_encounters")
+
+    val (bits, mask) = marshIndexCut()
+    require(nationalDex.size == mask + 1 && local.size == mask + 1) {
+      "the marsh cuts a ${mask + 1} entry index out of the day's roll, and ${marshFile.path} " +
+          "holds ${nationalDex.size} and ${local.size}"
+    }
+    val areas = MARSH_AREA_HEADERS.map(::header)
+    require(bits * areas.size <= Int.SIZE_BITS) {
+      "${areas.size} areas of $bits bits do not fit in the day's roll"
+    }
+    require(trophyMons.size == trophyGardenSlots()) {
+      "${trophyFile.path} holds ${trophyMons.size} daily species for ${trophyGardenSlots()} slots"
+    }
+    return ParsedDailyEncounters(
+        marshNationalDex = nationalDex,
+        marshLocal = local,
+        marshAreaHeaders = areas,
+        marshAreaBits = bits,
+        trophyGardenMons = trophyMons,
+        trophyGardenHeader = header(TROPHY_GARDEN_HEADER),
+        regionId = region.regionId,
+    )
+  }
+
+  /** How `ReplaceGreatMarshDailyEncounters` cuts an area's index out of the day's roll. */
+  private fun marshIndexCut(): Pair<Int, Int> {
+    val file = File(rootDir, "src/overlay006/great_marsh_daily_encounters.c")
+    require(file.exists()) { "${file.path} is missing; the marsh index is cut there" }
+    val cut =
+        Regex("""dailyMon >> \((\d+) \* areaNum\)\) & (0x[0-9a-fA-F]+)""").find(file.readText())
+            ?: error("${file.path} no longer cuts the marsh index out of the day's roll")
+    return cut.groupValues[1].toInt() to cut.groupValues[2].substring(2).toInt(16)
+  }
+
+  /** `NUM_TROPHY_GARDEN_SPECIAL_MONS`, which is how many the day's pair is drawn from. */
+  private fun trophyGardenSlots(): Int {
+    val file = File(rootDir, "include/special_encounter.h")
+    require(file.exists()) {
+      "${file.path} is missing; the Trophy Garden's count is declared there"
+    }
+    return Regex("""#define NUM_TROPHY_GARDEN_SPECIAL_MONS\s+(\d+)""")
+        .find(file.readText())
+        ?.groupValues
+        ?.get(1)
+        ?.toInt() ?: error("${file.path} no longer declares NUM_TROPHY_GARDEN_SPECIAL_MONS")
   }
 
   private fun readEncounters(
@@ -642,6 +913,15 @@ class PlatinumNdsParser(
 
   companion object {
     private const val GENERATED_PACKAGE = "de.fiereu.openmmo.maps.generated"
+
+    /** The two sources the extra encounter archive's daily members are built from. */
+    private const val MARSH_LOOKOUT_ARCHIVE = "encounters_great_marsh_lookout"
+    private const val TROPHY_GARDEN_ARCHIVE = "encounters_trophy_garden"
+
+    /** The marsh areas in the order `GreatMarsh_GetAreaNumFromMapId` numbers them. */
+    private val MARSH_AREA_HEADERS = (1..6).map { "MAP_HEADER_GREAT_MARSH_$it" }
+
+    private const val TROPHY_GARDEN_HEADER = "MAP_HEADER_TROPHY_GARDEN"
     private const val EMPTY_CELL = "MAP_NONE"
 
     /** Where Weather's gen 4 block starts; platinum's own ids run from there. */
@@ -655,6 +935,25 @@ class PlatinumNdsParser(
     private val FRAME_ROW =
         Regex(
             """^\s*InitScriptGoToIfEqual\s+(\w+)\s*,\s*(\w+)\s*,\s*(\w+)""", RegexOption.MULTILINE)
+
+    /** The mark a static site's script carries, the same one the ported regions use. */
+    const val STATIC_MARK = "static:"
+
+    /** The four commands that stage a wild fight from a script, and their species and level. */
+    private val STATIC_BATTLE =
+        Regex(
+            """Start(?:LegendaryBattle|WildBattle|GiratinaOriginBattle|FatefulEncounter)""" +
+                """\s+(\w+)\s*,\s*(\w+)""")
+
+    /** A script archive's entry table, in the order an event's script id numbers it from one. */
+    private val SCRIPT_ENTRY = Regex("""^\s*ScriptEntry\s+(\w+)\s*$""", RegexOption.MULTILINE)
+
+    /** A label in a script archive, which is where a body starts. */
+    private val SCRIPT_LABEL = Regex("""^(\w+):\s*$""", RegexOption.MULTILINE)
+
+    /** A jump within one archive. Every form of it puts the target last. */
+    private val SCRIPT_JUMP =
+        Regex("""^\s*(?:GoTo|Call)(?:If\w+)?\s+[^\n]*?(\w+)\s*$""", RegexOption.MULTILINE)
 
     private val TERRAIN_DEFINES =
         listOf(
@@ -777,6 +1076,16 @@ class PlatinumNdsParser(
             "TILE_BEHAVIOR_JUMP_WEST" to "JUMP_WEST",
             "TILE_BEHAVIOR_JUMP_NORTH" to "JUMP_NORTH",
             "TILE_BEHAVIOR_JUMP_SOUTH" to "JUMP_SOUTH",
+            // The Distortion World's wide gaps, which are three tiles across rather than two.
+            "TILE_BEHAVIOR_JUMP_NORTH_TWICE" to "JUMP_NORTH_TWICE",
+            "TILE_BEHAVIOR_JUMP_SOUTH_TWICE" to "JUMP_SOUTH_TWICE",
+            "TILE_BEHAVIOR_JUMP_WEST_TWICE" to "JUMP_WEST_TWICE",
+            "TILE_BEHAVIOR_JUMP_EAST_TWICE" to "JUMP_EAST_TWICE",
+            // A bike ramp. `PlayerAvatar_WillHitBikeRamp` returns the ramp collision for the tile
+            // ahead whatever its collision bit says, so a rider gets onto a tile the terrain calls
+            // impassable; on foot no set-movement function reads that bit and it stays a wall.
+            "TILE_BEHAVIOR_BIKE_RAMP_EASTWARD" to "BIKE_RAMP_EAST",
+            "TILE_BEHAVIOR_BIKE_RAMP_WESTWARD" to "BIKE_RAMP_WEST",
             "TILE_BEHAVIOR_DOOR" to "DOOR",
             "TILE_BEHAVIOR_WARP_ENTRANCE_EAST" to "NON_ANIMATED_DOOR",
             "TILE_BEHAVIOR_WARP_ENTRANCE_WEST" to "NON_ANIMATED_DOOR",
@@ -797,6 +1106,10 @@ class PlatinumNdsParser(
             "TILE_BEHAVIOR_WATERFALL" to "WATERFALL",
             "TILE_BEHAVIOR_ROCK_CLIMB_N_S" to "ROCK_CLIMB_NORTH_SOUTH",
             "TILE_BEHAVIOR_ROCK_CLIMB_E_W" to "ROCK_CLIMB_EAST_WEST",
+            // The counter a clerk stands behind: the engine looks one tile past it for the person
+            // (unk_0203C954.c, TileBehavior_IsTable), and so does InteractionService now. The
+            // same number in HeartGold's table (0x80, unnamed there), so a ported counter is one.
+            "TILE_BEHAVIOR_TABLE" to "COUNTER",
         )
   }
 }

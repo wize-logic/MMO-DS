@@ -1,19 +1,24 @@
 /* Four real players in one Super Contest. */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "constants/heap.h"
 #include "contest.h"
 #include "field/field_system.h"
+#include "field_script_context.h"
 #include "field_system.h"
+#include "generated/vars_flags.h"
 #include "heap.h"
 #include "save_player.h"
 #include "savedata.h"
+#include "script_manager.h"
 #include "trainer_info.h"
 
 #include "../../../include/charcode.h"
 #include "../../../include/client.h"
+#include "../../../include/endpoint.h"
 
 /* The engine's own delivery into the command table
  * registered for whatever scene is up. */
@@ -24,6 +29,15 @@ extern int CommCmd_PacketSizeOf(int cmd);
  * save, this player's own TrainerInfo, which the engine asks for by net id
  * like any other seat's. */
 extern FieldSystem *pc_lab_field_system(void);
+
+/*
+ * HEAP_ID_COMMUNICATION, which the radio would have made and nothing here
+ * does.
+ */
+extern int openmmo_comm_heap_take(u32 size);
+extern void openmmo_comm_heap_put(void);
+
+#define CONTEST_COMM_HEAP 0x7080
 
 #define PACKET_SIZE_VARIABLE (-1)
 
@@ -54,13 +68,31 @@ static int s_asked;                 /* the queue request is out, seat not yet in
 static int s_table_up;
 static int s_asked_frames;          /* frames the lobby's script has been waiting */
 
+/* OPENMMO_CONTEST_TRACE=1: one line per command out, per command in and per
+ * barrier. A contest that stops has nothing to say for itself otherwise, both
+ * seats simply sit there, and which command was last exchanged is the whole
+ * answer. Off by default; a running contest sends a few hundred of these. */
+static int trace_on(void)
+{
+    static int on = -1;
+
+    if (on < 0) {
+        const char *v = openmmo_dev_env("OPENMMO_CONTEST_TRACE");
+        on = (v != NULL && v[0] != '\0' && v[0] != '0');
+    }
+    return on;
+}
+
+/* Below, beside the rest of the receiving half; declared here because a send
+ * feeds itself back through it. */
+static void contest_queue(int from, const u8 *frame, int len);
+
 /* How long the door waits before giving up on the queue. */
 #define CONTEST_ASK_FRAMES 3600
 
-/* The barrier. `s_sync_seen[i]` is the last number seat i announced, and -1
- * before it has announced anything. A barrier is passed when every seat that is
- * still here is sitting on the same number. */
-static int s_sync_seen[MMO_CONTEST_SEATS];
+/* The barriers: one marker per seat per sync number, and the released number. */
+static u8 s_sync_bits[MMO_CONTEST_SEATS][32];
+static int s_sync_state = -1;
 
 /* A TrainerInfo per seat, answered to CommInfo_TrainerInfo. */
 static TrainerInfo *s_peer_info[MMO_CONTEST_SEATS];
@@ -143,20 +175,62 @@ int openmmo_contest_send(int cmd, const void *data, int size)
     frame[0] = (u8)cmd;
     if (size > 0 && data != NULL)
         memcpy(frame + 1, data, (size_t)size);
-    /* No loopback: every handler in the contest's table writes into the slot
-     * of the seat that sent, and the engine has already filled its own. */
     if (openmmo_client_contest_send(s_client, MMO_CONTEST_KIND_DATA, frame,
-                                    size + 1) != 0)
+                                    size + 1) != 0) {
+        printf("openmmo: contest, command %d (%d bytes) would not send\n",
+               cmd, size);
         return 0;
+    }
+    if (trace_on())
+        printf("openmmo: contest trace, out cmd %d, %d byte(s)\n", cmd, size);
+    /*
+     * And back to ourselves, because a console hears its own broadcast and the handlers count
+     * on it, see the head of this file.
+     */
+    contest_queue(s_seat, frame, size + 1);
     return 1;
 }
 
 /* ---- the barrier --------------------------------------------------------- */
 
-static void sync_note(int seat, int no)
+static void sync_mark(int seat, int no)
 {
     if (seat >= 0 && seat < MMO_CONTEST_SEATS)
-        s_sync_seen[seat] = no;
+        s_sync_bits[seat][(no & 0xFF) >> 3] |= (u8)(1u << (no & 7));
+}
+
+static int sync_marked(int seat, int no)
+{
+    if (seat < 0 || seat >= MMO_CONTEST_SEATS)
+        return 0;
+    return (s_sync_bits[seat][(no & 0xFF) >> 3] >> (no & 7)) & 1;
+}
+
+/* Released once every seat still here has announced this number. A seat that
+ * left is one the engine has already been told to stop waiting for. */
+static void sync_release(int no)
+{
+    int i;
+
+    for (i = 0; i < s_humans; i++) {
+        if (s_gone[i])
+            continue;
+        if (!sync_marked(i, no))
+            return;
+    }
+    s_sync_state = no & 0xFF;
+}
+
+/* Every barrier this client has armed, re-run. Called when a seat goes away,
+ * because the one it was the last holdout for releases now or never; ascending,
+ * so what is left standing is the highest number that has come through. */
+static void sync_release_all(void)
+{
+    int i;
+
+    for (i = 0; i < 256; i++)
+        if (sync_marked(s_seat, i))
+            sync_release(i);
 }
 
 /* 1 when this barrier is ours, so the engine's own CommTiming stays out of it:
@@ -169,29 +243,24 @@ int openmmo_contest_sync_start(int syncNo)
     if (!s_pipe)
         return 0;
     s_table_up = 1;
-    sync_note(s_seat, syncNo);
+    if (trace_on())
+        printf("openmmo: contest trace, barrier %d armed\n", syncNo);
+    sync_mark(s_seat, syncNo);
     tag = (u8)syncNo;
     if (s_client != NULL)
         openmmo_client_contest_send(s_client, MMO_CONTEST_KIND_SYNC, &tag, 1);
+    /* The others may already be sitting on this one, in which case the barrier
+     * is passed the moment it is armed. */
+    sync_release(syncNo);
     return 1;
 }
 
-/* 1 / 0 when this barrier is ours, -1 when it is not. Every seat still here has
- * to be sitting on the same number; a seat that left is one the engine has
- * already been told to stop waiting for. */
+/* 1 / 0 when this barrier is ours, -1 when it is not. */
 int openmmo_contest_sync_state(int syncState)
 {
-    int i;
-
     if (!s_pipe)
         return -1;
-    for (i = 0; i < s_humans; i++) {
-        if (s_gone[i])
-            continue;
-        if (s_sync_seen[i] != syncState)
-            return 0;
-    }
-    return 1;
+    return s_sync_state == (syncState & 0xFF) ? 1 : 0;
 }
 
 /* ---- who the others are -------------------------------------------------- */
@@ -249,8 +318,6 @@ static void peer_seat(int seat, const openmmo_contest *ct)
 
 void openmmo_contest_link_reset(void)
 {
-    int i;
-
     peers_free();
     memset(s_q, 0, sizeof s_q);
     s_q_head = 0;
@@ -263,8 +330,8 @@ void openmmo_contest_link_reset(void)
     s_seat = 0;
     s_humans = 0;
     memset(s_gone, 0, sizeof s_gone);
-    for (i = 0; i < MMO_CONTEST_SEATS; i++)
-        s_sync_seen[i] = -1;
+    memset(s_sync_bits, 0, sizeof s_sync_bits);
+    s_sync_state = -1;
 }
 
 /* The server seated this client. Everything below the pipe is the engine's from
@@ -283,6 +350,9 @@ int openmmo_contest_link_open(void)
     if (s_pipe)
         return 1;
 
+    if (!openmmo_comm_heap_take(CONTEST_COMM_HEAP))
+        return 0;
+
     openmmo_contest_link_reset();
     s_seat = ct->seat;
     s_humans = ct->humans;
@@ -300,7 +370,14 @@ void openmmo_contest_link_close(void)
     if (!s_pipe)
         return;
     printf("openmmo: link contest down (%d command(s) dropped)\n", s_q_dropped);
+    /* Say so, rather than letting the session carry the seat. Nothing else
+     * does: the connection outlives the contest, so a server told nothing holds
+     * this seat until the player logs out, and the seats that did report are
+     * waiting on it before the result can be taken. */
+    if (s_client != NULL)
+        openmmo_client_contest_leave(s_client);
     openmmo_contest_link_reset();
+    openmmo_comm_heap_put();
 }
 
 /*
@@ -375,12 +452,16 @@ void openmmo_contest_link_pump(void)
             contest_queue(msg.seat, msg.data, msg.len);
             break;
         case MMO_CONTEST_KIND_SYNC:
-            if (msg.len >= 1)
-                sync_note(msg.seat, msg.data[0]);
+            if (msg.len >= 1) {
+                sync_mark(msg.seat, msg.data[0]);
+                sync_release(msg.data[0]);
+            }
             break;
         case MMO_CONTEST_KIND_LEAVE:
-            if (msg.seat >= 0 && msg.seat < MMO_CONTEST_SEATS)
+            if (msg.seat >= 0 && msg.seat < MMO_CONTEST_SEATS) {
                 s_gone[msg.seat] = 1;
+                sync_release_all();
+            }
             printf("openmmo: contest, seat %d left\n", msg.seat);
             break;
         default:
@@ -402,6 +483,9 @@ void openmmo_contest_link_pump(void)
 
         s_q_head = (s_q_head + 1) % CONTEST_Q;
         s_q_count--;
+        if (trace_on())
+            printf("openmmo: contest trace, in cmd %d from seat %d, %d"
+                   " byte(s)\n", m.cmd, m.from, m.len);
         CommCmd_Callback(m.from, m.cmd, m.len, m.data);
         if (!s_pipe)
             return; /* a handler tore the contest down under us */
@@ -412,8 +496,8 @@ void openmmo_contest_link_pump(void)
 
 /* The engine's own comm-club return codes, which the lobby's script branches
  * on: 0 keeps waiting, 1 is the player backing out, 2 is a group, 3 is an
- * error. Restated rather than included because generated/comm_club_ret_codes.h
- * is a ROM-build header this file has no other reason to pull in. */
+ * error. Restated rather than pulling generated/comm_club_ret_codes.h in for
+ * four names. */
 #define CONTEST_CLUB_WAIT   0
 #define CONTEST_CLUB_CANCEL 1
 #define CONTEST_CLUB_OK     2
@@ -422,8 +506,8 @@ void openmmo_contest_link_pump(void)
 /* COMM_TYPE_CONTEST. */
 #define CONTEST_COMM_TYPE 8
 
-int openmmo_contest_club_start(int commType, int contestType, int contestRank,
-                               int partySlot)
+static int openmmo_contest_club_start(int commType, int contestType,
+                                      int contestRank, int partySlot)
 {
     if (commType != CONTEST_COMM_TYPE)
         return 0;   /* not a contest: the engine's own comm club has it */
@@ -446,7 +530,7 @@ int openmmo_contest_club_start(int commType, int contestType, int contestRank,
 /* Polled every frame while the lobby's script waits. The pipe comes up the
  * moment a seat arrives, so the script's own branch is what starts the contest
  * from there. */
-int openmmo_contest_club_result(void)
+static int openmmo_contest_club_result(void)
 {
     const openmmo_contest *ct;
 
@@ -480,4 +564,37 @@ int openmmo_contest_club_result(void)
         return CONTEST_CLUB_ERROR;
     }
     return CONTEST_CLUB_WAIT;
+}
+
+/*
+ * The two script commands themselves. The official client's pair open the DS communication club, "join a
+ * group" or "become the leader", and wait for a wireless group to form.
+ */
+static BOOL contest_club_poll(ScriptContext *ctx)
+{
+    u16 *destVar = FieldSystem_GetVarPointer(ctx->fieldSystem, ctx->data[0]);
+    int code = openmmo_contest_club_result();
+
+    if (code == CONTEST_CLUB_WAIT) {
+        return FALSE;
+    }
+
+    *destVar = code;
+    return TRUE;
+}
+
+/* TRUE when this client took the door, so the official comm club stays out of it. */
+BOOL openmmo_contest_club_take(ScriptContext *ctx, int commType, int contestType,
+    int contestRank, u16 destVarID)
+{
+    u16 *slotVar = FieldSystem_GetVarPointer(ctx->fieldSystem, VAR_MAP_LOCAL_0x02);
+    int slot = slotVar != NULL ? (int)*slotVar : 0;
+
+    if (!openmmo_contest_club_start(commType, contestType, contestRank, slot)) {
+        return FALSE;
+    }
+
+    ctx->data[0] = destVarID;
+    ScriptContext_Pause(ctx, contest_club_poll);
+    return TRUE;
 }

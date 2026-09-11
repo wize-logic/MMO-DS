@@ -1,19 +1,66 @@
 --- a/src/battle/battle_display.c
 +++ b/src/battle/battle_display.c
-@@ -6299,6 +6299,16 @@
+@@ -80,6 +80,17 @@
  
-     ManagedSprite *managedSprite = SpriteSystem_NewManagedSpriteTrainer(spriteSys, spriteMan, paletteData, x, y, trainerClass, face, battlerType, HEAP_ID_BATTLE);
+ #include "res/text/bank/battle_strings.h"
  
-+    /* openmmo: the player's own back never draws. Every trainer sprite a
-+     * battle shows is born here, and the player side is exactly FACE_BACK;
-+     * the intro, throw and slide tasks still run against the hidden sprite,
-+     * so their timings hold and the thrown ball (an ov12 sprite of its own)
-+     * still flies. Nothing in battle sets the draw flag back to TRUE, 
-+     * BattlerData_SetTrainerVisibility is only ever called with FALSE. */
-+    if (face == FACE_BACK) {
-+        ManagedSprite_SetDrawFlag(managedSprite, FALSE);
-+    }
++/* openmmo: the frame a mon sprite is drawn through follows the battle's page
++ * layout (mods/openmmo/src/openmmo_spriteframe.c): the cartridge's 80x80, or
++ * 128x88 for the two sprites of a single battle. Set here, in the translation
++ * unit, because a patched header is only seen by the units that open it first. */
++#undef MON_SPRITE_FRAME_WIDTH
++#undef MON_SPRITE_FRAME_HEIGHT
++int openmmo_mon_frame_w(void);
++int openmmo_mon_frame_h(void);
++#define MON_SPRITE_FRAME_WIDTH  (openmmo_mon_frame_w())
++#define MON_SPRITE_FRAME_HEIGHT (openmmo_mon_frame_h())
 +
-     return managedSprite;
- }
+ typedef struct TrainerEncounterData {
+     BattleSystem *battleSys;
+     Terrain *terrain;
+@@ -2839,6 +2850,13 @@
+         },
+     };
  
++    /* openmmo: where the ball sits in the hand, frame by frame. The table
++     * above is one row per back the engine ships; a back the packages
++     * appended, a composed player look, carries its own row
++     * (mods/openmmo/src/openmmo_look.c). */
++    extern const s16 (*openmmo_trainer_ball_row(int backSpriteIdx, const s16 (*rows)[6][2], int count))[2];
++    const s16 (*ballRow)[2] = openmmo_trainer_ball_row(trainerThrowBallData->backSpriteIdx, (const s16 (*)[6][2])v5, (int)(sizeof v5 / sizeof v5[0]));
++
+     battleType = BattleSystem_GetBattleType(trainerThrowBallData->battleSys);
+ 
+     switch (trainerThrowBallData->state) {
+@@ -2934,9 +2952,9 @@
+         if (trainerThrowBallData->battlerData->ballRotation) {
+             animFrame = ManagedSprite_GetAnimationFrame(trainerThrowBallData->battlerData->managedSprite);
+ 
+-            if (v5[trainerThrowBallData->backSpriteIdx][animFrame][0] != 0x7FFF) {
++            if (ballRow[animFrame][0] != 0x7FFF) {
+                 ov12_02237E0C(trainerThrowBallData->battlerData->ballRotation, 1);
+-                ov12_02237E18(trainerThrowBallData->battlerData->ballRotation, x + v5[trainerThrowBallData->backSpriteIdx][animFrame][0], y + v5[trainerThrowBallData->backSpriteIdx][animFrame][1]);
++                ov12_02237E18(trainerThrowBallData->battlerData->ballRotation, x + ballRow[animFrame][0], y + ballRow[animFrame][1]);
+ 
+                 if (animFrame == 3 && ov12_02237890(trainerThrowBallData->battlerData->ballRotation) != 0) {
+                     ov12_0223786C(trainerThrowBallData->battlerData->ballRotation, 0);
+@@ -2945,7 +2963,7 @@
+                     if (battleType & BATTLE_TYPE_DOUBLES && (battleType & BATTLE_TYPE_2vs2) == 0) {
+                         BattlerData *battlerData = BattleSystem_GetBattlerData(trainerThrowBallData->battleSys, BattleSystem_GetPartner(trainerThrowBallData->battleSys, trainerThrowBallData->battler));
+ 
+-                        ov12_02237E18(battlerData->ballRotation, x + v5[trainerThrowBallData->backSpriteIdx][animFrame][0], y + v5[trainerThrowBallData->backSpriteIdx][animFrame][1]);
++                        ov12_02237E18(battlerData->ballRotation, x + ballRow[animFrame][0], y + ballRow[animFrame][1]);
+                         ov12_02237E0C(battlerData->ballRotation, 1);
+                         ov12_0223786C(battlerData->ballRotation, 0);
+                         ov12_02237E30(battlerData->ballRotation, 1);
+@@ -2975,8 +2993,8 @@
+             trainerThrowBallData->delay = 8;
+             trainerThrowBallData->state = 4;
+         } else if (trainerThrowBallData->battlerData->ballRotation != NULL) {
+-            if (v5[trainerThrowBallData->backSpriteIdx][animFrame][0] != 0x7FFF) {
+-                ov12_02237E18(trainerThrowBallData->battlerData->ballRotation, x + v5[trainerThrowBallData->backSpriteIdx][animFrame][0], y + v5[trainerThrowBallData->backSpriteIdx][animFrame][1]);
++            if (ballRow[animFrame][0] != 0x7FFF) {
++                ov12_02237E18(trainerThrowBallData->battlerData->ballRotation, x + ballRow[animFrame][0], y + ballRow[animFrame][1]);
+ 
+                 if (animFrame == 3 && ov12_02237890(trainerThrowBallData->battlerData->ballRotation) != trainerThrowBallData->ballTargetState) {
+                     ov12_0223786C(trainerThrowBallData->battlerData->ballRotation, trainerThrowBallData->ballTargetState);

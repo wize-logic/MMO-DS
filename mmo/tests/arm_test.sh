@@ -67,6 +67,8 @@ if [ -n "$ENGINE" ] && [ -f "$ENGMK" ]; then
     else
         bad "the engine's ARM build no longer sets:$miss"
     fi
+elif [ -n "$ENGINE" ] && [ ! -d "$ENGINE/pc" ]; then
+    echo "  SKIP the engine's own ARM flags (no engine checkout at $ENGINE)"
 elif [ -n "$ENGINE" ]; then
     bad "no $ENGMK, the engine checkout has no ARM build to agree with"
 else

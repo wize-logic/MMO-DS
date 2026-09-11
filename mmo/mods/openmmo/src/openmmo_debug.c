@@ -1,11 +1,6 @@
-/* Select opens the tester's door into the world.
- *
- * OPENMMO_DEBUG_MENU=1 gives the button out. It is off by default: everything on
- * this menu is a thing the server then keeps. A flag set here goes into the
- * VarsFlags block and is reported as c2s 0xCB, so it survives a relog, and a warp
- * is reported as ScriptWarpArrived and moves the stored position. Shipped on, that
- * is a story editor and a teleporter on one keypress for every player. */
+/* Select opens the tester's door into the world. */
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,13 +45,14 @@
 #include "vars_flags.h"
 
 #include "../../../include/charcode.h"
+#include "../../../include/endpoint.h"
 #include "../../../include/client.h"
 
 extern int openmmo_underground_enter(FieldSystem *fs, FieldTask *caller);
 extern int openmmo_underground_leave(FieldSystem *fs, FieldTask *caller);
 extern int openmmo_underground_active(void);
 extern int openmmo_contest_start(FieldSystem *fs, FieldTask *caller, int rank,
-                                 int type, int competition, int slot);
+                                 int type, int competition, int slot, int link);
 extern int openmmo_contest_party_count(FieldSystem *fs);
 
 #define DEBUG_HEAP        HEAP_ID_FIELD2
@@ -240,9 +236,9 @@ void openmmo_debug_attach(openmmo_client *c)
 
 static int debug_enabled(void)
 {
-    const char *v = getenv("OPENMMO_DEBUG_MENU");
+    /* Two conditions, and the variable is the weaker of them. */
+    const char *v = openmmo_dev_env("OPENMMO_DEBUG_MENU");
 
-    /* Absent means off. A shipped build is not a tester's build. */
     if (v == NULL || v[0] == '\0')
         return 0;
     return v[0] != '0';
@@ -258,7 +254,7 @@ void openmmo_debug_request_open(void)
     s_want_open = 1;
 }
 
-static String *latin1(const char *s)
+static String *utf8_string(const char *s)
 {
     mmo_charcode buf[DEBUG_ROW_CHARS + 1];
     String *out = String_Init(DEBUG_ROW_CHARS + 1, DEBUG_HEAP);
@@ -415,7 +411,7 @@ static int paint_menu(FieldSystem *fs, DebugMenu *d, const char *const *labels,
     if (d->choices == NULL)
         return 0;
     for (i = 0; i < n; i++) {
-        d->rowStr[i] = latin1(labels[i]);
+        d->rowStr[i] = utf8_string(labels[i]);
         if (d->rowStr[i] == NULL)
             return 0;
         StringList_AddFromString(d->choices, d->rowStr[i], (u32)i);
@@ -491,7 +487,7 @@ static int paint_list(FieldSystem *fs, DebugMenu *d)
             snprintf(line, sizeof line, "%c %s",
                      VarsFlags_CheckFlag(vf, (u16)id) ? '*' : '-',
                      short_name(name));
-            d->rowStr[n] = latin1(line);
+            d->rowStr[n] = utf8_string(line);
             if (d->rowStr[n] == NULL)
                 return 0;
             d->rowId[n] = (u16)id;
@@ -510,7 +506,7 @@ static int paint_list(FieldSystem *fs, DebugMenu *d)
             }
             snprintf(line, sizeof line, "%u %s",
                      (unsigned)vf->vars[id], short_name(name));
-            d->rowStr[n] = latin1(line);
+            d->rowStr[n] = utf8_string(line);
             if (d->rowStr[n] == NULL)
                 return 0;
             d->rowId[n] = (u16)id;
@@ -573,7 +569,7 @@ static int paint_message(FieldSystem *fs, DebugMenu *d, const char *text)
         String_Free(d->msgStr);
         d->msgStr = NULL;
     }
-    d->msgStr = latin1(text);
+    d->msgStr = utf8_string(text);
     if (d->msgStr == NULL)
         return 0;
     FieldMessage_AddWindow(fs->bgConfig, &d->msgWin, BG_LAYER_MAIN_3);
@@ -980,7 +976,7 @@ static BOOL debug_task(FieldTask *task)
             widgets_free(d);
             if (openmmo_contest_start(fs, task, d->rank, d->type,
                                       COMPETITIONS[d->comp].competition,
-                                      d->slot)) {
+                                      d->slot, 0)) {
                 printf("openmmo: debug contest %s, %s rank, %s, slot %d\n",
                        COMPETITIONS[d->comp].label, RANKS[d->rank],
                        TYPES[d->type], d->slot + 1);
@@ -1075,4 +1071,31 @@ int openmmo_debug_try_open(FieldSystem *fs)
     FieldSystem_CreateTask(fs, debug_task, d);
     printf("openmmo: debug menu opened\n");
     return 1;
+}
+
+/*
+ * The frame that did not fit. The 3D engine holds 2048 polygons and 6144 vertices a frame, and
+ * a polygon past that is dropped: the port counts it (pc_gpu3d_ram_overflows,
+ * pc/hw/pc_gpu3d.c).
+ */
+extern unsigned long pc_gpu3d_ram_overflows;
+
+void openmmo_poly_overflow_tick(void)
+{
+    static unsigned quiet, frames, reports;
+    static unsigned long seen;
+
+    frames++;
+    if (pc_gpu3d_ram_overflows != seen) {
+        seen = pc_gpu3d_ram_overflows;
+        if (quiet == 0) {
+            printf("openmmo: the 3D engine's polygon or vertex RAM overflowed "
+                   "(frame %u, %lu polygon(s) dropped so far, report %u); "
+                   "what was drawn last is missing\n",
+                   frames, seen, ++reports);
+            quiet = 60;
+        }
+    }
+    if (quiet > 0)
+        quiet--;
 }

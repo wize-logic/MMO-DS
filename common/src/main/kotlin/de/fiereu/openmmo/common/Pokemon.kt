@@ -10,6 +10,18 @@ const val MAX_MOVE_SLOTS = 4
 
 const val MAX_PARTY_SIZE = 6
 
+/** What a monster starts liking its trainer at when nothing better is known. */
+const val DEFAULT_FRIENDSHIP = 70
+
+/** The ceiling the game clamps friendship to, and what Return reads as full power. */
+const val MAX_FRIENDSHIP = 255
+
+/**
+ * The bits the client engine's condition word defines: the sleep counter, the five conditions, and
+ * the counter the bad poison keeps above them.
+ */
+const val MON_STATUS_MASK = 0x0FFF
+
 data class Pokemon(
     val id: Long,
     val ownerId: Long,
@@ -49,6 +61,19 @@ data class Pokemon(
     val caughtRegionId: Int = -1,
     val caughtBankId: Int = -1,
     val caughtMapId: Int = -1,
+    /** The engine's own location label for where this monster was caught, or 0 for none. */
+    val caughtLocationLabel: Int = 0,
+    /** How much this monster likes its trainer, 0..[MAX_FRIENDSHIP]. */
+    val friendship: Int = DEFAULT_FRIENDSHIP,
+    /** The item this monster is carrying, as a wire item id, or 0 for nothing. */
+    val heldItemId: Int = 0,
+    /**
+     * What this monster is suffering from: the client engine's own condition word, 0 for a healthy
+     * one.
+     */
+    val status: Int = 0,
+    /** True while this monster arrived from a save file rather than from this server's own dice. */
+    val offlineOrigin: Boolean = false,
 ) {
   // seed is an unsigned 32-bit value on the wire, so mask before the modulo to avoid a negative
   // index when the high bit is set.

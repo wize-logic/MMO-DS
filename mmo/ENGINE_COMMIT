@@ -29,6 +29,59 @@
 # The guard compares committed HEAD only; the engine's uncommitted working-tree
 # changes are not captured here.
 #
+# Verified 2026-09-03: pincheck, patchcheck every hunk on exact context,
+# fused builds and links, the five fused checks (crowd, heap, name, label,
+# ceiling) green, abicheck green. This bump crosses TWO commits, both in
+# the rasterizer. First the perspective divide: posX * viewport width was
+# a 32-bit product, which the console never overflows (256 pixels, 24-bit
+# W) and a wide HD viewport of up to 2736 pixels does for any vertex far
+# enough away, sending it to the far side of the screen, the smear every
+# wide HD run has carried, the width cliffs pc_view.c was clamped against,
+# and the black notch from the same wrap in Y. The product is 64-bit now,
+# which is bit-identical at native, and the RAM cap counts what it drops.
+# Second the screen x field: it was sized from 512 * hd alone, so a page
+# wider than 512 columns folded at 1023 pixels (hd3d 2) or 2047 (hd3d 4);
+# it is sized from the page's own width now, the console's at native.
+# The sixteenth bump's note, kept for the record:
+# Verified 2026-09-01, evening: pincheck, patchcheck every hunk on exact
+# context, fused builds and links, the five fused checks (crowd, heap, name,
+# label, ceiling) green, abicheck green, engine suite rows determinism,
+# state_digest, view_channel, session, save_lab, selftest, cli, hd3d,
+# widescreen, mods, sym green. This bump crosses ONE commit, the mixer's
+# output mode: pc_spu_set_output() lets PC_AUDIO_RATE mix at any whole rate
+# through a fixed-point cycle step and PC_AUDIO_INTERP answer between a PCM
+# channel's samples with melonDS's linear, cosine or cubic shapes; the view
+# page's audio_rate, the WAV dump and the audio lab carry the mixer's real
+# rate. With neither set every step is the old arithmetic and the dumps are
+# byte-identical, which two before-and-after runs measured. The launcher's
+# new `sound` row (hd, the default) is what asks for 48,000 and cubic.
+# The fifteenth bump's note, kept for the record:
+# Verified 2026-09-01: pincheck, patchcheck every hunk on exact context, fused
+# builds and links, the five fused checks (crowd, heap, name, label, ceiling)
+# green, abicheck green. This bump crosses ONE commit, the battle copy mirror:
+# every OBJ copy a move script makes of a battler was loaded from a tile
+# buffer filled once at battle start, so on a sprite whose picture changes
+# (our Gen 5 loop) the copy sat on the mon as a frozen still, three frames at
+# the start of every move and the whole of a stat change. The engine now keeps
+# that buffer, and every live copy, equal to the sprite's texture
+# (pc/src/pc_sprite_mirror.c plus patches on pokemon_sprite, battle_display,
+# battle_io_command, battle_anim_system, ov12_022380BC, unk_02094EDC).
+# Static Platinum sprites are pixel-identical before and after.
+# The fourteenth bump's note, kept for the record:
+# Verified 2026-08-31: pincheck read at 7 of 199 paths moved, patchcheck
+# every hunk on exact context, fused builds and links with no SKIP, the five
+# fused checks (crowd, heap, name, label, ceiling) green, abicheck green,
+# engine suite determinism/hd3d/save_lab/battle_math green. This bump crosses
+# six commits. Five are the port's own: the modfs hooks moved into pc/patches
+# (map_header, narc, area_data, map_prop_material_shape, our hunks on those
+# files still land exact), the WM manager answers behind PXI tag 10 and the
+# base comm_manager/communication_system patches it replaced are gone (ours
+# still land exact), plus ci.sh and mirror housekeeping. The sixth is the
+# battle stand-in fix: BattleMonOBJData_New put an OBJ copy of every battler
+# over its PokemonSprite for the ball throw and never hid the sprite under
+# it, so a Gen 5 loop showed a static copy sitting on top of itself during
+# every switch; the copy now draws nothing (pc/patches/src/battle_anim).
+# The thirteenth bump's note, kept for the record:
 # Verified 2026-08-27 (the thirteenth bump that day): pincheck 189 paths
 # unchanged, patchcheck every hunk on exact context, fused builds and
 # links, boot and crowd checks green, abicheck green. This bump crosses
@@ -48,4 +101,4 @@
 # hides _WIN32 from exactly the TUs that use it. The first true cold
 # Windows fused links, debug and release, closed on this machine with
 # pc_sleep_ns inside; engine suite 34/34.
-90898b71682bb8f4b533aaf4d3746d904979fbc3
+2d23b1136c065424e80c268f1f1124f7f14e60cb

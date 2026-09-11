@@ -20,8 +20,10 @@
 #include "field/field_system.h" /* FieldSystem: mapObjMan, playerAvatar, task */
 #include "field_system.h"       /* FieldSystem_HasChildProcess */
 #include "field_task.h"         /* FieldSystem_IsRunningFieldMap */
+#include "overlay005/ov5_021DFB54.h" /* PlayerAvatar_SetTransitionState/RequestChangeState */
 #include "player_avatar.h"      /* PlayerAvatar_New/Delete/TryFace/GetMapObject/GetXPos */
 #include "player_move.h"        /* PlayerAvatar_SetMapObjMovement/GetMovementActionAnimCode */
+#include "map_header_data.h"  /* MapHeaderData_GetNumObjectEvents */
 #include "map_object.h"         /* MapObject_SetLocalID, MapObjMan_LocalMapObjByIndex, _Delete */
 #include "map_object_move.h"    /* MapObject_GetDxFromDir / GetDzFromDir */
 #include "map_tile_behavior.h"  /* TileBehavior_IsDoor / IsWarpEntrance* */
@@ -29,6 +31,7 @@
 #include "unk_020655F4.h"       /* MovementAction_GetDirFromAction */
 #include "generated/map_headers.h"      /* MAP_HEADER_UNDERGROUND */
 #include "generated/movement_actions.h" /* enum MovementAction */
+#include "generated/movement_types.h"   /* MOVEMENT_TYPE_NONE */
 #include "constants/map_object.h"       /* DIR_* */
 #include "constants/player_avatar.h"    /* PLAYER_AVATAR_WALKING/SURFING */
 #include "generated/object_events_gfx.h" /* OBJ_EVENT_GFX_* for the appearance probe */
@@ -53,10 +56,13 @@
 #include "../../../include/client.h"
 #include "../../../include/platform.h"
 #include "../../../include/creator.h"
+#include "../../../include/endpoint.h"
 #include "../../../include/entity.h"
+#include "../../../include/follower.h"
 #include "../../../include/entry.h"
 #include "../../../include/hud_channel.h"
 #include "../../../include/idmap.h"
+#include "../../../include/login.h"
 #include "../../../include/osk.h"
 #include "../../../include/status_channel.h"
 #include "../../../include/text_channel.h"
@@ -87,11 +93,20 @@ void openmmo_presence_shutdown(void);
  * the server's seat written into VarsFlags, and what the VM writes reported
  * back. No header of its own; three rows are cheaper than a fourth file. */
 void openmmo_script_state_reset(void);
+/* openmmo_follow_talk.c. An A press on the tile the follower is standing on:
+ * 1 when the talk took it. */
+int openmmo_follow_talk_try(void *fieldSystemVoid);
+
 /* openmmo_follow.c. fs is a FieldSystem*; fieldReady is this file's own
  * field_ready_for_peers, so there is one definition of settled in the build. */
 void openmmo_follow_tick(void *fieldSystemVoid, int fieldReady);
 void openmmo_follow_reset(void);
 void openmmo_script_state_tick(void *fieldSystemVoid, openmmo_client *c);
+void openmmo_script_state_flush(void *fieldSystemVoid, openmmo_client *c);
+
+/* The first monster in a save this build has no tables for,
+ * and a sentence naming it and the package it needs. 0 when there is none. */
+int openmmo_offline_save_unsupported(SaveData *save, char *why, size_t cap);
 
 FS_EXTERN_OVERLAY(game_start);
 
@@ -109,9 +124,12 @@ extern void openmmo_pc_field_sync(FieldSystem *fs, const openmmo_client *c);
 extern void openmmo_pc_reconcile_tick(FieldSystem *fs, openmmo_client *c);
 extern int openmmo_encounter_scene_up(void);
 
+/* An A press on a person whose script stages a wild fight. */
+extern int openmmo_static_press_try(FieldSystem *fs);
+
 /* A peer's name projected onto the world and painted over it. */
-extern void openmmo_label_set(int slot, const char *latin1);
-extern const char *openmmo_label_latin1(int slot);
+extern void openmmo_label_set(int slot, const char *name);
+extern const char *openmmo_label_text(int slot);
 extern void openmmo_label_clear(int slot);
 extern void openmmo_label_clear_all(void);
 extern void openmmo_label_draw_for(int slot, const MapObject *obj);
@@ -190,6 +208,11 @@ extern void openmmo_trade_pump(FieldSystem *fs);
  * so the field is never settled while one is running, and the
  * traffic that runs it has to keep moving through all of that. */
 extern void openmmo_contest_link_pump(void);
+/* The headless link-contest station: asks for a group, runs the contest the
+ * seat starts, and holds the pen the acting round wants. Off unless
+ * OPENMMO_LAB_CONTEST_LINK names one. mmo/mods/openmmo/src/openmmo_contest_lab.c */
+extern void openmmo_contest_lab_attach(openmmo_client *c);
+extern void openmmo_contest_lab_frame(FieldSystem *fs, int settled);
 extern void openmmo_trade_tick(void);
 extern void openmmo_gtl_attach(openmmo_client *c);
 extern void openmmo_gtl_mark_pending(void);
@@ -202,11 +225,30 @@ extern int openmmo_player_try_open(FieldSystem *fs, const char *name);
 extern void openmmo_widget_attach(openmmo_client *c);
 extern void openmmo_widget_mark_pending(void);
 extern int openmmo_widget_try_open(FieldSystem *fs);
+extern void openmmo_travel_attach(openmmo_client *c);
+extern void openmmo_travel_tick(FieldSystem *fs, int seated);
+extern void openmmo_cries_debug_tick(int settled);
+extern void openmmo_poly_overflow_tick(void); /* openmmo_debug.c */
 
 /* SELECT is the tester's door, warps to the Contest Hall
  * and the Underground, and the story flags either of them reads. */
 extern void openmmo_debug_attach(openmmo_client *c);
 extern void openmmo_underground_attach(openmmo_client *c);
+extern void openmmo_fishing_attach(openmmo_client *c);           /* openmmo_fishing.c */
+extern void openmmo_apricorn_attach(openmmo_client *c);          /* openmmo_apricorn.c */
+extern void openmmo_apricorn_tick(FieldSystem *fs);
+extern void openmmo_fieldmove_attach(openmmo_client *c);         /* openmmo_fieldmove.c */
+extern void openmmo_card_attach(openmmo_client *c);              /* openmmo_card.c */
+extern void openmmo_look_attach(openmmo_client *c);              /* openmmo_look.c */
+extern int openmmo_look_body_gfx(int gfx, int gender);           /* openmmo_look.c */
+extern int openmmo_look_state_gfx(int look, int playerState);    /* openmmo_look.c */
+extern void openmmo_fieldmove_tick(FieldSystem *fs);
+extern int openmmo_encounter_field_busy(const FieldSystem *fs);  /* openmmo_encounter.c */
+extern void openmmo_encounter_defer(int foe_species, int foe_level);
+extern int openmmo_encounter_deferred(void);
+extern void openmmo_fishing_tick(FieldSystem *fs, openmmo_client *c);
+extern int openmmo_fishing_take_battle(FieldSystem *fs, const openmmo_client *c,
+                                       int foe_species, int foe_level);
 extern void openmmo_debug_request_open(void);
 extern int openmmo_debug_try_open(FieldSystem *fs);
 
@@ -216,6 +258,18 @@ extern void openmmo_underground_forget(void);
 extern int openmmo_underground_active(void);
 extern void openmmo_underground_tick(int latency_ms);
 extern void openmmo_underground_note_step(int running);
+
+/* The engine's own save, out to the file the front door
+ * named, so a session can be carried on with no server. The ask is held until
+ * the field is standing still, so the tick is what answers it. */
+extern void openmmo_offline_export_request(const char *character);
+extern int openmmo_offline_export_tick(openmmo_client *c);
+/* A save read on the way out, and one offered on the way in.
+ * Answers 1 on the frame the session should end on a save the server took. */
+extern int openmmo_import_tick(openmmo_client *c);
+/* The play-time clock, wound from the host's clock
+ * because the port fires no timer for the engine's own counter. */
+extern void openmmo_playtime_tick(void);
 
 /* The engine's own sprite-archive answers, dumped for the
  * client's copy of that arithmetic to be checked against. Off unless asked for,
@@ -338,6 +392,13 @@ static int g_fake_entity;
  * ceilings can be measured without N players. Default 0 = off. */
 static int g_fake_crowd;
 
+/*
+ * OPENMMO_FAKE_FOLLOWERS: give the synthetic crowd a Pokemon each, one distinct species per
+ * slot, so the peer-follower half and both of its culls can be driven without twelve players
+ * carrying twelve different parties.
+ */
+static int g_fake_followers;
+
 /* OPENMMO_FAKE_NAME: the name a synthetic peer is labelled with, numbered per
  * slot. NULL (unset) leaves the default "Player"; empty is an empty name, so
  * the label path's visible fallback can be driven without a server. Only
@@ -368,7 +429,7 @@ static int g_testbattle_round;
  * aftermath can say so; any other on-value keeps the two-round default. */
 static int testbattle_rounds(void)
 {
-    const char *t = getenv("OPENMMO_TESTBATTLE");
+    const char *t = openmmo_dev_env("OPENMMO_TESTBATTLE");
     int n;
 
     if (t == NULL)
@@ -685,11 +746,18 @@ __attribute__((constructor(101))) static void openmmo_announce(void)
     openmmo_union_attach(g_client);
     openmmo_trade_attach(g_client);
     openmmo_contest_link_attach(g_client);
+    openmmo_contest_lab_attach(g_client);
     openmmo_gtl_attach(g_client);
     openmmo_player_attach(g_client);
     openmmo_widget_attach(g_client);
+    openmmo_travel_attach(g_client);
     openmmo_debug_attach(g_client);
     openmmo_underground_attach(g_client);
+    openmmo_fishing_attach(g_client);
+    openmmo_apricorn_attach(g_client);
+    openmmo_fieldmove_attach(g_client);
+    openmmo_card_attach(g_client);
+    openmmo_look_attach(g_client);
 }
 
 /*
@@ -704,10 +772,93 @@ static int session_configured(void)
     return s != NULL && s[0] != '\0' && s[0] != '0';
 }
 
+/*
+ * PLAY OFFLINE's front door is this game's character select, not Platinum's title (the owner's
+ * ask, 2026-09-08: "exactly like the menu from OpenMMO, just without 'new character'").
+ */
+static int g_offline_lobby;
+
+/* And which of the two the player picked, because they end in different engine
+ * applications: a saved game continues, a new one runs the cartridge's own
+ * opening. */
+static int g_offline_new_game;
+
+/* Whether the front door pressed PLAY OFFLINE. */
+static int offline_row(void)
+{
+    const char *s = getenv("OPENMMO_OFFLINE");
+
+    return s != NULL && s[0] != '\0' && s[0] != '0';
+}
+
+/* The list is seated, so leave the title for it without waiting to be asked. */
+static void offline_lobby_taken(void)
+{
+    g_offline_lobby = 1;
+    g_leave_lobby = 1;
+}
+
+/* One row: the character on the chip, or NEW GAME where there is none. */
+static int offline_lobby_seat(SaveData *saveData)
+{
+    mmo_character_list list;
+    TrainerInfo *info = NULL;
+    char why[64];
+
+    if (saveData == NULL || session_configured() || !offline_row())
+        return 0;
+
+    memset(&list, 0, sizeof list);
+    if (SaveData_DataExists(saveData))
+        info = SaveData_GetTrainerInfo(saveData);
+
+    mmo_creator_reset(&g_creator);
+    g_offline_new_game = 0;
+
+    if (info == NULL) {
+        /*
+         * Nothing has been played or carried out here yet. One row, NEW GAME, and A on it runs
+         * the cartridge's own opening, which is where the name and the gender are asked, so
+         * the creator's four steps are not.
+         */
+        mmo_creator_direct_new(&g_creator, 1);
+        mmo_creator_set_list(&g_creator, &list);
+        offline_lobby_taken();
+        printf("openmmo: offline character select: nothing saved here, so NEW GAME\n");
+        return 1;
+    }
+
+    list.count = 1;
+    list.held = 1;
+    list.entry[0].id = (s64)TrainerInfo_ID(info);
+    list.entry[0].gender = (int)TrainerInfo_Gender(info);
+    list.entry[0].region = MMO_REGION_SINNOH;
+    mmo_charcode_to_utf8((const mmo_charcode *)TrainerInfo_Name(info),
+                         list.entry[0].name, sizeof list.entry[0].name);
+
+    mmo_creator_fix_list(&g_creator, 1);
+    mmo_creator_set_list(&g_creator, &list);
+    offline_lobby_taken();
+    printf("openmmo: offline character select: \"%s\" (%s)\n",
+           list.entry[0].name[0] ? list.entry[0].name : "?",
+           list.entry[0].gender == 1 ? "girl" : "boy");
+
+    /*
+     * The row is shown either way, "your character, and here is why it will not open" is a
+     * better screen than an empty one, but a save naming a species the loaded packages
+     * cannot draw is refused here rather than crashing later.
+     */
+    if (openmmo_offline_save_unsupported(saveData, why, sizeof why) != 0) {
+        printf("openmmo: this save cannot be opened: %s\n", why);
+        mmo_creator_refuse(&g_creator, why);
+    }
+    return 1;
+}
+
 /* Boot straight into a map, skipping the title and the Rowan intro. */
 int openmmo_boot_into_world(void *saveDataVoid)
 {
-    const char *s = getenv("OPENMMO_BOOT_WORLD");
+    const char *s = openmmo_dev_env("OPENMMO_BOOT_WORLD");
 
     if (s == NULL || s[0] == '\0' || s[0] == '0')
         return 0;
@@ -729,30 +880,47 @@ int openmmo_boot_kind(void *saveDataVoid)
         printf("openmmo: session title\n");
         return 2;
     }
+    if (offline_lobby_seat(saveDataVoid)) {
+        printf("openmmo: offline title\n");
+        return 2;
+    }
+
     return 0;
 }
 
-/* Replace the title's PRESS START string with the game's name. No-op
- * when no session is configured, so a plain boot stays the port's. */
+/* Replace the title's PRESS START string with the game's name. No-op on a
+ * plain boot, no session and no offline save, so the port's own title,
+ * which is where NEW GAME lives, stays the port's. */
 void openmmo_title_name(void *stringVoid)
 {
     String *s = stringVoid;
     mmo_charcode buf[16];
 
-    if (!session_configured() || s == NULL)
+    if ((!session_configured() && !g_offline_lobby) || s == NULL)
         return;
     mmo_utf8_to_charcode("OPENMMO", buf, sizeof buf / sizeof buf[0]);
     String_Clear(s);
     String_CopyChars(s, (const charcode_t *)buf);
 }
 
-/* Stay on our title: do not walk Continue / New Game, do not clear the
- * save, do not replay the opening. A / Start, the clear-save combo and
- * the opening replay all become the lobby instead. */
-int openmmo_title_hold(void)
+/*
+ * Stay on our title: do not walk Continue / New Game, do not clear the save, do not replay the
+ * opening. A / Start, the clear-save combo and the opening replay all become the lobby
+ * instead.
+ */
+#define OPENMMO_TITLE_START_MENU 0
+#define OPENMMO_TITLE_CLEAR_SAVE 1
+#define OPENMMO_TITLE_REPLAY     2
+
+int openmmo_title_hold(int exit)
 {
-    if (!session_configured())
-        return 0;
+    if (!session_configured()) {
+        if (!g_offline_lobby || exit == OPENMMO_TITLE_CLEAR_SAVE)
+            return 0;
+        if (exit == OPENMMO_TITLE_START_MENU)
+            g_leave_lobby = 1;
+        return 1;
+    }
     if (!g_have_seat)
         g_leave_lobby = 1;
     return 1;
@@ -768,6 +936,27 @@ static int g_seated;
  * correction.
  */
 static int g_seat_reload;
+
+/*
+ * A STEP onto a tile the ENGINE WARPS from, an exit mat, a stair, an escalator, is
+ * answered twice.
+ */
+static int g_local_landing_header = -1;
+static int g_local_landing_frames;
+#define LOCAL_LANDING_FRAMES 240
+/* What the server said the player was riding when that report went out. While
+ * this still matches, the report has not been answered and the mount the engine
+ * has is newer than the one the server is talking about (apply_local_mount). */
+static int g_landing_mount;
+static int local_is_surfing(void);
+/*
+ * And the third order: the engine started its own transition and the server's answer arrives
+ * while it is still in flight.
+ */
+static int g_engine_warp_header = -1;
+static int g_engine_warp_frames;
+/* The seat the engine's own transition is fulfilling. */
+static int g_seat_engine;
 
 /*
  * The join's character, written into the save the engine will show. Gender has to land before
@@ -830,7 +1019,12 @@ int openmmo_trainer_money_gate_take(u32 amount)
     return money_report(-(int)amount);
 }
 
-static void seat_trainer_money(TrainerInfo *info, s32 money)
+/*
+ * Not static any more: openmmo_offline.c seats the OFFLINE wallet over the online one for the
+ * length of the export save, because the two homes keep separate wallets and the image this
+ * session writes is about to become the offline game.
+ */
+void openmmo_seat_trainer_money(TrainerInfo *info, s32 money)
 {
     u32 value;
 
@@ -844,10 +1038,11 @@ static void seat_trainer_money(TrainerInfo *info, s32 money)
 }
 
 /* The rival's name, into the block the engine's own BufferRivalName reads. */
-static void seat_rival_name(SaveData *save)
+void openmmo_rival_name_default(SaveData *save)
 {
     static int announced;
     MiscSaveBlock *misc;
+    const charcode_t *have;
     mmo_charcode buf[TRAINER_NAME_LEN + 2];
     String *name;
 
@@ -855,6 +1050,9 @@ static void seat_rival_name(SaveData *save)
         return;
     misc = SaveData_MiscSaveBlock(save);
     if (misc == NULL)
+        return;
+    have = MiscSaveBlock_RivalName(misc);
+    if (have != NULL && have[0] != MMO_CHAR_EOS)
         return;
     name = String_Init(TRAINER_NAME_LEN + 2, HEAP_ID_APPLICATION);
     if (name == NULL)
@@ -868,6 +1066,32 @@ static void seat_rival_name(SaveData *save)
         announced = 1;
         printf("openmmo: rival is %s\n", OPENMMO_RIVAL_NAME);
     }
+}
+
+/* The badges the server says this character has earned, into TrainerInfo. */
+static void seat_badges(SaveData *save)
+{
+    const openmmo_world_state *ws = openmmo_client_world_state(g_client);
+    TrainerInfo *info;
+    int i, seated = 0;
+
+    if (ws == NULL || !ws->valid || save == NULL)
+        return;
+    info = SaveData_GetTrainerInfo(save);
+    if (info == NULL)
+        return;
+    for (i = 0; i < ws->badge_count && i < MMO_WS_BADGE_MAX; i++) {
+        int id = ws->badges[i];
+
+        if (id < 0 || id >= 8)
+            continue;
+        if (!TrainerInfo_HasBadge(info, id)) {
+            TrainerInfo_SetBadge(info, id);
+            seated++;
+        }
+    }
+    if (seated > 0)
+        printf("openmmo: %d badge(s) seated (%d earned)\n", seated, ws->badge_count);
 }
 
 static void seat_trainer(SaveData *save)
@@ -907,8 +1131,8 @@ static void seat_trainer(SaveData *save)
      * character's entity id, and the server keeps a kind tag in exactly those bits, so every
      * player's card read IDNo 36864.
      */
-    seat_trainer_money(info, ws->money);
-    seat_rival_name(save);
+    openmmo_seat_trainer_money(info, ws->money);
+    openmmo_rival_name_default(save);
 
     if (!s_player_announced
         || s_player_id != ws->character_id
@@ -1001,12 +1225,27 @@ void openmmo_lobby_commit(void)
 
 int openmmo_lobby_ready_to_field(void)
 {
-    return g_leave_field && g_have_seat;
+    return g_leave_field && (g_have_seat || g_offline_lobby);
 }
 
 void openmmo_lobby_enter_field(SaveData *save)
 {
-    if (g_have_seat)
+    if (g_offline_lobby) {
+        /*
+         * Two templates, and the wrong one on either side is the whole of what this branch is
+         * for.
+         */
+        if (g_offline_new_game) {
+            EnqueueApplication(FS_OVERLAY_ID(game_start),
+                               &gGameStartRowanIntroAppTemplate);
+            printf("openmmo: leaving the lobby for a new offline game\n");
+        } else {
+            EnqueueApplication(FS_OVERLAY_ID(game_start),
+                               &gGameStartLoadSaveAppTemplate);
+            printf("openmmo: leaving the lobby for the offline save\n");
+        }
+        g_offline_new_game = 0;
+    } else if (g_have_seat)
         seat_and_enter_field(save);
     g_in_lobby = 0;
     g_leave_field = 0;
@@ -1017,22 +1256,33 @@ void openmmo_lobby_set_active(int on)
     g_in_lobby = on;
 }
 
-/* Hide the Platinum wordmark, the grayscale Pokemon logo, and GAME
- * FREAK Presents. The PRESS START layer carries the name we just set. */
+/*
+ * Hide the Platinum wordmark, the grayscale Pokemon logo, and GAME FREAK Presents. The PRESS
+ * START layer carries the name we just set.
+ */
 int openmmo_title_present(void)
+{
+    return session_configured() || g_offline_lobby;
+}
+
+/* Whether this build was asked to talk to a server at all. The one predicate
+ * that answers before anything has connected, which is what a caller deciding
+ * between the engine's own behaviour and the server's needs, the vanilla port
+ * boots through here too and must keep every one of its own answers. */
+int openmmo_session_configured(void)
 {
     return session_configured();
 }
 
-/*
- * Whether the overworld may start a wild encounter on its own. It may not: the server owns
- * whether and when a wild encounter happens, so the field's per-step random roll is cut and a
- * battle begins only when the server sends one.
- */
+/* Whether the overworld may start a wild encounter on its own. */
 int openmmo_local_encounters_enabled(void)
 {
-    const char *s = getenv("OPENMMO_LOCAL_ENCOUNTERS");
-    return s != NULL && s[0] != '\0' && s[0] != '0';
+    const char *s = openmmo_dev_env("OPENMMO_LOCAL_ENCOUNTERS");
+
+    if (s != NULL && s[0] != '\0')
+        return s[0] != '0';
+
+    return !session_configured();
 }
 
 /* The server has moved this session into a battle. The window does not
@@ -1059,7 +1309,7 @@ static int session_in_dialog(void)
  */
 int openmmo_local_warps_enabled(void)
 {
-    const char *s = getenv("OPENMMO_LOCAL_WARPS");
+    const char *s = openmmo_dev_env("OPENMMO_LOCAL_WARPS");
     if (s != NULL && s[0] != '\0')
         return s[0] != '0';
     return 1;
@@ -1067,23 +1317,21 @@ int openmmo_local_warps_enabled(void)
 
 int openmmo_local_field_scripts_enabled(void)
 {
-    const char *s = getenv("OPENMMO_LOCAL_SCRIPTS");
+    const char *s = openmmo_dev_env("OPENMMO_LOCAL_SCRIPTS");
     if (s != NULL && s[0] != '\0')
         return s[0] != '0';
     return 1;
 }
 
 /*
- * Whether a trainer who sees the player may start a fight without the server. Off on a
- * session: the party, the money and the reward are the server's, and the engine's own battle
- * would be fought with a party this save does not hold.
+ * Whether a trainer who sees the player may start a fight without the server. On, and it has
+ * been since the party seat became faithful.
  */
 int openmmo_local_trainer_battles_enabled(void)
 {
-    const char *s = getenv("OPENMMO_LOCAL_TRAINERS");
+    const char *s = openmmo_dev_env("OPENMMO_LOCAL_TRAINERS");
     if (s != NULL && s[0] != '\0')
         return s[0] != '0';
-    /* On by default since the party seat became faithful. */
     return 1;
 }
 
@@ -1107,6 +1355,10 @@ int openmmo_allow_local_warp(int header)
 {
     if (openmmo_local_warps_enabled()) {
         printf("openmmo: local warp to header %d\n", header);
+        /* The server is answering the step onto this tile at the same time;
+         * from here until the landing, its answer is this warp, not another. */
+        g_engine_warp_header = header;
+        g_engine_warp_frames = LOCAL_LANDING_FRAMES;
         return 1;
     }
     printf("openmmo: refused local warp to header %d\n", header);
@@ -1124,6 +1376,34 @@ static int g_scene_ran;
  */
 static int g_scene_fought;
 
+/* A map this client did not ship. The porter appends a ported header after the
+ * engine's own last one, so 594 is the first (tools/portmap.py). Three places
+ * ask: the sight scan, the script gate, and the A press. */
+#define OPENMMO_PORTED_HEADER_FIRST 594
+
+static int on_ported_map(const FieldSystem *fs)
+{
+    return fs != NULL && fs->location != NULL
+        && fs->location->mapHeaderID >= OPENMMO_PORTED_HEADER_FIRST;
+}
+
+/* The same question for the engine's script commands, which have no field
+ * system in hand (openmmo_card.c's badge read). */
+int openmmo_on_ported_map(void)
+{
+    return on_ported_map(pc_lab_field_system());
+}
+
+/*
+ * WHO PLAYS A TRAINER ENCOUNTER. Nobody is blocked any more, and the reason this hook exists
+ * at all is worth keeping.
+ */
+int openmmo_trainer_sight_blocked(FieldSystem *fieldSystem)
+{
+    (void)fieldSystem;
+    return 0;
+}
+
 int openmmo_allow_local_script(unsigned scriptID)
 {
     if (script_would_be_underground()) {
@@ -1131,6 +1411,11 @@ int openmmo_allow_local_script(unsigned scriptID)
         return 0;
     }
     if (openmmo_local_field_scripts_enabled()) {
+        /*
+         * 3000..6999 used TO be refused here and are not any more. They are the engine's own
+         * single- and double-battle ranges, where an object keeps a trainer number rather than
+         * a script and the loader turns it into an entry of `scripts_battles`.
+         */
         printf("openmmo: local script %u\n", scriptID);
         g_scene_ran = 1;
         g_scene_fought = 1;
@@ -1185,9 +1470,33 @@ int openmmo_field_interact_peer(void)
     if (!openmmo_remote_at(fs, px + MapObject_GetDxFromDir(dir),
                            pz + MapObject_GetDzFromDir(dir),
                            name, (int)sizeof name)) {
-        if (interact_report())
-            printf("openmmo: A at (%d,%d) dir %d, no player on that tile\n",
-                   px, pz, dir);
+        /* Whoever is on that tile, named. A press that does nothing is either
+         * a tile with nobody on it or a person the engine did not build, and
+         * only this line tells the two apart. */
+        if (interact_report()) {
+            MapObject *self = PlayerAvatar_GetMapObject(fs->playerAvatar);
+            const MapObjectManager *man =
+                self != NULL ? MapObject_MapObjectManager(self) : NULL;
+            MapObject *faced = man != NULL
+                ? sub_0206326C(man, px + MapObject_GetDxFromDir(dir),
+                               pz + MapObject_GetDzFromDir(dir), 0)
+                : NULL;
+
+            printf("openmmo: A at (%d,%d) dir %d on header %d, no player"
+                   " on that tile; engine object %s", px, pz, dir,
+                   fs->location != NULL ? (int)fs->location->mapHeaderID : -1,
+                   faced != NULL ? "yes" : "no");
+            if (faced != NULL)
+                printf(", script %u, trainer type %u",
+                       (unsigned)MapObject_GetScript(faced),
+                       (unsigned)MapObject_GetTrainerType(faced));
+            printf("\n");
+            /* And what the map thinks it has. */
+            printf("openmmo:   the header names %u object event(s) and"
+                   " %d sign(s)\n",
+                   (unsigned)MapHeaderData_GetNumObjectEvents(fs),
+                   MapHeaderData_GetNumBgEvents(fs));
+        }
         return 0;
     }
     if (!openmmo_player_try_open(fs, name)) {
@@ -1212,6 +1521,44 @@ void openmmo_on_field_interact(void)
     if (openmmo_local_field_scripts_enabled())
         return;
     openmmo_client_interact_tile(g_client);
+}
+
+/*
+ * An A press on a ported map's trainer, from inside the engine's own interact path
+ * (patches/src/overlay005/field_control.c.patch), once it has worked out who the player faces.
+ */
+/* A ported clerk's shelf, asked for. */
+int openmmo_mart_ask(void)
+{
+    const FieldSystem *fs = pc_lab_field_system();
+
+    if (g_client == NULL || !g_seated || !on_ported_map(fs))
+        return 0;
+    printf("openmmo: a ported clerk on header %d, the shelf is the"
+           " server's\n", (int)fs->location->mapHeaderID);
+    openmmo_shop_mark_pending();
+    openmmo_client_interact_tile(g_client);
+    return 1;
+}
+
+/* A static site's fight ended won, or with the Pokemon caught, on this
+ * engine; the server is told before the RUN that closes its own instance. */
+int openmmo_static_won_send(void)
+{
+    if (g_client == NULL || !g_seated)
+        return 0;
+    return openmmo_client_ug_talk_send(g_client, MMO_UG_TALK_STATIC_WON, 0,
+                                       NULL, 0) == 0;
+}
+
+/* A static site's press, sent for openmmo_static.c: the same tile the mart
+ * command sends, with no shop marked pending. Answers whether it went. */
+int openmmo_static_press_send(void)
+{
+    if (g_client == NULL || !g_seated || openmmo_client_in_dialog(g_client))
+        return 0;
+    openmmo_client_interact_tile(g_client);
+    return 1;
 }
 
 /* The engine's Strength push stays on this tile (walk-on-spot) and never
@@ -1245,6 +1592,69 @@ void openmmo_maybe_strength_push(void *playerAvatar, int dir, int playerEvent)
            PlayerAvatar_GetXPos(av), PlayerAvatar_GetZPos(av), dir);
     openmmo_client_send_move(g_client, PlayerAvatar_GetXPos(av),
                              PlayerAvatar_GetZPos(av), dir, 0);
+}
+
+/*
+ * A ride that starts from the water is a field task with no script behind it, and neither
+ * PlayerAvatar_SetMovement nor the end of a script ever fires for one, so the server keeps
+ * the tile the ride started on.
+ */
+void openmmo_maybe_water_ride(void *playerAvatar)
+{
+    PlayerAvatar *av = playerAvatar;
+
+    if (av == NULL || g_client == NULL || !g_seated)
+        return;
+    if (PlayerAvatar_GetPlayerState(av) != PLAYER_AVATAR_SURFING)
+        return;
+    printf("openmmo: a ride from (%d,%d) the step hook cannot see\n",
+           PlayerAvatar_GetXPos(av), PlayerAvatar_GetZPos(av));
+    g_scene_ran = 1;
+}
+
+/* Who takes an A press over the field, in the order the press is offered. */
+int openmmo_field_interact_taken(FieldSystem *fs)
+{
+    if (openmmo_field_interact_peer()) {
+        return 1;
+    }
+
+    /* Then your own Pokemon, and before the scripts of either half. */
+    if (openmmo_follow_talk_try(fs)) {
+        return 1;
+    }
+
+    if (!openmmo_local_field_scripts_enabled()) {
+        openmmo_on_field_interact();
+        return 1;
+    }
+
+    openmmo_static_press_try(fs);
+    return 0;
+}
+
+/* A move the field made for the player rather than one they walked: a Strength
+ * boulder going in, or a ride the step hook cannot see. Both are reported off
+ * the same frame. */
+void openmmo_forced_move_taken(void *playerAvatar, int dir, int playerEvent)
+{
+    openmmo_maybe_strength_push(playerAvatar, dir, playerEvent);
+    openmmo_maybe_water_ride(playerAvatar);
+}
+
+/*
+ * A warp walked into northward. This game's own maps have none, a north entrance is a door, so
+ * the engine's warp chain never asked about the tile, and a visitor stood on HeartGold's
+ * station stairs, or its Pokemon Center stairs, facing a wall.
+ */
+int openmmo_warp_north_tile(u8 tileBehavior)
+{
+    return TileBehavior_IsWarpEntranceNorth(tileBehavior) || TileBehavior_IsWarpNorth(tileBehavior);
+}
+
+int openmmo_warp_north_taken(u8 tileBehavior)
+{
+    return openmmo_warp_north_tile(tileBehavior) && openmmo_on_ported_map();
 }
 
 int openmmo_allow_on_frame_script(unsigned scriptID)
@@ -1360,6 +1770,19 @@ static int action_is_on_spot(int a)
     return 0;
 }
 
+/* How many tiles one step action moves the avatar. */
+static int action_step_tiles(int a)
+{
+    if (a >= MOVEMENT_ACTION_JUMP_FAR_NORTH && a <= MOVEMENT_ACTION_JUMP_FAR_EAST)
+        return 2;
+    if (a >= MOVEMENT_ACTION_JUMP_DISTORTION_WORLD_NORTH
+        && a <= MOVEMENT_ACTION_JUMP_DISTORTION_WORLD_EAST)
+        return 3;
+    if (a == MOVEMENT_ACTION_JUMP_FARTHER_WEST || a == MOVEMENT_ACTION_JUMP_FARTHER_EAST)
+        return 3;
+    return 1;
+}
+
 static int action_is_step(int a)
 {
     if (action_is_idle_face(a) || action_is_on_spot(a))
@@ -1443,7 +1866,10 @@ static int warp_bump(PlayerAvatar *av, int dir)
     return TileBehavior_IsDoor(behavior) == TRUE;
 }
 
-/* Catalog bodies have no run cycle. Keep the run speed, use walk frames. */
+/* A body that is not a player's sheet has no run cycle (a person's is four
+ * walks): keep the run speed, use walk frames. The player's own two and a
+ * composed look, a hero sheet laid out like the player's, with its run,
+ * keep the run. */
 int openmmo_remap_movement(void *playerAvatar, int movementAction)
 {
     PlayerAvatar *av = playerAvatar;
@@ -1456,7 +1882,8 @@ int openmmo_remap_movement(void *playerAvatar, int movementAction)
     if (obj == NULL)
         return movementAction;
     gfx = (int)MapObject_GetGraphicsID(obj);
-    if (gfx == MMO_APPEAR_GFX_PLAYER_M || gfx == MMO_APPEAR_GFX_PLAYER_F)
+    if (gfx == MMO_APPEAR_GFX_PLAYER_M || gfx == MMO_APPEAR_GFX_PLAYER_F
+        || mmo_appearance_look_of_gfx(gfx) >= 0)
         return movementAction;
     if (movementAction >= MOVEMENT_ACTION_RUN_NORTH
         && movementAction <= MOVEMENT_ACTION_RUN_EAST)
@@ -1470,7 +1897,7 @@ void openmmo_player_set_movement(void *playerAvatar, void *mapObj, int movementA
 {
     PlayerAvatar *av = playerAvatar;
     FieldSystem *fs;
-    int x, z, dir, running;
+    int x, z, dir, running, tiles, below;
 
     (void)mapObj;
     (void)speed;
@@ -1486,6 +1913,33 @@ void openmmo_player_set_movement(void *playerAvatar, void *mapObj, int movementA
     if (fs == NULL || av != fs->playerAvatar)
         return;
 
+    /* HeartGold's follower does not watch the player: the player's own step
+     * code hands it the action and the tile to step onto (sub_0205D4B4 ->
+     * ov01_02205990). This is that hand-off, once the engine has committed
+     * the action (mods/openmmo/src/openmmo_follow_move.c). */
+    {
+        extern void openmmo_follow_player_moved(FieldSystem *fs, MapObject *player, int action);
+        openmmo_follow_player_moved(fs, (MapObject *)mapObj, movementAction);
+    }
+
+    /*
+     * OPENMMO_MOVE_REPORT=1: the action the engine committed and the state it came from, once
+     * per change.
+     */
+    {
+        static int on = -1;
+        static int last_action = -1;
+
+        if (on < 0)
+            on = openmmo_dev_env("OPENMMO_MOVE_REPORT") != NULL;
+        if (on && movementAction != last_action) {
+            last_action = movementAction;
+            printf("openmmo: move action %d in state %d\n", movementAction,
+                   PlayerAvatar_GetPlayerState(av));
+            fflush(stdout);
+        }
+    }
+
     /* A fight the window is only holding: the server already has the
      * player in battle, so a step or face now would walk a tile the
      * overworld is not on. The engine still animates; the wire does not. */
@@ -1493,6 +1947,13 @@ void openmmo_player_set_movement(void *playerAvatar, void *mapObj, int movementA
         return;
     if (session_in_dialog())
         return;
+
+    /*
+     * Below ground the tiles are the cavern's own 480x480 grid, and the server still holds the
+     * surface tile the descent left, it is not told about the trip, because the Underground
+     * is one player's own place.
+     */
+    below = openmmo_underground_active();
 
     dir = MovementAction_GetDirFromAction((enum MovementAction)movementAction);
     if (dir == DIR_NONE)
@@ -1507,12 +1968,28 @@ void openmmo_player_set_movement(void *playerAvatar, void *mapObj, int movementA
          * player stuck on this side of a door the server owns. */
         if (!openmmo_local_warps_enabled() && warp_bump(av, dir)) {
             printf("openmmo: warp-bump from (%d,%d) dir %d\n", x, z, dir);
-            if (g_client != NULL && g_seated)
+            if (g_client != NULL && g_seated && !below)
                 openmmo_client_send_move(g_client, x, z, dir, 0);
             return;
         }
         printf("openmmo: face dir %d at (%d,%d)\n", dir, x, z);
-        if (g_client != NULL && g_seated)
+        /* OPENMMO_INTERACT_REPORT=1: what the tile underfoot and the one
+         * faced are, for a warp that did not fire (a stair the engine's
+         * transition table does not know is one that reads as a wall). */
+        if (getenv("OPENMMO_INTERACT_REPORT") != NULL) {
+            MapObject *o = PlayerAvatar_GetMapObject(av);
+            FieldSystem *fs = o != NULL ? MapObject_FieldSystem(o) : NULL;
+
+            if (fs != NULL)
+                printf("openmmo: tile behaviour underfoot 0x%02x, ahead 0x%02x,"
+                       " warp event underfoot %d\n",
+                       TerrainCollisionManager_GetTileBehavior(fs, x, z),
+                       TerrainCollisionManager_GetTileBehavior(
+                           fs, x + MapObject_GetDxFromDir(dir),
+                           z + MapObject_GetDzFromDir(dir)),
+                       MapHeaderData_GetIndexOfWarpEventAtPos(fs, x, z));
+        }
+        if (g_client != NULL && g_seated && !below)
             openmmo_client_send_face(g_client, dir);
         return;
     }
@@ -1522,12 +1999,14 @@ void openmmo_player_set_movement(void *playerAvatar, void *mapObj, int movementA
 
     running = (movementAction >= MOVEMENT_ACTION_RUN_NORTH
                && movementAction <= MOVEMENT_ACTION_RUN_EAST);
-    printf("openmmo: step from (%d,%d) dir %d run=%d\n", x, z, dir, running);
+    tiles = action_step_tiles(movementAction);
+    printf("openmmo: step from (%d,%d) dir %d run=%d tiles=%d\n",
+           x, z, dir, running, tiles);
     /* The Underground counts dwell off the comm slot's step timer, and nothing
      * else down there knows a step started (openmmo_underground.c). */
     openmmo_underground_note_step(running);
-    if (g_client != NULL && g_seated)
-        openmmo_client_send_move(g_client, x, z, dir, running);
+    if (g_client != NULL && g_seated && !below)
+        openmmo_client_send_move_tiles(g_client, x, z, dir, running, tiles);
 }
 
 /*
@@ -1536,12 +2015,12 @@ void openmmo_player_set_movement(void *playerAvatar, void *mapObj, int movementA
  * vanilla port does.
  */
 /* Copy an environment string into a static buffer, or fall back to a default.
- * The client keeps the pointer for the session's lifetime, so it cannot borrow
- * the volatile getenv() return. */
-static const char *env_or(const char *name, const char *fallback,
+ * The caller reads the variable, so which kind of read a name gets is decided
+ * beside the name; the client keeps the pointer for the session's lifetime, so
+ * it cannot borrow the volatile getenv() return. */
+static const char *env_or(const char *v, const char *fallback,
                           char *buf, size_t bufsz)
 {
-    const char *v = getenv(name);
     if (v == NULL || v[0] == '\0')
         return fallback;
     size_t n = strlen(v);
@@ -1645,8 +2124,8 @@ static void maybe_start_from_env(void)
      */
     openmmo_config cfg;
     memset(&cfg, 0, sizeof(cfg));
-    cfg.user = env_or("OPENMMO_USER", "", user, sizeof(user));
-    cfg.pass = env_or("OPENMMO_PASS", "", pass, sizeof(pass));
+    cfg.user = env_or(getenv("OPENMMO_USER"), "", user, sizeof(user));
+    cfg.pass = env_or(getenv("OPENMMO_PASS"), "", pass, sizeof(pass));
     cfg.mode = OPENMMO_MODE_GAME_JOIN;
     /* This binary carries the engine's script VM, so say so: the server will
      * not start the same cutscene from its own corpus. A build told to leave
@@ -1657,7 +2136,7 @@ static void maybe_start_from_env(void)
         const char *ch = getenv("OPENMMO_CHARACTER");
 
         if (ch != NULL && ch[0] != '\0') {
-            cfg.select_name = env_or("OPENMMO_CHARACTER", "",
+            cfg.select_name = env_or(getenv("OPENMMO_CHARACTER"), "",
                                      character, sizeof(character));
             cfg.select_how = OPENMMO_SELECT_NAME;
         } else {
@@ -1715,8 +2194,8 @@ static void rejoin_attempt(void)
     openmmo_config cfg;
 
     memset(&cfg, 0, sizeof cfg);
-    cfg.user = env_or("OPENMMO_USER", "", user, sizeof user);
-    cfg.pass = env_or("OPENMMO_PASS", "", pass, sizeof pass);
+    cfg.user = env_or(getenv("OPENMMO_USER"), "", user, sizeof user);
+    cfg.pass = env_or(getenv("OPENMMO_PASS"), "", pass, sizeof pass);
     cfg.mode = OPENMMO_MODE_GAME_JOIN;
     cfg.local_scripts = openmmo_local_field_scripts_enabled();
     if (g_rejoin.character[0] != '\0') {
@@ -1738,6 +2217,44 @@ static void rejoin_attempt(void)
                 g_rejoin.tries);
     else
         fprintf(stderr, "openmmo: rejoin attempt %d\n", g_rejoin.tries);
+}
+
+/* How long a parting report may take to leave. A frame is 16 ms and the report
+ * is one small packet, so this is the socket being wedged rather than the
+ * report being large, and a quarter of a second is under the notice the
+ * window is already showing. */
+#define LEAVE_FLUSH_MS 250
+
+/*
+ * The last thing the server hears from this session: whatever the last seconds wrote, then the
+ * hang-up.
+ */
+static void report_and_hang_up(void)
+{
+    if (g_client == NULL)
+        return;
+    openmmo_script_state_flush(pc_lab_field_system(), g_client);
+    openmmo_client_flush(g_client, LEAVE_FLUSH_MS);
+    openmmo_client_disconnect(g_client);
+}
+
+/* Whether the state this session is holding is still the state the server should keep. */
+enum { LEAVE_SUPERSEDED = 0, LEAVE_REPORT = 1 };
+
+/* The session ends here, on purpose, with the process. Continue Offline and a
+ * landed save both leave this way: the launcher is what runs next, and it reads
+ * what the session left on disk. The card is hung up before the exit so it does
+ * not outlive the session that put it there. */
+static void leave_session(const char *why, int report)
+{
+    printf("openmmo: %s\n", why);
+    if (report)
+        report_and_hang_up();
+    else if (g_client != NULL)
+        openmmo_client_disconnect(g_client);
+    openmmo_presence_shutdown();
+    fflush(NULL);
+    exit(0);
 }
 
 /*
@@ -1923,8 +2440,7 @@ static void apply_hud_cmds(void)
              * straight through into the lobby's frames).
              */
             printf("openmmo: logout, back to character select\n");
-            if (g_client != NULL)
-                openmmo_client_disconnect(g_client);
+            report_and_hang_up();
             mmo_plat_unsetenv("OPENMMO_CHARACTER");
             mmo_plat_unsetenv("OPENMMO_BOOT_WORLD");
             /* Hang up before the exec: the card must not outlive the session
@@ -1937,6 +2453,16 @@ static void apply_hud_cmds(void)
              * drawing a world nobody is connected to. */
             fprintf(stderr, "openmmo: logout exec failed; leaving\n");
             exit(0);
+        } else if (kind == OPENMMO_HUD_CMD_EXPORT) {
+            /* Carry on offline. The save itself waits for a field that is
+             * standing still (openmmo_offline_export_tick, below), so this
+             * only remembers who asked. */
+            const openmmo_world_state *ws =
+                (g_client != NULL) ? openmmo_client_world_state(g_client)
+                                   : NULL;
+
+            openmmo_offline_export_request(
+                (ws != NULL && ws->valid) ? ws->name : NULL);
         }
     }
 }
@@ -1957,11 +2483,11 @@ static void drive_text_page(void)
         osk_feed(&g_osk, openmmo_text_kind(ev[i]), openmmo_text_unit(ev[i]));
 }
 
-/*
- * Drive the on-screen keyboard from the engine's already-debounced input and from the host
- * keyboard on the .text page.
- */
-static void osk_line_latin1(const osk_state *k, char *dst, size_t cap)
+/* The typed line, as UTF-8: the keyboard accumulates UTF-16 code units (the
+ * text page carries them, osk.h holds them) and everything downstream of here,
+ * the wire codec, the glyph bridge, the host panel, is UTF-8. A character
+ * that does not fit whole is left out rather than cut in half. */
+static void osk_line_utf8(const osk_state *k, char *dst, size_t cap)
 {
     size_t i, n = 0, len;
 
@@ -1971,15 +2497,25 @@ static void osk_line_latin1(const osk_state *k, char *dst, size_t cap)
     if (k == NULL)
         return;
     len = osk_text_len(k);
-    for (i = 0; i < len && n + 1 < cap; i++) {
-        unsigned u = k->text[i];
+    for (i = 0; i < len;) {
+        char seq[4];
+        unsigned used = 1;
+        unsigned w = openmmo_text_utf16_to_utf8(&k->text[i],
+                                                (unsigned)(len - i), seq, &used);
 
-        if (u != 0 && u < 256)
-            dst[n++] = (char)u;
+        if (w == 0 || n + w + 1 > cap)
+            break;
+        memcpy(dst + n, seq, w);
+        n += w;
+        i += used;
     }
     dst[n] = '\0';
 }
 
+/*
+ * Drive the on-screen keyboard from the engine's already-debounced input and from the host
+ * keyboard on the .text page.
+ */
 static void drive_osk(void)
 {
     u32 rep = gSystem.pressedKeysRepeatable;
@@ -2013,7 +2549,7 @@ static void drive_osk(void)
     if (osk_committed(&g_osk)) {
         char line[OSK_MAX_TEXT + 1];
 
-        osk_line_latin1(&g_osk, line, sizeof line);
+        osk_line_utf8(&g_osk, line, sizeof line);
         printf("openmmo: keyboard committed \"%s\"\n", line);
         if (mmo_creator_needs_entry(&g_creator)) {
             if (!mmo_creator_set_name(&g_creator, line))
@@ -2101,10 +2637,33 @@ static void creator_sync_osk(void)
 
 static void creator_submit(void)
 {
+    if (g_offline_lobby && mmo_creator_wants_new(&g_creator)) {
+        /* The row past the end, offline: no server to make a character on and
+         * no four steps to walk, because the cartridge's own opening asks the
+         * name and the gender itself. */
+        printf("openmmo: offline character select: starting a new game\n");
+        s_pending_gfx = -1;
+        g_offline_new_game = 1;
+        g_leave_field = 1;
+        mmo_creator_begin_wait(&g_creator);
+        return;
+    }
     if (mmo_creator_has_pick(&g_creator)) {
         int idx = mmo_creator_pick_index(&g_creator);
-        const mmo_character_list *list = openmmo_client_characters(g_client);
+        const mmo_character_list *list;
 
+        if (g_offline_lobby) {
+            /* Nobody to ask. The pick is the answer offline, and what it
+             * opens is the save that is already loaded. */
+            printf("openmmo: offline character select: continuing \"%s\"\n",
+                   g_creator.list.entry[idx].name[0]
+                       ? g_creator.list.entry[idx].name : "?");
+            s_pending_gfx = -1;
+            g_leave_field = 1;
+            mmo_creator_begin_wait(&g_creator);
+            return;
+        }
+        list = openmmo_client_characters(g_client);
         printf("openmmo: character select: picked \"%s\"\n",
                (list && idx >= 0 && idx < list->held)
                    ? list->entry[idx].name : "?");
@@ -2406,6 +2965,11 @@ static void drive_battle_hold(void)
         return;
     if (openmmo_encounter_scene_up())
         return;
+    /* A fight held for the field to settle is not one with no scene: the
+     * server's first turn arrives before the shake ends, and running from it
+     * here would answer a battle the player has not seen open. */
+    if (openmmo_encounter_deferred())
+        return;
     if (openmmo_client_battle_state(g_client) != OPENMMO_BATTLE_ACTIVE)
         return;
     if (g_battle_ran)
@@ -2646,9 +3210,14 @@ static void npc_seats_clear(void)
 }
 static long g_avatar_frees;   /* of those, ones that matched a cached avatar */
 
+/* Defined with the rest of the peer-follower half, further down; a forgotten
+ * avatar and a forgotten follower are one act and this is where it happens. */
+static void peer_followers_forget(void);
+
 static void forget_avatars(void)
 {
     memset(g_avatars, 0, sizeof g_avatars);
+    peer_followers_forget();
     openmmo_label_clear_all();
 }
 
@@ -2750,7 +3319,7 @@ static int openmmo_remote_at(FieldSystem *fs, int x, int z, char *name, int cap)
         if (PlayerAvatar_GetXPos(g_avatars[i]) != x
             || PlayerAvatar_GetZPos(g_avatars[i]) != z)
             continue;
-        label = openmmo_label_latin1(i);
+        label = openmmo_label_text(i);
         snprintf(name, (size_t)cap, "%s",
                  (label != NULL && label[0] != '\0') ? label : "?");
         return 1;
@@ -2812,6 +3381,17 @@ static int field_ready_for_peers(FieldSystem *fs)
 /* The client changed map on its own. Tell the server where it stands now. */
 static int g_pending_local_warp = -1;
 
+/* A warp this client is about to take on its own, told ahead of the map
+ * change: the Pokegear's Fly. The header watcher below only arms on a header
+ * Change, and a Fly to the town one is standing in changes nothing but the
+ * tile; armed here, the landing is reported the same way once it settles. */
+void openmmo_boot_expect_local_warp(int header)
+{
+    g_pending_local_warp = header;
+    if (g_have_seat)
+        g_seat.mapHeaderID = (enum MapHeaderID)header;
+}
+
 static void report_local_warp(FieldSystem *fs, int header)
 {
     int x, z, dir;
@@ -2823,6 +3403,12 @@ static void report_local_warp(FieldSystem *fs, int header)
     dir = PlayerAvatar_GetFacingDir(fs->playerAvatar);
     printf("openmmo: local warp landed on header %d at (%d,%d) dir %d\n",
            header, x, z, dir);
+    g_local_landing_header = header;
+    g_local_landing_frames = LOCAL_LANDING_FRAMES;
+    g_landing_mount = local_is_surfing();
+    /* Landed: the guard above is the one that answers from here. */
+    g_engine_warp_header = -1;
+    g_engine_warp_frames = 0;
     openmmo_client_send_script_warp(g_client, header, x, z, dir);
     /* The seat must move with us. */
     Location_Set(&g_seat, (enum MapHeaderID)header, WARP_ID_NONE, x, z, dir);
@@ -2872,13 +3458,38 @@ static int seat_from_server(int region, int bank, int map, int x, int z, int dir
                  dir >= 0 ? dir : FACE_DOWN);
     g_have_seat = 1;
     g_seated = 0;
+    g_seat_engine = 0;
     return 1;
 }
 
 static void snap_avatar(FieldSystem *fs, int x, int z, int dir)
 {
-    if (fs->playerAvatar != NULL)
+    if (fs->playerAvatar != NULL) {
+        /*
+         * The engine teleport underneath writes the height as if the ground were at zero
+         * (MapObject_SetPosDirFromCoords passes y=0), so a correction on a hill draws the
+         * player inside the terrain and then fails the height compare every later step asks,
+         * a clamped player stayed clamped.
+         */
+        MapObject *obj = PlayerAvatar_GetMapObject(fs->playerAvatar);
+        VecFx32 kept;
+        int have = 0;
+
+        if (obj != NULL) {
+            MapObject_GetPosPtr(obj, &kept);
+            have = 1;
+        }
         PlayerAvatar_SetPosDirFromCoords(fs->playerAvatar, x, z, dir);
+        if (have) {
+            VecFx32 pos;
+
+            MapObject_GetPosPtr(obj, &pos);
+            pos.y = kept.y;
+            MapObject_SetPos(obj, &pos);
+            MapObject_SetY(obj, ((kept.y) >> 3) / FX32_ONE);
+            MapObject_RecalculateObjectHeight(obj);
+        }
+    }
     if (fs->location != NULL) {
         fs->location->x = x;
         fs->location->z = z;
@@ -2917,26 +3528,24 @@ static int local_strength_active(void)
                                      MMO_FLAG_STRENGTH_ACTIVE);
 }
 
-/* Put FLAG_STRENGTH_ACTIVE where the engine reads it before it will slide a
- * boulder. Safe to call every frame: the engine also clears the flag on a map
- * change, and without this the server's set would not survive that clear. */
+/*
+ * Put FLAG_STRENGTH_ACTIVE where the engine reads it before it will slide a boulder. Safe to
+ * call every frame: the engine also clears the flag on a map change, and without this the
+ * server's set would not survive that clear.
+ */
 static void apply_local_strength(FieldSystem *fs)
 {
     VarsFlags *vf;
-    int want, have;
 
     if (fs == NULL || fs->saveData == NULL || g_client == NULL)
         return;
-    vf = SaveData_GetVarsFlags(fs->saveData);
-    want = local_strength_active();
-    have = VarsFlags_CheckFlag(vf, MMO_FLAG_STRENGTH_ACTIVE);
-    if (want == have)
+    if (!local_strength_active())
         return;
-    if (want)
-        VarsFlags_SetFlag(vf, MMO_FLAG_STRENGTH_ACTIVE);
-    else
-        VarsFlags_ClearFlag(vf, MMO_FLAG_STRENGTH_ACTIVE);
-    printf("openmmo: strength %s\n", want ? "on" : "off");
+    vf = SaveData_GetVarsFlags(fs->saveData);
+    if (VarsFlags_CheckFlag(vf, MMO_FLAG_STRENGTH_ACTIVE))
+        return;
+    VarsFlags_SetFlag(vf, MMO_FLAG_STRENGTH_ACTIVE);
+    printf("openmmo: strength on\n");
 }
 
 /* Put FLAG_HAS_PARTNER where LockAll and item-use read it. The walk is
@@ -3221,8 +3830,8 @@ static void apply_npcs(FieldSystem *fs)
 }
 
 /*
- * Put the avatar in the state the server says it is riding, and draw it from that state's own
- * sprite.
+ * Put the avatar in the state the server says it is riding, through the engine's own state
+ * change.
  */
 static void apply_local_mount(FieldSystem *fs)
 {
@@ -3230,41 +3839,36 @@ static void apply_local_mount(FieldSystem *fs)
 
     if (!field_has_avatar(fs) || g_client == NULL)
         return;
-    want = local_is_surfing() ? PLAYER_AVATAR_SURFING : PLAYER_AVATAR_WALKING;
-    have = PlayerAvatar_GetPlayerState(fs->playerAvatar);
-    if (want == have)
+    if (!field_settled(fs))
         return;
-    PlayerAvatar_SetPlayerState(fs->playerAvatar, want);
-    PlayerAvatar_ClearSpeed(fs->playerAvatar);
-    /* Only the mount draws itself. Walking off it leaves the sprite to
-     * apply_local_body, which runs straight after this and knows the catalog
-     * body the player picked, the walking sprite from this table is Lucas or
-     * Dawn, and seating it here would undress everyone who chose a look. */
-    if (want == PLAYER_AVATAR_SURFING) {
-        MapObject *obj = PlayerAvatar_GetMapObject(fs->playerAvatar);
-
-        if (obj != NULL)
-            sub_02061AD4(obj, Player_GetSpriteFromStateAndGender(
-                                  want, PlayerAvatar_GetGender(fs->playerAvatar)));
-    }
+    /* This is a surf correction, not A STATE correction, and the difference is the bicycle. */
+    have = PlayerAvatar_GetPlayerState(fs->playerAvatar);
+    if ((have == PLAYER_AVATAR_SURFING) == (local_is_surfing() != 0))
+        return;
+    want = local_is_surfing() ? PLAYER_AVATAR_SURFING : PLAYER_AVATAR_WALKING;
+    if (g_local_landing_frames > 0 && local_is_surfing() == g_landing_mount)
+        return;
+    PlayerAvatar_SetTransitionState(fs->playerAvatar,
+                                    want == PLAYER_AVATAR_SURFING
+                                        ? PLAYER_TRANSITION_SURFING
+                                        : PLAYER_TRANSITION_WALKING);
+    PlayerAvatar_RequestChangeState(fs->playerAvatar);
     printf("openmmo: avatar state %d -> %d\n", have, want);
 }
 
-/* Seat the chosen catalog body on the local avatar. GameStartNewSave
- * builds Lucas/Dawn from gender; a SkinSet type >= 512 names the look
- * picked in the lobby. Safe to call every frame. */
+/*
+ * Seat the chosen catalog body on the local avatar. GameStartNewSave builds Lucas/Dawn from
+ * gender; a SkinSet type >= 512 names the look picked in the lobby.
+ */
 static void apply_local_body(FieldSystem *fs)
 {
     MapObject *obj;
     int want, have;
 
-    if (!field_has_avatar(fs) || g_client == NULL)
+    if (!field_has_avatar(fs) || g_client == NULL || !session_configured())
         return;
-    /* A mount owns the sprite while it lasts. Both of these want to be the one
-     * that says what the avatar is drawn from, and a body seated over the surf
-     * sprite is a player walking on the water. The catalog body comes back on
-     * its own the moment the mount is cleared, because that is a change too. */
-    if (local_is_surfing())
+    /* SURFING is the only STATE that takes the sprite off a chosen body. */
+    if (PlayerAvatar_GetPlayerState(fs->playerAvatar) == PLAYER_AVATAR_SURFING)
         return;
     obj = PlayerAvatar_GetMapObject(fs->playerAvatar);
     if (obj == NULL)
@@ -3273,6 +3877,20 @@ static void apply_local_body(FieldSystem *fs)
     if (want == mmo_appearance_gender_gfx(s_player_gender >= 0 ? s_player_gender : 0)
         && s_pending_gfx >= 0)
         want = s_pending_gfx;
+    /*
+     * A composed look has a sheet a state (openmmo_look.c), and the engine picks it itself
+     * through the patched Player_GetSpriteFromStateAndGender on every transition; what is
+     * seated here is the walk, and only while the avatar is walking, so a ride or a cast keeps
+     * the sheet the engine just chose.
+     */
+    if (mmo_appearance_look_of_gfx(want) >= 0) {
+        int look = mmo_appearance_look_of_gfx(want);
+        int state = PlayerAvatar_GetPlayerState(fs->playerAvatar);
+
+        want = openmmo_look_state_gfx(look, state);
+        if (want < 0)
+            want = mmo_appearance_gender_gfx(s_player_gender >= 0 ? s_player_gender : 0);
+    }
     have = (int)MapObject_GetGraphicsID(obj);
     if (want == have)
         return;
@@ -3283,35 +3901,101 @@ static void apply_local_body(FieldSystem *fs)
            (int)MapObject_GetGraphicsID(obj));
 }
 
-/*
- * A trace probe, not a fix: say the frame the rival's name appears in the MiscSaveBlock and
- * the frame it goes away again.
- */
-static void watch_rival_name(FieldSystem *fs)
-{
-    static int last = -1; /* -1 unseen, 0 empty, 1 named */
-    const MiscSaveBlock *misc;
-    const charcode_t *name;
-    int now;
-
-    if (fs == NULL || fs->saveData == NULL)
-        return;
-    misc = SaveData_MiscSaveBlock(fs->saveData);
-    if (misc == NULL)
-        return;
-    name = MiscSaveBlock_RivalName(misc);
-    now = (name != NULL && name[0] != 0xFFFF) ? 1 : 0; /* 0xFFFF is CHAR_EOS */
-    if (now == last)
-        return;
-    printf("openmmo: rival name is %s (header %d)\n",
-           now ? "set" : "EMPTY",
-           fs->location != NULL ? (int)fs->location->mapHeaderID : -1);
-    last = now;
-}
-
 /* How far the avatar may be moved without reloading the ground under it: half
  * a land-data chunk, which is 32 tiles square. */
 #define SEAT_SNAP_TILES 16
+
+/* The server's warp, taken as the engine's own transition. */
+extern void sub_02056BDC(FieldSystem *fs, int header, int warpId, int x, int z, int dir, int type);
+extern void sub_02056C18(FieldSystem *fs, int header, int warpId, int x, int z, int dir);
+extern void FieldSystem_StartMapChangeWarpTask(FieldSystem *fs, int header, int warpId);
+
+static int engine_transition_to_seat(FieldSystem *fs)
+{
+    PlayerAvatar *av = fs->playerAvatar;
+    const WarpEvent *w;
+    MapObject *self;
+    u8 b;
+    int x, z, idx, dir, hdr, wid, moving;
+
+    if (av == NULL)
+        return 0;
+    x = PlayerAvatar_GetXPos(av);
+    z = PlayerAvatar_GetZPos(av);
+    dir = PlayerAvatar_GetFacingDir(av);
+    /* The ride's own gate, not MapObject_IsMoving: a step is a movement
+     * action (MAP_OBJ_STATUS_4 set until it lands), which IsMoving does not
+     * read, and the r1021 log still had the two assertions on every
+     * escalator. LocalMapObj_IsAnimationSet is what ov5_021D4A24 asks. */
+    self = PlayerAvatar_GetMapObject(av);
+    moving = self != NULL && !LocalMapObj_IsAnimationSet(self);
+    idx = MapHeaderData_GetIndexOfWarpEventAtPos(fs, x, z);
+    if (idx != -1) {
+        w = MapHeaderData_GetWarpEventByIndex(fs, idx);
+        if (w == NULL || (int)w->destHeaderID != (int)g_seat.mapHeaderID)
+            return 0;
+        hdr = w->destHeaderID;
+        wid = w->destWarpID;
+        b = TerrainCollisionManager_GetTileBehavior(fs, x, z);
+        /*
+         * A stair's and an escalator's departure is a walk the player is given (WALK_SLOW, the
+         * ride's 0xa/0xb), and the server's answer to the step onto the tile arrives while
+         * that step is still being walked: a map object already has its tile then, so the
+         * event is found, but LocalMapObj_IsAnimationSet says no to a moving object and the
+         * ride asserts twice and skips itself, the owner's "it won't always move you along
+         * the escalator" (r1018, every escalator in the log).
+         */
+        if (TileBehavior_IsWarpStairsEast(b)) {
+            if (moving)
+                return -1;
+            sub_02056BDC(fs, hdr, wid, 0, 0, DIR_EAST, 3);
+        } else if (TileBehavior_IsWarpStairsWest(b)) {
+            if (moving)
+                return -1;
+            sub_02056BDC(fs, hdr, wid, 0, 0, DIR_WEST, 3);
+        } else if (TileBehavior_IsEscalatorFlipFace(b)) {
+            if (moving)
+                return -1;
+            sub_02056BDC(fs, hdr, wid, 0, 0, dir == DIR_WEST ? DIR_EAST : DIR_WEST, 2);
+        } else if (TileBehavior_IsEscalator(b)) {
+            if (moving)
+                return -1;
+            sub_02056BDC(fs, hdr, wid, 0, 0, dir == DIR_WEST ? DIR_WEST : DIR_EAST, 2);
+        } else if (TileBehavior_IsWarpEntranceSouth(b) || TileBehavior_IsWarpSouth(b)) {
+            sub_02056C18(fs, hdr, wid, 0, 0, DIR_SOUTH);
+        } else if (TileBehavior_IsWarpEntranceEast(b) || TileBehavior_IsWarpEast(b)) {
+            sub_02056C18(fs, hdr, wid, 0, 0, DIR_EAST);
+        } else if (TileBehavior_IsWarpEntranceWest(b) || TileBehavior_IsWarpWest(b)) {
+            sub_02056C18(fs, hdr, wid, 0, 0, DIR_WEST);
+        } else if (TileBehavior_IsWarpEntranceNorth(b) || TileBehavior_IsWarpNorth(b)) {
+            sub_02056C18(fs, hdr, wid, 0, 0, DIR_NORTH);
+        } else if (TileBehavior_IsWarpPanel(b)) {
+            FieldSystem_StartMapChangeWarpTask(fs, hdr, wid);
+        } else {
+            return 0;
+        }
+        printf("openmmo: the server's warp is the tile's own; the engine"
+               " takes it (header %d, tile behaviour 0x%02x)\n", hdr, b);
+        return 1;
+    }
+    /* A door faced, which the engine enters on a press. */
+    x += MapObject_GetDxFromDir(dir);
+    z += MapObject_GetDzFromDir(dir);
+    if (!TileBehavior_IsDoor(TerrainCollisionManager_GetTileBehavior(fs, x, z)))
+        return 0;
+    idx = MapHeaderData_GetIndexOfWarpEventAtPos(fs, x, z);
+    if (idx == -1)
+        return 0;
+    w = MapHeaderData_GetWarpEventByIndex(fs, idx);
+    if (w == NULL || (int)w->destHeaderID != (int)g_seat.mapHeaderID)
+        return 0;
+    sub_02056BDC(fs, w->destHeaderID, w->destWarpID, 0, 0, dir, 1);
+    printf("openmmo: the server's warp is the door faced; the engine takes it"
+           " (header %d)\n", (int)w->destHeaderID);
+    return 1;
+}
+
+static void finish_seat(FieldSystem *fs);
 
 /* Load the server's map, or snap the avatar onto its tile if that map
  * is already up. Safe to call every frame: a map change in flight or
@@ -3320,12 +4004,39 @@ static void try_apply_seat(FieldSystem *fs)
 {
     Location *saved;
 
+    if (g_local_landing_frames > 0)
+        g_local_landing_frames--;
+    if (g_engine_warp_frames > 0 && --g_engine_warp_frames == 0)
+        g_engine_warp_header = -1;
     if (!g_have_seat || g_seated || !field_has_avatar(fs))
         return;
 
     if ((int)fs->location->mapHeaderID != (int)g_seat.mapHeaderID) {
         if (!field_settled(fs))
             return;
+        /*
+         * The engine announced this very warp and has not landed yet, so its transition is the
+         * one bringing us there and a load started here would be the second one, the flash
+         * the rule above exists to stop.
+         */
+        if (g_seat_engine && g_engine_warp_frames > 0
+            && g_engine_warp_header == (int)g_seat.mapHeaderID)
+            return;
+        if (g_seat_reload) {
+            int taken = engine_transition_to_seat(fs);
+
+            if (taken < 0)
+                return; /* the step onto the tile is still being walked */
+            if (taken > 0) {
+                /* The engine's own task is the map change now; its landing
+                 * on the seat's header brings us back here on the
+                 * same-header path, which waits for the walk out and
+                 * reports where the engine put us (g_seat_engine). */
+                g_seat_reload = 0;
+                g_seat_engine = 1;
+                return;
+            }
+        }
         saved = FieldOverworldState_GetPlayerLocation(
             SaveData_GetFieldOverworldState(fs->saveData));
         *saved = g_seat;
@@ -3333,6 +4044,25 @@ static void try_apply_seat(FieldSystem *fs)
         pc_lab_start_map_change(fs, &g_seat);
         printf("openmmo: loading header %d at (%d,%d)\n",
                (int)g_seat.mapHeaderID, g_seat.x, g_seat.z);
+        return;
+    }
+
+    if (g_seat_engine) {
+        MapObject *self = fs->playerAvatar != NULL
+                              ? PlayerAvatar_GetMapObject(fs->playerAvatar) : NULL;
+
+        if (!field_settled(fs) || self == NULL || !LocalMapObj_IsAnimationSet(self))
+            return;
+        /*
+         * Seated first: the report refuses while the seat is pending, and the first cut of
+         * this let it refuse in silence, cleared the flag, and fell to the snap below on the
+         * next frame, the player seen riding off an escalator and put back on it, facing the
+         * way the server's row said (owner, r1018).
+         */
+        g_seat_engine = 0;
+        g_seated = 1;
+        report_local_warp(fs, (int)fs->location->mapHeaderID);
+        finish_seat(fs);
         return;
     }
 
@@ -3369,11 +4099,20 @@ static void try_apply_seat(FieldSystem *fs)
         || PlayerAvatar_GetZPos(fs->playerAvatar) != g_seat.z)
         snap_avatar(fs, g_seat.x, g_seat.z, g_seat.faceDirection);
 
+    finish_seat(fs);
+}
+
+/* The seat is taken: the player stands on the map the server named, by a
+ * snap or by the engine's own transition. Everything the map is dressed with
+ * once that is true, the same list either way. */
+static void finish_seat(FieldSystem *fs)
+{
     g_seated = 1;
     /* GameStartNewSave has rolled a trainer id and re-inited the block the
      * name and money live in; write those again. The id it rolled stands
      * until the save-block seat replaces it with this character's own. */
     seat_trainer(fs->saveData);
+    seat_badges(fs->saveData);
     openmmo_bag_mark_dirty();
     openmmo_bag_sync(fs->saveData, FieldSystem_HasChildProcess(fs));
     apply_local_mount(fs);
@@ -3532,6 +4271,24 @@ static void heap_report_tick(const FieldSystem *fs, int settled, int mapId)
 /* Map an engine facing DIR_* to the D-pad key the engine's movement-action lookup
  * expects, so a step reuses PlayerAvatar_GetMovementActionAnimCode exactly as
  * CommPlayer_MoveClient does. */
+/*
+ * The movement action a peer crosses a tile with, given the pace the model timed the step at.
+ */
+static int peer_action_speed(int speed, u16 *pad)
+{
+    switch (speed) {
+    case OPENMMO_ENTITY_SPEED_RUN:
+        *pad |= PAD_BUTTON_B;
+        return PLAYER_ACTION_SPEED_NORMAL;
+    case OPENMMO_ENTITY_SPEED_WALK:
+        return PLAYER_ACTION_SPEED_SLOWER;
+    case OPENMMO_ENTITY_SPEED_SLOW:
+        return PLAYER_ACTION_SPEED_NOT_MOVING;
+    default:
+        return PLAYER_ACTION_SPEED_FAST;
+    }
+}
+
 static u16 pad_from_dir(int dir)
 {
     switch (dir) {
@@ -3563,6 +4320,167 @@ static int map_objects_free(FieldSystem *fs)
  * follower, a field effect. They are added without asking, and a crowd that has taken the last
  * slot turns one of those into the NULL write above.
  */
+
+/* ------------------------------------------------------------------ *
+ *  A peer's follower
+ * ------------------------------------------------------------------ */
+
+/* The fourth local-id band. 0x100 is the remote avatars, 0x200 the npcs, 0x300
+ * our own follower; a peer's is one per slot above those. */
+#define OPENMMO_PEER_FOLLOW_LOCALID_BASE 0x400
+
+/* How many of them may draw at once, and it is the texture pool that decides. */
+#define OPENMMO_PEER_FOLLOWERS_DRAWN 8
+
+/*
+ * And the object table. A follower is refused before a player is: a crowd of twelve where the
+ * last four walk alone is a working game, and one where the thirteenth object writes through a
+ * NULL is not.
+ */
+#define OPENMMO_FOLLOWER_OBJECT_RESERVE \
+    (OPENMMO_MAP_OBJECT_RESERVE + OPENMMO_ENTITY_NETID_CEIL)
+
+static int g_peer_follow_gfx[OPENMMO_ENTITY_NETID_CEIL];   /* 0 = none seated */
+
+static MapObject *peer_follower(FieldSystem *fs, int slot)
+{
+    return MapObjMan_LocalMapObjByIndex(fs->mapObjMan,
+                                        OPENMMO_PEER_FOLLOW_LOCALID_BASE + slot);
+}
+
+static int peer_followers_drawn(FieldSystem *fs)
+{
+    int i, n = 0;
+
+    for (i = 0; i < OPENMMO_ENTITY_NETID_CEIL; i++) {
+        if (peer_follower(fs, i) != NULL)
+            n++;
+    }
+    return n;
+}
+
+static void peer_follower_drop(FieldSystem *fs, int slot)
+{
+    MapObject *obj = peer_follower(fs, slot);
+
+    if (obj != NULL)
+        MapObject_Delete(obj);
+    g_peer_follow_gfx[slot] = 0;
+}
+
+/* Seat, or re-seat, the Pokemon behind one peer, on the tile the peer is standing on. */
+static void peer_follower_seat(FieldSystem *fs, const openmmo_event *ev,
+                               enum MapHeaderID header)
+{
+    int slot = ev->entity.slot;
+    MapObject *obj;
+
+    peer_follower_drop(fs, slot);
+    if (!ev->entity.has_follower)
+        return;
+
+    if (openmmo_dev_env("OPENMMO_FOLLOWER_NO_CULL") == NULL) {
+        if (peer_followers_drawn(fs) >= OPENMMO_PEER_FOLLOWERS_DRAWN) {
+            static int said;
+
+            if (!said) {
+                said = 1;
+                printf("openmmo: %d peer followers are drawn already, the"
+                       " next players walk alone\n",
+                       OPENMMO_PEER_FOLLOWERS_DRAWN);
+                fflush(stdout);
+            }
+            return;
+        }
+        if (map_objects_free(fs) <= OPENMMO_FOLLOWER_OBJECT_RESERVE) {
+            static int said;
+
+            if (!said) {
+                said = 1;
+                printf("openmmo: the map's object table is down to %d free --"
+                       " peer followers give way to players\n",
+                       map_objects_free(fs));
+                fflush(stdout);
+            }
+            return;
+        }
+    }
+
+    /*
+     * MOVEMENT_TYPE_NONE, and that is the load-bearing line of this whole half:
+     * MOVEMENT_TYPE_FOLLOW_PLAYER follows the LOCAL avatar (MapObjectMan_GetPlayerMapObject),
+     * so a peer's follower given that type walks behind the wrong trainer.
+     */
+    obj = MapObjectMan_AddMapObject(fs->mapObjMan, ev->entity.x, ev->entity.z,
+                                    ev->entity.dir,
+                                    (u32)ev->entity.follower_gfx,
+                                    MOVEMENT_TYPE_NONE, header);
+    if (obj == NULL)
+        return;
+    MapObject_SetLocalID(obj, (u32)(OPENMMO_PEER_FOLLOW_LOCALID_BASE + slot));
+    g_peer_follow_gfx[slot] = ev->entity.follower_gfx;
+    printf("openmmo: peer slot %d walks with gfx %d\n", slot,
+           ev->entity.follower_gfx);
+    fflush(stdout);
+}
+
+/*
+ * One step of a peer's follower: onto the tile the peer was standing on before this step, at
+ * the pace the peer took it.
+ */
+static void peer_follower_step(FieldSystem *fs, int slot, int was_x, int was_z,
+                               int speed)
+{
+    MapObject *obj = peer_follower(fs, slot);
+    int fx, fz, dx, dz, dir, action;
+
+    if (obj == NULL)
+        return;
+    fx = MapObject_GetX(obj);
+    fz = MapObject_GetZ(obj);
+    dx = was_x - fx;
+    dz = was_z - fz;
+    if (dx == 0 && dz == 0)
+        return;
+
+    if ((dx != 0 && dz != 0) || dx < -1 || dx > 1 || dz < -1 || dz > 1) {
+        MapObject_SetPosDirFromCoords(obj, was_x, 0, was_z,
+                                      MapObject_GetFacingDir(obj));
+        return;
+    }
+
+    if (dz < 0)
+        dir = DIR_NORTH;
+    else if (dz > 0)
+        dir = DIR_SOUTH;
+    else if (dx < 0)
+        dir = DIR_WEST;
+    else
+        dir = DIR_EAST;
+
+    /* The same three paces the crowd draws a player with, so a follower keeps
+     * station with the trainer instead of arriving a beat late or early. */
+    switch (speed) {
+    case OPENMMO_ENTITY_SPEED_FASTEST:
+    case OPENMMO_ENTITY_SPEED_RUN:
+        action = MOVEMENT_ACTION_RUN_NORTH + dir;
+        break;
+    case OPENMMO_ENTITY_SPEED_SLOW:
+        action = MOVEMENT_ACTION_WALK_SLOW_NORTH + dir;
+        break;
+    default:
+        action = MOVEMENT_ACTION_WALK_NORMAL_NORTH + dir;
+        break;
+    }
+    LocalMapObj_SetAnimationCode(obj, (enum MovementAction)action);
+}
+
+/* Every peer's follower forgotten, for a map change or a session that ended.
+ * The objects go with the table; only the bookkeeping is ours to clear. */
+static void peer_followers_forget(void)
+{
+    memset(g_peer_follow_gfx, 0, sizeof g_peer_follow_gfx);
+}
 
 /* Apply one render event to the avatar in its slot. fs must already be settled. */
 static void apply_entity_event(FieldSystem *fs, const openmmo_event *ev)
@@ -3597,7 +4515,7 @@ static void apply_entity_event(FieldSystem *fs, const openmmo_event *ev)
          * The cull. Refusing to draw one player is a missing sprite; letting the engine run
          * out of objects is a write through NULL.
          */
-        if (getenv("OPENMMO_CROWD_NO_CULL") == NULL
+        if (openmmo_dev_env("OPENMMO_CROWD_NO_CULL") == NULL
             && map_objects_free(fs) <= OPENMMO_MAP_OBJECT_RESERVE) {
             static int said;
             if (!said) {
@@ -3621,15 +4539,26 @@ static void apply_entity_event(FieldSystem *fs, const openmmo_event *ev)
         printf("openmmo: named slot %d \"%s\"\n", slot,
                ev->entity.name[0] != '\0' ? ev->entity.name : "?");
         fflush(stdout);
+        peer_follower_seat(fs, ev, fs->location != NULL
+                                   ? fs->location->mapHeaderID
+                                   : (enum MapHeaderID)0);
         {
             MapObject *obj = PlayerAvatar_GetMapObject(av);
             u32 before = MapObject_GetGraphicsID(obj);
-            int want = ev->entity.has_body ? ev->entity.gfx : -1;
-            const char *fg = getenv("OPENMMO_FAKE_GFX");
+            /*
+             * Always seated, body or not: PlayerAvatar_New asked the patched
+             * Player_GetSpriteFromStateAndGender, which answers the LOCAL look for the local
+             * gender, so a peer of our gender with no body of their own was built wearing our
+             * look.
+             */
+            int want = ev->entity.has_body
+                           ? openmmo_look_body_gfx(ev->entity.gfx, ev->entity.gender)
+                           : mmo_appearance_gender_gfx(ev->entity.gender);
+            const char *fg = openmmo_dev_env("OPENMMO_FAKE_GFX");
 
             /* OPENMMO_FAKE_GFX=N applies one id to the whole crowd; a
              * comma-list cycles. A body on the event wins. */
-            if (want < 0 && fg != NULL && fg[0] != '\0') {
+            if (!ev->entity.has_body && fg != NULL && fg[0] != '\0') {
                 int n = 0, pick = slot;
                 const char *p = fg;
 
@@ -3687,17 +4616,44 @@ static void apply_entity_event(FieldSystem *fs, const openmmo_event *ev)
         PlayerAvatar *av;
         u16 pad;
         u32 anim;
+        int action;
+
+        int was_x, was_z;
 
         if (!avatar_live(fs, slot))
             break;
         av = g_avatars[slot];
+        /* Read before the step: the tile the peer is about to leave is the one
+         * its follower steps onto. */
+        was_x = PlayerAvatar_GetXPos(av);
+        was_z = PlayerAvatar_GetZPos(av);
         pad = pad_from_dir(ev->entity.dir);
-        /* actionSpeed 2 = walk, isRunning 1, collision 0, the normal-step call
-         * from CommPlayer_MoveClient. The action both animates and advances the
-         * MapObject one tile, keeping the drawn avatar on the model's tile. */
-        anim = PlayerAvatar_GetMovementActionAnimCode(av, pad, pad, 2, 0, 0);
+        action = peer_action_speed(ev->entity.speed, &pad);
+        /* collision 0, the normal-step call from CommPlayer_MoveClient. The
+         * action both animates and advances the MapObject one tile, keeping the
+         * drawn avatar on the model's tile. Running is asked for so that the run
+         * key the pace put in the pad is read. */
+        anim = PlayerAvatar_GetMovementActionAnimCode(av, pad, pad, action, 1, 0);
         if (anim != 0xff)
             PlayerAvatar_SetMapObjMovement(av, (enum MovementAction)anim, 1);
+        peer_follower_step(fs, slot, was_x, was_z, ev->entity.speed);
+        break;
+    }
+    case OPENMMO_EV_ENTITY_PLACE: {
+        openmmo_event seat = *ev;
+
+        if (!avatar_live(fs, slot))
+            break;
+        /*
+         * Seated afresh rather than written onto the live object: a position write passes y =
+         * 0 and leaves the avatar standing at height zero wherever the ground is, and it
+         * clears the step the object is in the middle of.
+         */
+        printf("openmmo: peer slot %d set down at (%d,%d)\n",
+               slot, ev->entity.x, ev->entity.z);
+        fflush(stdout);
+        seat.kind = OPENMMO_EV_ENTITY_SPAWN;
+        apply_entity_event(fs, &seat);
         break;
     }
     case OPENMMO_EV_ENTITY_TURN: {
@@ -3714,6 +4670,7 @@ static void apply_entity_event(FieldSystem *fs, const openmmo_event *ev)
             g_avatars[slot] = NULL; /* uncached first; see the spawn path above */
             PlayerAvatar_Delete(going);
         }
+        peer_follower_drop(fs, slot);
         openmmo_label_clear(slot);
         break;
     }
@@ -3749,7 +4706,7 @@ static void catch_up_peers(FieldSystem *fs)
         int slot = evs[i].entity.slot;
         PlayerAvatar *av;
         MapObject *obj;
-        int ax, az, dx, dz, dir;
+        int ax, az, dx, dz, dir, behind, action;
         u16 pad;
         u32 anim;
 
@@ -3789,6 +4746,11 @@ static void catch_up_peers(FieldSystem *fs)
             continue;
         }
 
+        /* More than one tile behind the model is the same catching-up the model
+         * itself runs to close, so the avatar closes it at the same pace rather
+         * than strolling further behind every frame. */
+        behind = (dx < 0 ? -dx : dx) + (dz < 0 ? -dz : dz);
+
         /* One axis at a time, the long one first, so a diagonal catch-up walks
          * the way a person would rather than zig-zagging. */
         if (dx != 0 && (dz == 0 || (dx < 0 ? -dx : dx) >= (dz < 0 ? -dz : dz)))
@@ -3801,7 +4763,10 @@ static void catch_up_peers(FieldSystem *fs)
             : dz > 0 ? OPENMMO_DIR_SOUTH
                      : OPENMMO_DIR_NORTH;
         pad = pad_from_dir(dir);
-        anim = PlayerAvatar_GetMovementActionAnimCode(av, pad, pad, 2, 0, 0);
+        action = peer_action_speed(behind > 1 ? OPENMMO_ENTITY_SPEED_RUN
+                                              : evs[i].entity.speed,
+                                   &pad);
+        anim = PlayerAvatar_GetMovementActionAnimCode(av, pad, pad, action, 1, 0);
         if (anim != 0xff)
             PlayerAvatar_SetMapObjMovement(av, (enum MovementAction)anim, 1);
     }
@@ -3887,6 +4852,9 @@ static void drive_fake_entity(FieldSystem *fs)
     }
 
     ev.kind = OPENMMO_EV_ENTITY_STEP;
+    /* A synthetic peer walks: zeroed memory is the engine's fastest
+     * pace, not its ordinary one. */
+    ev.entity.speed = OPENMMO_ENTITY_SPEED_WALK;
     ev.entity.dir = kDirs[(phase / 3) % 4];
     apply_entity_event(fs, &ev);
     phase++;
@@ -3938,6 +4906,10 @@ static void drive_fake_crowd(FieldSystem *fs)
              * or outside ASCII gets driven onto a nameplate headlessly. */
             snprintf(ev.entity.name, sizeof ev.entity.name, "%s%d",
                      g_fake_name != NULL ? g_fake_name : "Player", i);
+            if (g_fake_followers) {
+                ev.entity.has_follower = 1;
+                ev.entity.follower_gfx = mmo_follower_gfx_base() + i;
+            }
             apply_entity_event(fs, &ev);
             if (avatar_live(fs, i))
                 live++;
@@ -3960,12 +4932,23 @@ static void drive_fake_crowd(FieldSystem *fs)
 
         memset(&ev, 0, sizeof ev);
         ev.kind = OPENMMO_EV_ENTITY_STEP;
+        /* A synthetic peer walks: zeroed memory is the engine's fastest
+         * pace, not its ordinary one. */
+        ev.entity.speed = OPENMMO_ENTITY_SPEED_WALK;
         ev.entity.slot = i;
         ev.entity.localid = OPENMMO_ENTITY_LOCALID_BASE + i;
         ev.entity.dir = (phase & 1) ? DIR_SOUTH : DIR_NORTH;
         apply_entity_event(fs, &ev);
     }
     phase++;
+}
+
+/* The GAME, stopped where it stands, at the platform's word. */
+static volatile int g_host_paused;
+
+void openmmo_mod_pause(int on)
+{
+    g_host_paused = on ? 1 : 0;
 }
 
 /*
@@ -3978,6 +4961,11 @@ void openmmo_mod_frame(void)
     static int primed;
     static int rearmed;
     static int was_settled;
+
+    /* Before anything this frame would do, including the crash handler and
+     * the session pump: a parked frame is one that has not started. */
+    while (g_host_paused)
+        mmo_plat_sleep_us(20 * 1000);
 
     /*
      * The engine takes SIGSEGV, SIGBUS, SIGILL and SIGFPE for itself in main(), after the
@@ -3992,6 +4980,15 @@ void openmmo_mod_frame(void)
     openmmo_sprite_bind_overlay();
     openmmo_sprite_dump_once();
     appearance_dump_once();
+
+    /* Before the session gate below: offline there is no client at all and the
+     * report of what the player has is exactly what an offline run owes. Online
+     * it answers once, on a save the server took: the window is drawing the
+     * character that save replaced, and the join is what reads the new one. */
+    openmmo_playtime_tick();
+    if (openmmo_import_tick(g_client))
+        leave_session("your save is this character now; back to the launcher,"
+                      " and Play carries on as it", LEAVE_SUPERSEDED);
 
     if (g_client == NULL)
         return;
@@ -4009,7 +5006,7 @@ void openmmo_mod_frame(void)
         }
 
         {
-            const char *o = getenv("OPENMMO_OSK");
+            const char *o = openmmo_dev_env("OPENMMO_OSK");
             g_osk_on = (o != NULL && o[0] != '\0' && o[0] != '0');
             if (g_osk_on) {
                 if (o[0] == 'n' || o[0] == 'N')
@@ -4026,20 +5023,20 @@ void openmmo_mod_frame(void)
         }
 
         {
-            const char *f = getenv("OPENMMO_FAKE_ENTITY");
+            const char *f = openmmo_dev_env("OPENMMO_FAKE_ENTITY");
             g_fake_entity = (f != NULL && f[0] != '\0' && f[0] != '0');
             if (g_fake_entity)
                 printf("openmmo: synthetic remote entity enabled (OPENMMO_FAKE_ENTITY)\n");
         }
 
         {
-            const char *n = getenv("OPENMMO_FAKE_NAME");
+            const char *n = openmmo_dev_env("OPENMMO_FAKE_NAME");
 
             g_fake_name = n; /* NULL = unset (default "Player"); "" = empty */
         }
 
         {
-            const char *c = getenv("OPENMMO_FAKE_CROWD");
+            const char *c = openmmo_dev_env("OPENMMO_FAKE_CROWD");
 
             g_fake_crowd = (c != NULL && c[0] != '\0') ? atoi(c) : 0;
             if (g_fake_crowd > OPENMMO_ENTITY_NETID_CEIL) {
@@ -4056,7 +5053,17 @@ void openmmo_mod_frame(void)
         }
 
         {
-            const char *t = getenv("OPENMMO_TESTBATTLE");
+            const char *f = openmmo_dev_env("OPENMMO_FAKE_FOLLOWERS");
+
+            g_fake_followers = (f != NULL && f[0] != '\0' && f[0] != '0');
+            if (g_fake_followers) {
+                printf("openmmo: the synthetic crowd walks with a Pokemon each"
+                       " (OPENMMO_FAKE_FOLLOWERS)\n");
+            }
+        }
+
+        {
+            const char *t = openmmo_dev_env("OPENMMO_TESTBATTLE");
 
             g_testbattle = (t != NULL && t[0] != '\0' && t[0] != '0');
             if (g_testbattle)
@@ -4064,7 +5071,7 @@ void openmmo_mod_frame(void)
         }
 
         {
-            const char *d = getenv("OPENMMO_DUEL");
+            const char *d = openmmo_dev_env("OPENMMO_DUEL");
 
             if (d != NULL && d[0] != '\0') {
                 g_duel_target = d;
@@ -4073,7 +5080,7 @@ void openmmo_mod_frame(void)
         }
 
         {
-            const char *t = getenv("OPENMMO_TRADE_WITH");
+            const char *t = openmmo_dev_env("OPENMMO_TRADE_WITH");
 
             if (t != NULL && t[0] != '\0') {
                 g_trade_target = t;
@@ -4082,7 +5089,7 @@ void openmmo_mod_frame(void)
         }
 
         {
-            const char *s = getenv("OPENMMO_SHOP");
+            const char *s = openmmo_dev_env("OPENMMO_SHOP");
 
             g_ask_shop = (s != NULL && s[0] != '\0' && s[0] != '0');
             if (g_ask_shop) {
@@ -4092,7 +5099,7 @@ void openmmo_mod_frame(void)
         }
 
         {
-            const char *d = getenv("OPENMMO_DIALOG");
+            const char *d = openmmo_dev_env("OPENMMO_DIALOG");
 
             g_ask_dialog = (d != NULL && d[0] != '\0' && d[0] != '0');
             if (g_ask_dialog) {
@@ -4102,7 +5109,7 @@ void openmmo_mod_frame(void)
         }
 
         {
-            const char *yn = getenv("OPENMMO_YESNO");
+            const char *yn = openmmo_dev_env("OPENMMO_YESNO");
 
             g_ask_yesno = (yn != NULL && yn[0] != '\0' && yn[0] != '0');
             if (g_ask_yesno) {
@@ -4112,7 +5119,7 @@ void openmmo_mod_frame(void)
         }
 
         {
-            const char *mn = getenv("OPENMMO_MENU");
+            const char *mn = openmmo_dev_env("OPENMMO_MENU");
 
             g_ask_menu = (mn != NULL && mn[0] != '\0' && mn[0] != '0');
             if (g_ask_menu) {
@@ -4122,7 +5129,7 @@ void openmmo_mod_frame(void)
         }
 
         {
-            const char *m = getenv("OPENMMO_MOVE");
+            const char *m = openmmo_dev_env("OPENMMO_MOVE");
 
             g_ask_move = (m != NULL && m[0] != '\0' && m[0] != '0');
             if (g_ask_move) {
@@ -4132,7 +5139,7 @@ void openmmo_mod_frame(void)
         }
 
         {
-            const char *f = getenv("OPENMMO_FAKE_CHARS");
+            const char *f = openmmo_dev_env("OPENMMO_FAKE_CHARS");
 
             if (f != NULL && f[0] != '\0' && f[0] != '0') {
                 mmo_creator_reset(&g_creator);
@@ -4200,7 +5207,16 @@ void openmmo_mod_frame(void)
      * clock. Driven every frame and not only while down there, because the
      * frame the climb starts is the frame it has to go. */
     openmmo_underground_tick(openmmo_client_latency_ms(g_client));
-    watch_rival_name(fs);
+    openmmo_fishing_tick(fs, g_client);
+    openmmo_apricorn_tick(fs);
+    openmmo_fieldmove_tick(fs);
+
+    /* The image the player asked to carry offline, once the field will stand
+     * for it. The session ends on a written one: the launcher adopts what
+     * landed there as the offline save and PLAY OFFLINE plays it. */
+    if (openmmo_offline_export_tick(g_client))
+        leave_session("leaving the server; this game plays offline from here",
+                      LEAVE_REPORT);
 
     int settled = field_settled(fs);
     int peers_ok = field_ready_for_peers(fs);
@@ -4328,6 +5344,15 @@ void openmmo_mod_frame(void)
              * The client has already re-anchored the from-tile; put the engine
              * avatar on the same tile so the next predicted step is not a
              * desync. A snap that arrives mid-transition waits on the seat. */
+            /*
+             * Never below ground: the tile named is a surface one and the cavern has no land
+             * at it, so obeying it drops the avatar onto terrain that is not there.
+             */
+            if (openmmo_underground_active()) {
+                printf("openmmo: ignoring a correction to (%d,%d) while"
+                       " below ground\n", ev.entity.x, ev.entity.z);
+                break;
+            }
             if (field_has_avatar(fs)) {
                 snap_avatar(fs, ev.entity.x, ev.entity.z, ev.entity.dir);
                 printf("openmmo: snapped to (%d,%d) dir %d\n",
@@ -4349,8 +5374,28 @@ void openmmo_mod_frame(void)
                    ev.warp.region, ev.warp.bank, ev.warp.map,
                    ev.warp.x, ev.warp.z, ev.warp.dir);
             if (seat_from_server(ev.warp.region, ev.warp.bank, ev.warp.map,
-                                 ev.warp.x, ev.warp.z, ev.warp.dir))
+                                 ev.warp.x, ev.warp.z, ev.warp.dir)) {
                 g_seat_reload = 1;
+                if (g_local_landing_frames > 0
+                    && (int)g_seat.mapHeaderID == g_local_landing_header) {
+                    /* The engine already took it and said so; this is the
+                     * server's answer to the step, not a new place. */
+                    g_seat_reload = 0;
+                    printf("openmmo: the server's warp confirms the engine's"
+                           " landing on header %d\n", g_local_landing_header);
+                } else if (g_engine_warp_frames > 0
+                           && (int)g_seat.mapHeaderID == g_engine_warp_header) {
+                    /* The engine is taking us there as this arrives. Hand the
+                     * seat to that transition (g_seat_engine): its landing
+                     * settles the seat once the walk out of the door is over,
+                     * and nothing is snapped or loaded twice. */
+                    g_seat_reload = 0;
+                    g_seat_engine = 1;
+                    printf("openmmo: the server's warp is the transition the"
+                           " engine is already running (header %d)\n",
+                           g_engine_warp_header);
+                }
+            }
             break;
         case OPENMMO_EV_ENCOUNTER: {
             int foe = ev.encounter.foe_species;
@@ -4367,8 +5412,41 @@ void openmmo_mod_frame(void)
                 foe = 19;
                 lv = 3;
             }
-            if (openmmo_encounter_start(fs, g_client, foe, lv) == 0)
+            /* A reel-in that landed asked for this one: the fishing task is
+             * the field task and starts the fight itself. */
+            if (openmmo_fishing_take_battle(fs, g_client, foe, lv)) {
                 g_battle_ran = 1;
+                break;
+            }
+            /* And so did one of this game's own scripted sites: the paused
+             * script starts it on the task the scene is already running under
+             * (mods/openmmo/src/openmmo_static.c). */
+            {
+                extern int openmmo_static_take_battle(int foe_species, int foe_level);
+                int taken = openmmo_static_take_battle(foe, lv);
+
+                if (taken) {
+                    /* Landed after the scene gave up and fought its own: a
+                     * scene still up answers for it at its end, and one
+                     * already over is run from here, so the server's instance
+                     * closes either way and no second fight starts. */
+                    if (taken == 2)
+                        openmmo_client_battle_run(g_client);
+                    g_battle_ran = 1;
+                    break;
+                }
+            }
+            if (openmmo_encounter_start(fs, g_client, foe, lv) == 0) {
+                g_battle_ran = 1;
+                break;
+            }
+            /* A field still busy, the smash or the headbutt whose roll this
+             * is has not finished playing, is not a refusal: the fight
+             * starts the frame the field is free. */
+            if (openmmo_encounter_field_busy(fs)) {
+                openmmo_encounter_defer(foe, lv);
+                g_battle_ran = 1;
+            }
             break;
         }
         case OPENMMO_EV_BATTLE_EVENT:
@@ -4451,7 +5529,7 @@ void openmmo_mod_frame(void)
             break;
         case OPENMMO_EV_MONEY:
             if (fs != NULL && fs->saveData != NULL)
-                seat_trainer_money(SaveData_GetTrainerInfo(fs->saveData),
+                openmmo_seat_trainer_money(SaveData_GetTrainerInfo(fs->saveData),
                                    ev.money.money);
             else
                 printf("openmmo: money %d\n", ev.money.money);
@@ -4464,6 +5542,9 @@ void openmmo_mod_frame(void)
                                  FieldSystem_HasChildProcess(fs));
             break;
         case OPENMMO_EV_SHOP:
+            printf("openmmo: the server %s a shelf of %d line(s)%s\n",
+                   ev.shop.open ? "opened" : "closed", ev.shop.count,
+                   settled ? "" : " (the field is busy; it waits)");
             openmmo_shop_mark_pending();
             if (settled)
                 openmmo_shop_try_open(fs);
@@ -4567,7 +5648,8 @@ void openmmo_mod_frame(void)
      * In a windowed session the engine's own start menu is a second copy of the window's UI, 
      * every screen it offered is on the HUD bar, so X on the settled field opens nothing.
      */
-    if (openmmo_hud_windowed() && !openmmo_underground_active()) {
+    if (openmmo_session_configured() && openmmo_hud_windowed()
+        && !openmmo_underground_active()) {
         FieldSystem *fs = pc_lab_field_system();
 
         if (fs != NULL && FieldSystem_IsRunningFieldMap(fs)
@@ -4581,7 +5663,7 @@ void openmmo_mod_frame(void)
         int composing = mmo_chatwin_composing(&g_chat);
 
         if (composing)
-            osk_line_latin1(&g_osk, typed, sizeof typed);
+            osk_line_utf8(&g_osk, typed, sizeof typed);
         else
             typed[0] = '\0';
         openmmo_hud_publish_now(g_client, g_status_flags, g_message,
@@ -4620,7 +5702,11 @@ void openmmo_mod_frame(void)
             g_status_flags &= ~(uint32_t)OPENMMO_STATUS_F_REJOIN;
             /* The hush below held every player at zero; the reseat's map
              * reload restarts the BGM, this puts the levels back. */
-            openmmo_mixer_apply();
+            {
+                extern void openmmo_mixer_apply(void); /* openmmo_mixer.c */
+
+                openmmo_mixer_apply();
+            }
         }
 
         /* Raw states, not openmmo_status_over: once F_REJOIN is up, over()
@@ -4652,7 +5738,17 @@ void openmmo_mod_frame(void)
              * through joining and is left to run against its own phase
              * deadlines, which fire in the fused build now (client.c). */
             if (st == OPENMMO_ST_FAILED || st == OPENMMO_ST_DISCONNECTED) {
-                if (now - g_rejoin.lost_s > REJOIN_GIVE_UP_S) {
+                /* A refusal is not an outage. */
+                if (openmmo_client_login_refusal(g_client)
+                    == MMO_LOGIN_ALREADY_LOGGED_IN) {
+                    g_rejoin.gave_up = 1;
+                    g_rejoin.active = 0;
+                    g_status_flags &= ~(uint32_t)OPENMMO_STATUS_F_REJOIN;
+                    fprintf(stderr,
+                            "openmmo: stopped rejoining after %d attempt(s): "
+                            "the account is signed in elsewhere\n",
+                            g_rejoin.tries);
+                } else if (now - g_rejoin.lost_s > REJOIN_GIVE_UP_S) {
                     g_rejoin.gave_up = 1;
                     g_rejoin.active = 0;
                     g_status_flags &= ~(uint32_t)OPENMMO_STATUS_F_REJOIN;
@@ -4758,6 +5854,10 @@ void openmmo_mod_frame(void)
      * arrival burst is settled on the map we are still leaving.
      */
     openmmo_follow_tick(fs, field_settled(fs));
+    {
+        extern void openmmo_follow_move_tick(FieldSystem *fs);
+        openmmo_follow_move_tick(fs);
+    }
 
     if (fs != NULL && fs->saveData != NULL
         && FieldSystem_IsRunningFieldMap(fs)) {
@@ -4769,6 +5869,29 @@ void openmmo_mod_frame(void)
      * asked for closing again, and while one is up the field is not. */
     openmmo_apps_pump(fs);
     openmmo_contest_link_pump();
+    /* Beside the relay and outside the settled gate for the same reason: the
+     * station holds the pen while the contest's own application is up, which is
+     * exactly when the field is not settled. It reads `settled` itself, for the
+     * one frame it needs one, the frame it asks for a group. */
+    openmmo_contest_lab_frame(fs, settled);
+    /*
+     * Why the field is busy, which is the question behind every screen that never opened.
+     * `settled` is four conditions and the log only ever showed the verdict; this shows which
+     * one is holding, and only when it changes.
+     */
+    if (getenv("OPENMMO_SETTLE_TRACE") != NULL) {
+        static int was = -1;
+        int now = fs == NULL ? 0
+            : 1 | (fs->task != NULL ? 2 : 0)
+                | (FieldSystem_IsRunningFieldMap(fs) ? 4 : 0)
+                | (FieldSystem_HasChildProcess(fs) ? 8 : 0);
+
+        if (now != was) {
+            was = now;
+            printf("openmmo: settle fs=%d task=%d field=%d child=%d\n",
+                   now & 1, (now >> 1) & 1, (now >> 2) & 1, (now >> 3) & 1);
+        }
+    }
     if (settled) {
         openmmo_shop_try_open(fs);
         openmmo_bag_try_open(fs);
@@ -4782,6 +5905,9 @@ void openmmo_mod_frame(void)
         openmmo_widget_try_open(fs);
         openmmo_debug_try_open(fs);
     }
+    openmmo_travel_tick(fs, g_seated);
+    openmmo_cries_debug_tick(settled);
+    openmmo_poly_overflow_tick();
     play_script_move(fs);
     catch_up_peers(fs);
 

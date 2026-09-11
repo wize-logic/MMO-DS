@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <stdarg.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +44,8 @@ struct view_opts {
     int aspect;
     int fullscreen;
     int no_audio;
+    int offline;              /* no server behind the window: no chat, and no
+                               * bar button that would have to ask one */
     const char *audio_device;
     const char *shot;         /* write one composed frame here and exit */
     const char *shots;        /* where F12 writes; NULL means here */
@@ -182,7 +185,12 @@ static void view_audio_log_open(void)
     }
     snprintf(path, sizeof path, "%s%sopenmmo-view.log", dir, mmo_plat_sep());
     audio_log = fopen(path, "w");
-    if (audio_log != NULL) setvbuf(audio_log, NULL, _IOLBF, 0);
+    /*
+     * Line buffering is a POSIX promise and mingw's runtime does not keep it: _IOLBF there
+     * means fully buffered, so the whole ledger sat in a 4 KB buffer and died with the process
+     * every time the front door stopped the window.
+     */
+    if (audio_log != NULL) setvbuf(audio_log, NULL, _IONBF, 0);
 }
 
 static void view_audio_logf(const char *fmt, ...)
@@ -195,6 +203,7 @@ static void view_audio_logf(const char *fmt, ...)
     vfprintf(audio_log, fmt, ap);
     va_end(ap);
     fputc('\n', audio_log);
+    fflush(audio_log);
 }
 
 /*
@@ -203,33 +212,260 @@ static void view_audio_logf(const char *fmt, ...)
  */
 struct view_audio {
     const struct openmmo_view_shm *v;
-    uint32_t tail;
+    uint32_t tail;             /* the ring frame the read head sits on */
+    uint32_t frac;             /* how far past it, in 1/65536ths of a frame */
+    uint32_t step;             /* ring frames per output frame, 16.16 */
+    /*
+     * ONE ring FRAME per output FRAME IS an assumption, and when it is wrong every sound in
+     * the game is at the wrong pitch.
+     */
+    uint32_t base;             /* ring frames per output frame, 16.16 */
+    uint32_t dev_rate;         /* what the device actually opened at */
+    const int16_t *sinc;       /* (VIEW_SINC_PHASES + 1) x VIEW_SINC_TAPS, Q14 */
+    long integral;             /* the governor's learned rate difference,
+                                * 16.16 either side of base */
+    long backlog_avg;          /* the backlog the governor steers by: a
+                                * four-second average, 0 until started */
     uint64_t dropped;
     uint64_t starved;
     uint64_t trimmed;
 };
 
+/* One ring frame per output frame in the step's fixed point, and how far
+ * either side of it the governor below may go. Half a per cent is eight cents
+ * of pitch at the very ends of the range, and the mismatches it has to absorb
+ * are a third of that: wider would buy nothing and could be heard. */
+#define VIEW_STEP_ONE   65536u
+#define VIEW_STEP_SWING   328u          /* 0.5 % */
+/*
+ * How far the step may move per pass of the governor, which runs once a second, and it has
+ * to actually run once a second for this to mean what it says.
+ */
+#define VIEW_STEP_SLEW     32u
+#define VIEW_GOVERNOR_MS 1000u
+
+static void view_ring_frame(const struct openmmo_view_shm *v, uint32_t i,
+                            int *l, int *r)
+{
+    uint32_t s = v->audio[i % OPENMMO_VIEW_AUDIO_FRAMES];
+
+    *l = (int16_t)(uint16_t)(s & 0xFFFFu);
+    *r = (int16_t)(uint16_t)(s >> 16);
+}
+
+/*
+ * THE ring IS read at A RATE, NOT A FRAME at a time, and that is half of the governor further
+ * down.
+ */
+/* The step the callback last read the ring at and the ring frame it will
+ * read next, for a tap in the same process (the handheld's shim records
+ * them beside every burst) so a session's delivered stream can be
+ * reproduced from the mixer's dump and compared, sample for sample. */
+volatile uint32_t openmmo_view_audio_step;
+volatile uint32_t openmmo_view_audio_tail;
+volatile uint32_t openmmo_view_audio_frac;
+
+#define VIEW_SINC_TAPS   16
+#define VIEW_SINC_PHASES 128
+#define VIEW_SINC_BEFORE 7              /* frames behind the read head */
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+/* Bessel I0 by its series, enough for a Kaiser window. */
+static double view_bessel_i0(double x)
+{
+    double sum = 1.0, term = 1.0, hx = x / 2.0;
+    int k;
+
+    for (k = 1; k < 40; k++) {
+        term *= (hx / k) * (hx / k);
+        sum += term;
+        if (term < sum * 1e-12) break;
+    }
+    return sum;
+}
+
+/*
+ * The table: sinc at the phase, under a Kaiser window (beta 6), each phase scaled to sum to
+ * one so a constant passes as itself. Cutoff at the Nyquist rate exactly, which is what makes
+ * phase zero the identity.
+ */
+static int16_t *view_audio_sinc_build(void)
+{
+    /* One row past the last phase: phase 128 is phase 0 one frame on, so
+     * the lean between phases 127 and 128 has a row to lean towards. */
+    int16_t *tab = malloc(sizeof(int16_t) * (VIEW_SINC_PHASES + 1)
+                          * VIEW_SINC_TAPS);
+    const double beta = 6.0, half = VIEW_SINC_TAPS / 2.0;
+    double i0b;
+    int p, k;
+
+    if (tab == NULL) return NULL;
+    i0b = view_bessel_i0(beta);
+    for (p = 0; p <= VIEW_SINC_PHASES; p++) {
+        double h[VIEW_SINC_TAPS], sum = 0.0;
+        double a = (double)p / VIEW_SINC_PHASES;
+        long acc = 0;
+
+        for (k = 0; k < VIEW_SINC_TAPS; k++) {
+            double x = (double)(k - VIEW_SINC_BEFORE) - a;
+            double r = x / half, w, sn;
+
+            w = r * r < 1.0 ? view_bessel_i0(beta * sqrt(1.0 - r * r)) / i0b
+                            : 0.0;
+            sn = x == 0.0 ? 1.0 : sin(M_PI * x) / (M_PI * x);
+            h[k] = sn * w;
+            sum += h[k];
+        }
+        for (k = 0; k < VIEW_SINC_TAPS; k++) {
+            long q = (long)floor(h[k] / sum * 16384.0 + 0.5);
+
+            tab[p * VIEW_SINC_TAPS + k] = (int16_t)q;
+            acc += q;
+        }
+        /* Rounding left the phase a unit or two off unity: the centre tap
+         * takes the difference, so every phase sums to exactly 16384 and a
+         * constant input is a constant output at every phase. */
+        tab[p * VIEW_SINC_TAPS + VIEW_SINC_BEFORE] += (int16_t)(16384 - acc);
+    }
+    /* The one property everything above rests on, checked rather than
+     * trusted: phase zero is one and fifteen zeros. */
+    for (k = 0; k < VIEW_SINC_TAPS; k++) {
+        int16_t want = k == VIEW_SINC_BEFORE ? 16384 : 0;
+
+        if (tab[k] != want) {
+            view_audio_logf("sinc: phase 0 tap %d is %d, not %d, the table"
+                            " is wrong and the plain lean is used", k,
+                            (int)tab[k], (int)want);
+            free(tab);
+            return NULL;
+        }
+    }
+    return tab;
+}
+
 static void view_audio_cb(void *arg, Uint8 *stream, int len)
 {
     struct view_audio *a = (struct view_audio *)arg;
     unsigned want = (unsigned)len / (2 * sizeof(int16_t));
-    uint32_t lost = 0;
-    unsigned got;
+    int16_t *out = (int16_t *)stream;
+    const struct openmmo_view_shm *v = a->v;
+    uint32_t head, frac, step;
+    unsigned n = 0;
 
-    got = openmmo_view_audio_read(a->v, &a->tail, (int16_t *)stream, want,
-                                  &lost);
-    a->dropped += lost;
-    if (got < want) {
-        a->starved += want - got;
-        memset(stream + got * 2 * sizeof(int16_t), 0,
-               (size_t)(want - got) * 2 * sizeof(int16_t));
+    if (v == NULL || v->magic != OPENMMO_VIEW_MAGIC
+        || v->version != OPENMMO_VIEW_VERSION) {
+        memset(stream, 0, (size_t)len);
+        return;
+    }
+    head = __atomic_load_n(&v->audio_head, __ATOMIC_ACQUIRE);
+    /* A reader a whole ring behind is being handed frames the writer has
+     * already written over. Unsigned throughout, so this stays right across
+     * the 2^32 wrap. */
+    if (head - a->tail > OPENMMO_VIEW_AUDIO_FRAMES) {
+        uint32_t lost = (head - a->tail) - OPENMMO_VIEW_AUDIO_FRAMES;
+
+        a->dropped += lost;
+        a->tail += lost;
+        a->frac = 0;
+    }
+    frac = a->frac;
+    step = a->step != 0 ? a->step
+                        : (a->base != 0 ? a->base : VIEW_STEP_ONE);
+    openmmo_view_audio_step = step;
+    openmmo_view_audio_tail = a->tail;
+    openmmo_view_audio_frac = frac;
+    /* Sixteen ring frames make one of these, seven behind the head and
+     * eight from it on, so the loop stops eight short of the writer rather
+     * than leaning on a frame that is not there yet. The seven behind were
+     * played already and the writer is a cushion away from reaching them. */
+    while (n < want && head - a->tail >= (uint32_t)(VIEW_SINC_TAPS - VIEW_SINC_BEFORE) + 1u) {
+        if (a->sinc != NULL) {
+            const int16_t *h0 = a->sinc
+                + (frac >> (16 - 7)) * VIEW_SINC_TAPS;   /* 128 phases */
+            const int16_t *h1 = h0 + VIEW_SINC_TAPS;     /* the next one */
+            int32_t rem = (int32_t)(frac & 0x1FFu);      /* the last 9 bits */
+            int32_t sl = 0, sr = 0;
+            int l, r, k;
+
+            for (k = 0; k < VIEW_SINC_TAPS; k++) {
+                int32_t h = h0[k] + ((((int32_t)h1[k] - h0[k]) * rem) >> 9);
+
+                view_ring_frame(v, a->tail + (uint32_t)k - VIEW_SINC_BEFORE,
+                                &l, &r);
+                sl += h * l;
+                sr += h * r;
+            }
+            sl = (sl + 8192) >> 14;
+            sr = (sr + 8192) >> 14;
+            out[n * 2 + 0] = (int16_t)(sl > 32767 ? 32767 : sl < -32768 ? -32768 : sl);
+            out[n * 2 + 1] = (int16_t)(sr > 32767 ? 32767 : sr < -32768 ? -32768 : sr);
+        } else {
+            /* No table (the malloc failed): the plain lean, as before. */
+            int l0, r0, l1, r1;
+            int w = (int)(frac >> 8);
+
+            view_ring_frame(v, a->tail, &l0, &r0);
+            view_ring_frame(v, a->tail + 1u, &l1, &r1);
+            out[n * 2 + 0] = (int16_t)(l0 + (((l1 - l0) * w) >> 8));
+            out[n * 2 + 1] = (int16_t)(r0 + (((r1 - r0) * w) >> 8));
+        }
+        n++;
+        frac += step;
+        a->tail += frac >> 16;
+        frac &= 0xFFFFu;
+    }
+    a->frac = frac;
+    if (n < want) {
+        a->starved += want - n;
+        memset(out + n * 2, 0, (size_t)(want - n) * 2 * sizeof(int16_t));
     }
 }
 
 /*
- * Opened at the game's own rate with no SDL resampling allowed; a device that cannot take
- * 32,728 Hz fails and we retry letting SDL pick, the one case where it resamples. Failure is
- * never fatal: a window with no sound beats no window.
+ * The ring's rate is whatever the page says: the console's 32,728 Hz, or the finer rate the
+ * game's mixer was asked for (PC_AUDIO_RATE, 48,000 through the launcher).
+ */
+static uint32_t view_audio_rate(const struct openmmo_view_shm *v)
+{
+    return v != NULL && v->audio_rate ? v->audio_rate : OPENMMO_VIEW_AUDIO_RATE;
+}
+
+static uint32_t view_audio_scaled(const struct openmmo_view_shm *v,
+                                  uint32_t frames_at_console)
+{
+    return (uint32_t)((uint64_t)frames_at_console * view_audio_rate(v)
+                      / OPENMMO_VIEW_AUDIO_RATE);
+}
+
+/*
+ * The ratio, from whatever the page says now over whatever the device took. Answers 1.0 while
+ * either is unknown, which is the old assumption and the only safe guess before there is
+ * anything better.
+ */
+static void view_audio_rebase(struct view_audio *a)
+{
+    uint32_t page = (a->v != NULL) ? a->v->audio_rate : 0;
+    uint32_t was = a->base;
+
+    if (page == 0 || a->dev_rate == 0) {
+        a->base = VIEW_STEP_ONE;
+    } else {
+        a->base = (uint32_t)(((uint64_t)page << 16) / a->dev_rate);
+    }
+    if (a->base != was && was != 0) {
+        view_audio_logf("rate: the game mixes at %u Hz into a %u Hz device, so "
+                        "%u ring frames per output frame (was %u)",
+                        (unsigned)page, (unsigned)a->dev_rate,
+                        (unsigned)a->base, (unsigned)was);
+    }
+}
+
+/*
+ * Opened at the game's own rate with no SDL resampling allowed; a device that cannot take it,
+ * 32,728 Hz is the console's, and few devices take that as it is, fails and we retry
+ * letting SDL pick, the one case where it resamples.
  */
 static SDL_AudioDeviceID view_audio_open(struct view_audio *a,
                                          const char *device)
@@ -248,8 +484,9 @@ static SDL_AudioDeviceID view_audio_open(struct view_audio *a,
                                            : OPENMMO_VIEW_AUDIO_RATE);
     want.format   = AUDIO_S16SYS;
     want.channels = 2;
-    /* 1024 frames is 31 ms at this rate: short enough to stay in step with the
-     * picture, long enough to ride a scheduling hiccup. */
+    /* 1024 frames is 31 ms at the console's rate and 21 ms at 48,000: short
+     * enough to stay in step with the picture, long enough to ride a
+     * scheduling hiccup. */
     want.samples  = 1024;
     want.callback = view_audio_cb;
     want.userdata = a;
@@ -263,10 +500,20 @@ static SDL_AudioDeviceID view_audio_open(struct view_audio *a,
                         "picture still works.\n", SDL_GetError());
         return 0;
     }
+    a->dev_rate = (uint32_t)(have.freq > 0 ? have.freq : want.freq);
+    if (a->sinc == NULL)
+        a->sinc = view_audio_sinc_build();
+    view_audio_rebase(a);
     fprintf(stderr, "openmmo-view: audio at %d Hz%s%s\n", have.freq,
             device ? " on " : "", device ? device : "");
-    view_audio_logf("open: want %d Hz have %d Hz, %u-frame device buffer%s%s",
+    /* The ratio at the top, because it is the one number that decides pitch:
+     * 65536 is one ring frame per output frame and anything else is the
+     * window correcting for a device that did not take the game's rate. A
+     * pitch report is answered by this line before anything else is read. */
+    view_audio_logf("open: want %d Hz have %d Hz, %u-frame device buffer, "
+                    "ratio %u/65536%s%s",
                     want.freq, have.freq, (unsigned)have.samples,
+                    (unsigned)a->base,
                     device ? " on " : "", device ? device : "");
     return dev;
 }
@@ -349,14 +596,15 @@ static struct openmmo_view_geom view_geom_of(const struct view_opts *o)
 }
 
 /*
- * The one poketch behaviour kept: whenever the guest says its lower screen is the Poketch,
- * this window draws no second screen at all, the world and the UI layer are the whole
- * picture.
+ * Whether this window draws a second screen at all. Where the guest says its lower screen is
+ * the Poketch, the default is that it does not, the world and the UI layer are the whole
+ * picture, and the bar's Poketch button (K) asks for it back.
  */
 static int viewer_hides_second(const struct viewer *vw)
 {
     return vw->hud.any &&
-           vw->hud.snap.lower == OPENMMO_HUD_LOWER_POKETCH;
+           vw->hud.snap.lower == OPENMMO_HUD_LOWER_POKETCH &&
+           !view_ui_bar_poketch(&vw->ui_bar);
 }
 
 static int viewer_poketch(const struct viewer *vw, const struct view_opts *o)
@@ -566,9 +814,15 @@ static int viewer_open_video(struct viewer *vw, const struct view_opts *o)
                                          * (int)OPENMMO_VIEW_HD_MAX * o->rs,
                                        OPENMMO_VIEW_H * (int)OPENMMO_VIEW_HD_MAX
                                          * o->rs);
-        vw->scaled[i] = malloc((size_t)OPENMMO_VIEW_FRAME_WORDS
-                               * o->rs * o->rs * 4);
-        if (vw->tex[i] == NULL || vw->scaled[i] == NULL) {
+        /* Only a real scale needs a buffer of its own. At 1 the upload reads
+         * the seqlock's frame straight out (viewer_present), so this would be
+         * 8.4 MB a screen, the widest page at the highest scale, that
+         * nothing can ever read, on a handheld, twice. */
+        vw->scaled[i] = o->rs > 1
+                        ? malloc((size_t)OPENMMO_VIEW_FRAME_WORDS
+                                 * o->rs * o->rs * 4)
+                        : NULL;
+        if (vw->tex[i] == NULL || (o->rs > 1 && vw->scaled[i] == NULL)) {
             fprintf(stderr, "openmmo-view: SDL setup: %s\n", SDL_GetError());
             return -1;
         }
@@ -945,6 +1199,87 @@ static double view_trace_ms(Uint64 from, Uint64 to)
     return (double)(to - from) * 1000.0 / (double)SDL_GetPerformanceFrequency();
 }
 
+/*
+ * What reached THE panel, which is the half no engine trace can see. pc-pace answers "did the
+ * game make its frame in time"; a player saying the game stutters is answering a different
+ * question, "did a new picture arrive on every refresh".
+ */
+static struct {
+    int on;                             /* -1 until the environment is read */
+    int seen;                           /* a previous frame is on record */
+    uint32_t last;                      /* seq of the last frame presented */
+    Uint64 t0;                          /* when this window's tally started */
+    unsigned presents, fresh, repeats, skips, lost;
+    unsigned run, worst_run;            /* repeats in a row, and the worst */
+} view_frames = { -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
+/*
+ * One present's verdict. `seq` is the frame that went up, or 0 for a present that could not
+ * read one whole and left the previous picture there, which is a repeat by any name a player
+ * would use for it.
+ */
+static void view_frames_note(uint32_t seq)
+{
+    unsigned advanced;
+
+    if (view_frames.on < 0) {
+        const char *e = getenv("OPENMMO_VIEW_FRAMES");
+
+        view_frames.on = e != NULL && e[0] != '\0' && e[0] != '0';
+        view_frames.t0 = SDL_GetTicks64();
+    }
+    if (!view_frames.on) return;
+    view_frames.presents++;
+    if (!view_frames.seen) {
+        /* The first present has nothing to compare against and is neither. */
+        if (seq != 0) {
+            view_frames.seen = 1;
+            view_frames.last = seq;
+        }
+        return;
+    }
+    /* The page's seq bumps twice a frame, odd while the writer is inside
+     * it, even when it is stable, so the halving is what makes this count
+     * frames rather than twice as many of them. */
+    advanced = (seq == 0) ? 0u : (unsigned)((seq - view_frames.last) / 2u);
+    if (seq != 0) view_frames.last = seq;
+    if (advanced == 1u) {
+        view_frames.fresh++;
+        view_frames.run = 0;
+    } else if (advanced == 0u) {
+        view_frames.repeats++;
+        if (++view_frames.run > view_frames.worst_run)
+            view_frames.worst_run = view_frames.run;
+    } else {
+        view_frames.skips++;
+        view_frames.lost += advanced - 1u;
+        view_frames.run = 0;
+    }
+}
+
+/* The tally, five-secondly, on the same cadence pc-pace prints its own so the
+ * two lines in a log can be read against each other. */
+static void view_frames_report(void)
+{
+    Uint64 now;
+    double secs;
+
+    if (view_frames.on <= 0) return;
+    now = SDL_GetTicks64();
+    if (now - view_frames.t0 < 5000u) return;
+    secs = (double)(now - view_frames.t0) / 1000.0;
+    fprintf(stderr, "view-frames: %u presents in %.2f s (%.1f/s), %u fresh,"
+                    " %u repeats, %u skips (%u frames never shown),"
+                    " worst run %u\n",
+            view_frames.presents, secs, (double)view_frames.presents / secs,
+            view_frames.fresh, view_frames.repeats, view_frames.skips,
+            view_frames.lost, view_frames.worst_run);
+    fflush(stderr);
+    view_frames.t0 = now;
+    view_frames.presents = view_frames.fresh = view_frames.repeats = 0;
+    view_frames.skips = view_frames.lost = view_frames.worst_run = 0;
+}
+
 /* One frame: seqlock-copy, upscale, place, present. `frame` is the caller's
  * scratch so every path through this program shares the exact code. */
 static void viewer_present(struct viewer *vw, const struct view_opts *o,
@@ -953,6 +1288,9 @@ static void viewer_present(struct viewer *vw, const struct view_opts *o,
     Uint64 tt0 = 0, tt1 = 0, tt2 = 0, tt3 = 0, tt4 = 0;
     struct openmmo_view_geom g = viewer_geom(vw, o);
     struct openmmo_rect rects[2];
+    /* The two screens as the upload wants them: the scaled buffers when there
+     * is a scale, and the seqlock's own frames when there is not. */
+    const uint32_t *up[2] = { NULL, NULL };
     SDL_Rect dst[2], src0, src1;
     int win_w = 0, win_h = 0, upper = 0, tries, got = 0;
     int sw = OPENMMO_VIEW_W, sh = OPENMMO_VIEW_H;
@@ -1011,6 +1349,7 @@ static void viewer_present(struct viewer *vw, const struct view_opts *o,
         viewer_draw_plates(vw, &src0, &dst[0], vw->src_w, vw->src_h, o->rs);
         viewer_blit_guest(vw, o, &src1, &dst[1]);
         viewer_draw_ui(vw, win_w, win_h, rects);
+        view_frames_note(0);
         SDL_RenderPresent(vw->ren);
         return;
     }
@@ -1026,10 +1365,21 @@ static void viewer_present(struct viewer *vw, const struct view_opts *o,
         int big = openmmo_view_swaps_screens(&g) ? (upper ? 0 : 1)
                                                  : (upper ? 1 : 0);
 
-        openmmo_view_upscale(frame[big], sw, sh,
-                             vw->scaled[0], vw->mid, o->rs, o->filter);
-        openmmo_view_upscale(frame[big ^ 1], sw, sh,
-                             vw->scaled[1], vw->mid, o->rs, o->filter);
+        /*
+         * At scale 1 there IS NOTHING TO scale, and the buffer the seqlock already filled is
+         * the one to upload.
+         */
+        if (o->rs > 1) {
+            openmmo_view_upscale(frame[big], sw, sh,
+                                 vw->scaled[0], vw->mid, o->rs, o->filter);
+            openmmo_view_upscale(frame[big ^ 1], sw, sh,
+                                 vw->scaled[1], vw->mid, o->rs, o->filter);
+            up[0] = vw->scaled[0];
+            up[1] = vw->scaled[1];
+        } else {
+            up[0] = frame[big];
+            up[1] = frame[big ^ 1];
+        }
     }
     if (view_trace.on) tt2 = SDL_GetPerformanceCounter();
     /* Into the corner of a texture sized for the widest frame; the rest of it
@@ -1037,8 +1387,8 @@ static void viewer_present(struct viewer *vw, const struct view_opts *o,
     {
         SDL_Rect full = { 0, 0, sw * o->rs, sh * o->rs };
 
-        SDL_UpdateTexture(vw->tex[0], &full, vw->scaled[0], sw * o->rs * 4);
-        SDL_UpdateTexture(vw->tex[1], &full, vw->scaled[1], sw * o->rs * 4);
+        SDL_UpdateTexture(vw->tex[0], &full, up[0], sw * o->rs * 4);
+        SDL_UpdateTexture(vw->tex[1], &full, up[1], sw * o->rs * 4);
         view_src_rects(o, sw, sh, &src0, &src1);
     }
     if (view_trace.on) tt3 = SDL_GetPerformanceCounter();
@@ -1101,6 +1451,7 @@ static void viewer_present(struct viewer *vw, const struct view_opts *o,
     viewer_draw_plates(vw, &src0, &dst[0], sw, sh, o->rs);
     viewer_blit_guest(vw, o, &src1, &dst[1]);
     viewer_draw_ui(vw, win_w, win_h, rects);
+    view_frames_note(s0);
     SDL_RenderPresent(vw->ren);
 
     if (view_trace.on) {
@@ -1155,6 +1506,7 @@ static int viewer_run(struct viewer *vw, const struct view_opts *o,
     enum view_state state = VIEW_WAITING;
     int audio_started = 0, running = 1, stalled = 0, rc = 0, focus_shown = -1;
     uint64_t starved_seen = 0;
+    Uint64 governor_next = 0;       /* the governor's next pass, in ticks */
     uint32_t last_seq = 0;
     unsigned tick = 0, waited_ms = 0, shot_frames = 0;
     Uint64 next_tick = 0, t0 = SDL_GetTicks64();
@@ -1235,17 +1587,19 @@ static int viewer_run(struct viewer *vw, const struct view_opts *o,
             st = viewer_attach(vw, o->name);
             if (st == ATTACH_OK) {
                 fprintf(stderr, "openmmo-view: attached to '%s'\n", o->name);
-                if (!o->no_audio) {
+                if (!o->no_audio)
                     audio.v = vw->shm;
-                    /* Play from now, not from a ring of stale samples
-                     * published before this window existed. */
-                    audio.tail = vw->shm->audio_head;
-                    adev = view_audio_open(&audio, o->audio_device);
-                }
                 /* The typing page is named after this one and exists for as
                  * long as the window does, so a client that opens a text field
                  * at any point in the session finds somewhere to be typed to. */
                 view_input_open_text(in, o->name);
+                /*
+                 * And the page the game paces against, for the same span and named the same
+                 * way. Only where this renderer really presents on the panel: a window paced
+                 * by SDL_Delay would be publishing its own clock, and a game pacing to that is
+                 * a loop chasing itself.
+                 */
+                if (vw->vsync) mmo_plat_vsync_publish(o->name);
                 state = VIEW_LIVE;
                 vw->status_changed_ms = SDL_GetTicks64();
             } else if (st == ATTACH_BAD_VERSION) {
@@ -1269,6 +1623,18 @@ static int viewer_run(struct viewer *vw, const struct view_opts *o,
         }
 
         if (state == VIEW_LIVE) {
+            /* THE device opens at THE GAME'S RATE, and NOT BEFORE IT knows IT. */
+            if (adev == 0 && !o->no_audio && vw->shm != NULL
+                && vw->shm->audio_rate != 0) {
+                /* Play from now, not from a ring of stale samples published
+                 * before this window existed. */
+                audio.tail = vw->shm->audio_head;
+                audio.frac = 0;
+                /* One ring frame per output frame until the governor has a
+                 * cushion to steer by. */
+                audio.step = audio.base != 0 ? audio.base : VIEW_STEP_ONE;
+                adev = view_audio_open(&audio, o->audio_device);
+            }
             /*
              * Start the sound only once there is a cushion, and re-establish it after a
              * starve.
@@ -1283,6 +1649,7 @@ static int viewer_run(struct viewer *vw, const struct view_opts *o,
                     starved_seen = starved_now;
                     SDL_PauseAudioDevice(adev, 1);
                     audio_started = 0;
+                    audio.backlog_avg = 0;
                     view_audio_logf("starve: paused, %llu frames padded so far",
                                     (unsigned long long)starved_now);
                 }
@@ -1291,37 +1658,88 @@ static int viewer_run(struct viewer *vw, const struct view_opts *o,
                 uint32_t head = __atomic_load_n(&vw->shm->audio_head,
                                                 __ATOMIC_ACQUIRE);
 
-                if (head - audio.tail >= 6144u) {
+                if (head - audio.tail >= view_audio_scaled(vw->shm, 6144u)) {
                     SDL_PauseAudioDevice(adev, 0);
                     audio_started = 1;
                     view_audio_logf("start: backlog %u frames (%llu ms)",
                                     head - audio.tail,
                                     (unsigned long long)(head - audio.tail)
-                                        * 1000u / OPENMMO_VIEW_AUDIO_RATE);
+                                        * 1000u / view_audio_rate(vw->shm));
                 }
             }
-            /*
-             * The governor. The game and the audio device share no clock: the paced game mixes
-             * a shade over 32,728 frames per wall second (measured +55/s on Windows), the
-             * device drains exactly its own rate, and a stall adds a burst on top.
-             */
-            if (adev != 0 && audio_started) {
+            /* The governor, and it steers a RATE now rather than cutting the waveform. */
+            if (adev != 0 && audio_started
+                && SDL_GetTicks64() >= governor_next) {
                 uint32_t head = __atomic_load_n(&vw->shm->audio_head,
                                                 __ATOMIC_ACQUIRE);
+                /* The cushion to hold, and it is the one playback starts on
+                 * and the starve repair re-lands on: steering towards any
+                 * other number would quietly move the latency between a
+                 * sound existing and a player hearing it. */
+                uint32_t target = view_audio_scaled(vw->shm, 6144u);
                 uint32_t backlog, skip = 0;
+                long err, want_step, step, base;
+                long long refresh = 0, refresh_period = 0;
+                int steering;
+
+                /*
+                 * The same question the pacer asks, asked of the same marks: this window's
+                 * own, because this window is the one that makes them.
+                 */
+                steering = vw->vsync
+                           && mmo_plat_vsync_next(&refresh, &refresh_period) > 0;
+                governor_next = SDL_GetTicks64() + VIEW_GOVERNOR_MS;
 
                 SDL_LockAudioDevice(adev);
                 backlog = head - audio.tail;
-                if (backlog > 16384u) {
-                    skip = backlog - 6144u;
-                } else if (backlog > 8192u) {
-                    skip = 1u + (backlog - 8192u) / 1024u;
-                    if (skip > 8u) skip = 8u;
+                if (backlog > view_audio_scaled(vw->shm, 16384u)) {
+                    skip = backlog - view_audio_scaled(vw->shm, 6144u);
+                    audio.tail += skip;
+                    audio.trimmed += skip;
+                    backlog -= skip;
                 }
-                audio.tail += skip;
-                audio.trimmed += skip;
+                /*
+                 * Read faster than the game writes while the cushion is deep, slower while it
+                 * is thin. Two terms, because the two things this corrects have different
+                 * shapes.
+                 */
+                /* The pitch first, the cushion second. */
+                view_audio_rebase(&audio);
+                base = (long)(audio.base != 0 ? audio.base : VIEW_STEP_ONE);
+                if (!steering) {
+                    want_step = base;
+                } else {
+                    long tgt = (long)(target != 0 ? target : 1u);
+
+                    /* THE backlog IS steered by its average, not by the sample. */
+                    if (audio.backlog_avg <= 0)
+                        audio.backlog_avg = (long)backlog;
+                    else
+                        audio.backlog_avg += ((long)backlog
+                                              - audio.backlog_avg) / 4;
+                    err = audio.backlog_avg - (long)target;
+                    audio.integral += (err * base) / (tgt * 2000L);
+                    if (audio.integral > (long)VIEW_STEP_SWING)
+                        audio.integral = (long)VIEW_STEP_SWING;
+                    if (audio.integral < -(long)VIEW_STEP_SWING)
+                        audio.integral = -(long)VIEW_STEP_SWING;
+                    want_step = base + audio.integral
+                                + (err * base) / (tgt * 100L);
+                    if (want_step < base - (long)VIEW_STEP_SWING)
+                        want_step = base - (long)VIEW_STEP_SWING;
+                    if (want_step > base + (long)VIEW_STEP_SWING)
+                        want_step = base + (long)VIEW_STEP_SWING;
+                }
+                step = (long)(audio.step != 0 ? audio.step : (uint32_t)base);
+                if (want_step > step + (long)VIEW_STEP_SLEW)
+                    step += (long)VIEW_STEP_SLEW;
+                else if (want_step < step - (long)VIEW_STEP_SLEW)
+                    step -= (long)VIEW_STEP_SLEW;
+                else
+                    step = want_step;
+                audio.step = (uint32_t)step;
                 SDL_UnlockAudioDevice(adev);
-                if (skip > 6144u)
+                if (skip > view_audio_scaled(vw->shm, 6144u))
                     view_audio_logf("reskip: dropped %u frames to reland on "
                                     "the cushion", skip);
             }
@@ -1337,11 +1755,12 @@ static int viewer_run(struct viewer *vw, const struct view_opts *o,
                 Uint64 now_ms = SDL_GetTicks64();
                 uint32_t head = __atomic_load_n(&vw->shm->audio_head,
                                                 __ATOMIC_ACQUIRE);
-                uint32_t tail_now;
+                uint32_t tail_now, step_now;
                 uint64_t dropped_now, starved_now, trimmed_now;
 
                 SDL_LockAudioDevice(adev);
                 tail_now = audio.tail;
+                step_now = audio.step != 0 ? audio.step : VIEW_STEP_ONE;
                 dropped_now = audio.dropped;
                 starved_now = audio.starved;
                 trimmed_now = audio.trimmed;
@@ -1357,13 +1776,15 @@ static int viewer_run(struct viewer *vw, const struct view_opts *o,
                     audio_log_next = now_ms + 1000;
                     view_audio_logf("ring: backlog %u frames (%llu ms) "
                                     "dropped %llu starved %llu trimmed %llu "
-                                    "started %d",
+                                    "rate %+.3f%% started %d",
                                     head - tail_now,
                                     (unsigned long long)(head - tail_now)
-                                        * 1000u / OPENMMO_VIEW_AUDIO_RATE,
+                                        * 1000u / view_audio_rate(vw->shm),
                                     (unsigned long long)dropped_now,
                                     (unsigned long long)starved_now,
                                     (unsigned long long)trimmed_now,
+                                    ((double)step_now - (double)VIEW_STEP_ONE)
+                                        * 100.0 / (double)VIEW_STEP_ONE,
                                     audio_started);
                 }
             }
@@ -1428,6 +1849,14 @@ static int viewer_run(struct viewer *vw, const struct view_opts *o,
         } else {
             viewer_present_message(vw, o, &msg);
         }
+
+        /*
+         * THE refresh just happened. A vsynced present returns when the panel has taken the
+         * buffer, so this line is the display's own clock read at the one place in the program
+         * that can see it.
+         */
+        if (vw->vsync)
+            mmo_plat_vsync_mark();
 
         /*
          * --shot: one picture and out, whichever picture this is. A shot of the refusal screen
@@ -1497,6 +1926,7 @@ static int viewer_run(struct viewer *vw, const struct view_opts *o,
             if (next_tick > now) SDL_Delay((Uint32)(next_tick - now));
             next_tick += openmmo_view_pace_ms(tick);
         }
+        view_frames_report();
         waited_ms += openmmo_view_pace_ms(tick);
     }
 
@@ -1530,6 +1960,7 @@ static int viewer_run(struct viewer *vw, const struct view_opts *o,
      * missing a second later by the pid check. */
     if (vw->shm != NULL) vw->shm->in_quit = 1;
     view_input_close_text(in);
+    mmo_plat_vsync_unpublish();
     return rc;
 }
 
@@ -1551,7 +1982,8 @@ static void usage(const char *argv0)
            "                 large, the touch screen beside it), stacked (the\n"
            "                 console's own) or wide (side by side); in every\n"
            "                 layout the second screen draws as nothing while\n"
-           "                 the game would show the Poketch on it\n"
+           "                 the game would show the Poketch on it, until the\n"
+           "                 bar's Poketch button or K asks for it\n"
            "  --render-scale N  draw from an N-times-larger texture, 1..4\n"
            "                 (default 2)\n"
            "  --filter NAME  nearest, linear (the default; with render-scale\n"
@@ -1563,6 +1995,8 @@ static void usage(const char *argv0)
            "  --audio-device NAME  play the sound on this device\n"
            "  --list-audio-devices  print this machine's devices, exit\n"
            "  --no-audio     open no audio device (also OPENMMO_VIEW_NO_AUDIO=1)\n"
+           "  --offline      no server behind this window: no chat box, and\n"
+           "                 no Community, PvP, Trade or Mail on the bar\n"
            "  --shots DIR    where F12 screenshots go (default: here)\n"
            "  --hud-dump     print each hud-page snapshot as it arrives\n"
            "  --shot PATH    write one composed frame as a binary PPM and\n"
@@ -1602,11 +2036,14 @@ static void usage(const char *argv0)
            "\n"
            "The in-game UI is the official client's. The HUD bar is bottom\n"
            "right, Bag, Trainer, Community, PvP, Pokedex, Egg Incubators,\n"
-           "Trade, Mail, Gift Shop, Menu, on the official client's own keys: B bag, C\n"
-           "trainer, N pokedex, D the Menu popup, V friends, G team, I\n"
-           "incubators, P trade, H the FAQ. The party strip is on the right\n"
-           "edge; O folds it away. A frame is dragged by its title bar and\n"
-           "closed with its button or with Esc.\n"
+           "Trade, Mail, Gift Shop, Poketch, Menu, on the official client's own keys: B\n"
+           "bag, C trainer, N pokedex, D the Menu popup, V friends, G team, I\n"
+           "incubators, P trade, H the FAQ. K opens and shuts the Poketch,\n"
+           "the game's own lower screen, which this window otherwise leaves\n"
+           "out; it stays as you left it through a bag, a battle and a map\n"
+           "change. The party strip is on the right edge; O folds it away. A\n"
+           "frame is dragged by its title bar and closed with its button or\n"
+           "with Esc.\n"
            "\n"
            "The window opens whether or not the game is running, and says why\n"
            "when there is no picture. A page whose version\n"
@@ -1642,6 +2079,8 @@ int main(int argc, char **argv)
             want_list = 1;
         } else if (strcmp(a, "--no-audio") == 0) {
             o.no_audio = 1;
+        } else if (strcmp(a, "--offline") == 0) {
+            o.offline = 1;
         } else if (strcmp(a, "--integer") == 0) {
             o.integer = 1;
         } else if (strcmp(a, "--stretch") == 0) {
@@ -1768,6 +2207,7 @@ int main(int argc, char **argv)
      * events walk it the other way. The design notes is the guide to adding one. */
     view_ui_layer_init(&vw.ui);
     vw.ui.canvas_mode = o.ui_screen;
+    view_ui_offline_set(o.offline);
     view_ui_chat_init(&vw.ui_chat, &vw.hud);
     view_ui_party_init(&vw.ui_party, &vw.hud);
     view_ui_wins_init(&vw.ui_wins, &vw.hud);
@@ -1782,7 +2222,12 @@ int main(int argc, char **argv)
          * the chat box is above it, and the bar and its popup are above
          * everything, which is where a control strip belongs. */
         view_ui_layer_add(&vw.ui, &party);
-        view_ui_layer_add(&vw.ui, &chat);
+        /* Offline the box is never built into the layer at all rather than
+         * drawn empty: Enter is then the game's, and the bar below gets the
+         * whole floor instead of leaving room for a panel nobody can type
+         * into. */
+        if (!o.offline)
+            view_ui_layer_add(&vw.ui, &chat);
         view_ui_layer_add(&vw.ui, &wins);
         view_ui_layer_add(&vw.ui, &bar);
     }
@@ -1791,10 +2236,7 @@ int main(int argc, char **argv)
         SDL_Quit();
         return 1;
     }
-    /* The official client's art for the UI layer: --theme, then OPENMMO_THEME, then a
-     * theme/ folder beside the program. The art is the official client's and is not
-     * shipped, so an unpointed window simply keeps its primitive look, 
-     * only a named theme that will not load is worth a line on stderr. */
+    /* The art for the UI layer. */
     {
         char fallback[1024];
         const char *dir = o.theme;
@@ -1825,8 +2267,7 @@ int main(int argc, char **argv)
             }
             dir = fallback;
         }
-        if (dir[0] != '\0')
-            view_ui_theme_up(&vw.ui_gpu, vw.ren, dir);
+        view_ui_theme_up(&vw.ui_gpu, vw.ren, dir);
     }
     rc = viewer_run(&vw, &o, &in);
     viewer_close_video(&vw);

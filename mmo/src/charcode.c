@@ -1,5 +1,6 @@
 /* UTF-16LE and UTF-8 <-> engine charcode conversion. */
 #include "charcode.h"
+#include "text_channel.h"
 
 /* Contiguous charcode ranges, from charmap.txt. */
 #define CC_ZERO  0x0121u /* '0'..'9' -> 0x0121..0x012A */
@@ -159,27 +160,7 @@ static size_t put_utf8(uint32_t cp, char *dst, size_t off, size_t cap)
 
     if (off + n + 1 > cap)
         return 0;
-    switch (n) {
-    case 1:
-        dst[off] = (char)cp;
-        break;
-    case 2:
-        dst[off] = (char)(0xC0u | (cp >> 6));
-        dst[off + 1] = (char)(0x80u | (cp & 0x3Fu));
-        break;
-    case 3:
-        dst[off] = (char)(0xE0u | (cp >> 12));
-        dst[off + 1] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
-        dst[off + 2] = (char)(0x80u | (cp & 0x3Fu));
-        break;
-    default:
-        dst[off] = (char)(0xF0u | (cp >> 18));
-        dst[off + 1] = (char)(0x80u | ((cp >> 12) & 0x3Fu));
-        dst[off + 2] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
-        dst[off + 3] = (char)(0x80u | (cp & 0x3Fu));
-        break;
-    }
-    return n;
+    return openmmo_text_cp_to_utf8(cp, dst + off);
 }
 
 mmo_charcode_result mmo_charcode_to_utf8(const mmo_charcode *src, char *dst,

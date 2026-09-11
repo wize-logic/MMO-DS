@@ -30,10 +30,13 @@ import de.fiereu.openmmo.server.game.battle.TurnEngine
 import de.fiereu.openmmo.server.game.battle.WildMonFactory
 import de.fiereu.openmmo.server.game.session.SessionRegistry
 import de.fiereu.openmmo.server.game.storage.CharacterStore
+import de.fiereu.openmmo.server.game.storage.Containers
 import de.fiereu.openmmo.server.game.storage.EntityIdService
+import de.fiereu.openmmo.server.game.storage.InMemoryImportRepository
 import de.fiereu.openmmo.server.game.testsupport.FakeCharacterRepository
 import de.fiereu.openmmo.server.game.testsupport.FakeSession
 import de.fiereu.openmmo.server.game.testsupport.blackoutService
+import de.fiereu.openmmo.server.game.testsupport.safariService
 import de.fiereu.openmmo.server.game.testsupport.scriptRunner
 import de.fiereu.openmmo.server.game.world.interest.InterestManager
 import de.fiereu.openmmo.trainer.TrainerRegistry
@@ -50,7 +53,12 @@ import kotlinx.coroutines.test.runTest
 
 private const val TACKLE: Short = 33
 
-private fun starter(ownerId: Long, dexId: Int, slot: Short = 0): Pokemon =
+private fun starter(
+    ownerId: Long,
+    dexId: Int,
+    slot: Short = 0,
+    offlineOrigin: Boolean = false,
+): Pokemon =
     Pokemon(
         id = EntityIdService().newMonsterId(),
         ownerId = ownerId,
@@ -75,6 +83,7 @@ private fun starter(ownerId: Long, dexId: Int, slot: Short = 0): Pokemon =
         isFatefulEncounter = false,
         isRaidEncounter = false,
         caughtAt = LocalDateTime.now(),
+        offlineOrigin = offlineOrigin,
     )
 
 private class TradeFixture(scope: CoroutineScope) {
@@ -103,13 +112,22 @@ private class TradeFixture(scope: CoroutineScope) {
               blackoutService(store) { scriptRunner(store, mapManager, interestManager, battles) },
           budget = GrantBudget(),
           violations = ViolationLog(),
+          safariService = safariService(store, mapManager),
+          chatLimits = ChatLimits(ViolationLog()),
       )
   val duels = DuelService(sessions, store, battles)
-  val trades = TradeService(sessions, store, battles, duels)
+  val imports = InMemoryImportRepository()
+  val trades = TradeService(sessions, store, battles, duels, imports)
 
-  suspend fun seated(name: String, userId: Int, dexId: Int): Pair<FakeSession, Long> {
+  suspend fun seated(
+      name: String,
+      userId: Int,
+      dexId: Int,
+      offlineOrigin: Boolean = false,
+  ): Pair<FakeSession, Long> {
     val created = store.createCharacter(userId, name, CharacterGender.MALE, Region.HOENN)
-    store.addPokemon(created.info.id, starter(created.info.id, dexId))
+    store.addPokemon(
+        created.info.id, starter(created.info.id, dexId, offlineOrigin = offlineOrigin))
     val session = FakeSession(created.info.id)
     sessions.bindCharacter(session, created.info.id)
     return session to created.info.id
@@ -302,10 +320,12 @@ class TradeServiceTest :
           fx.select(blue, 1)
           fx.action(red, CONFIRM)
           // The offered monster is deposited before the second confirm lands.
-          fx.store.rearrangeMonsters(blueId) { party, pc ->
+          fx.store.rearrangeMonsters(blueId) { party, pc, daycare ->
             val moved = party.first { it.dexId == 7 }
-            party.filter { it.id != moved.id } to
-                pc + moved.copy(container = PokemonContainer.PC, containerSlot = 0)
+            Containers(
+                party.filter { it.id != moved.id },
+                pc + moved.copy(container = PokemonContainer.PC, containerSlot = 0),
+                daycare)
           }
           fx.action(blue, CONFIRM)
           fx.partyDex(redId) shouldBe listOf(1)
@@ -329,6 +349,15 @@ class TradeServiceTest :
           fx.partyDex(redId) shouldBe listOf(1)
           fx.partyDex(blueId) shouldBe listOf(4)
           red.states().last() shouldBe TradeStatePacket.STATE_CANCELLED
+          // A refusal hands both screens the record as it now stands. Red's party was swapped out
+          // and put back with nothing sent about either move, so a client still drawing the table
+          // it confirmed is showing a trade that never happened.
+          red.sent.filterIsInstance<PokemonContainerPacket>().single().pokemon.map {
+            it.dexId
+          } shouldBe listOf(1)
+          blue.sent.filterIsInstance<PokemonContainerPacket>().single().pokemon.map {
+            it.dexId
+          } shouldBe listOf(4)
         }
       }
 
@@ -349,6 +378,32 @@ class TradeServiceTest :
           fx.trades.onRequest(PacketEvent(StringCommandPacket("Red"), blueSession))
           blueSession.replies().last() shouldContain "no monster to trade"
           fx.trades.inTrade(blue) shouldBe false
+        }
+      }
+
+      test("a monster brought in from a save cannot be put on the table by either chair") {
+        runTest {
+          val fx = TradeFixture(backgroundScope)
+          val (red, redId) = fx.seated("Red", 1, 1, offlineOrigin = true)
+          val (blue, blueId) = fx.seated("Blue", 2, 4, offlineOrigin = true)
+          fx.request(red, "Blue")
+          fx.action(blue, ACCEPT)
+          red.sent.clear()
+          blue.sent.clear()
+
+          fx.select(red, 0)
+          red.replies().last() shouldContain "offline save"
+          // The other chair is told nothing: the refusal is this player's own business, and the
+          // table stays empty rather than showing a monster that cannot cross.
+          blue.sent.filterIsInstance<TradeListEntryPacket>().shouldBeEmpty()
+
+          fx.select(blue, 0)
+          blue.replies().last() shouldContain "offline save"
+          red.sent.filterIsInstance<TradeListEntryPacket>().shouldBeEmpty()
+
+          // Neither monster moved.
+          fx.partyDex(redId) shouldBe listOf(1)
+          fx.partyDex(blueId) shouldBe listOf(4)
         }
       }
 

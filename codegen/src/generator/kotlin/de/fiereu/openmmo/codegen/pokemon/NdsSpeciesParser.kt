@@ -16,7 +16,14 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /** Reads the DS decomp's per species data, which is the generation this server hosts. */
-class NdsSpeciesParser(private val rootDir: File) {
+class NdsSpeciesParser(
+    private val rootDir: File,
+    /**
+     * The hidden ability of every species, which is not in this decomp at all: Gen 5 invented the
+     * third slot and Gen 4's species data has no room for one.
+     */
+    private val hiddenAbilities: Map<Int, String>,
+) {
 
   private val json = Json { ignoreUnknownKeys = true }
 
@@ -98,6 +105,10 @@ class NdsSpeciesParser(private val rootDir: File) {
         eggGroup2 = ref(monEggGroups[1], "EGG_GROUP_", eggGroups, eggGroupNames(), ::eggGroupName),
         ability1 = ref(monAbilities[0], "ABILITY_", abilities, Ability.entries.map { it.name }),
         ability2 = ref(monAbilities[1], "ABILITY_", abilities, Ability.entries.map { it.name }),
+        abilityHidden =
+            "Ability." +
+                (hiddenAbilities[dexId]
+                    ?: error("$constant has no hidden ability row in the Gen 5 table")),
         safariZoneFleeRate = data.getValue("safari_flee_rate").jsonPrimitive.int,
         bodyColor =
             ref(

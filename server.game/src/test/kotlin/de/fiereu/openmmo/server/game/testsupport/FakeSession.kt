@@ -72,6 +72,11 @@ class FakeSession(
   override val channel: Channel
     get() = ch
 
+  /** Drops the channel, so `channel.isActive` answers what it does once the socket has gone. */
+  fun dropChannel() {
+    ch.close()
+  }
+
   override val remoteAddress: SocketAddress = InetSocketAddress("127.0.0.1", 0)
   override val phase: SessionPhase = SessionPhase.ESTABLISHED
   override val handshakeCompletedAt: Instant? = null

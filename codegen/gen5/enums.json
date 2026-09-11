@@ -1,0 +1,278 @@
+{
+  "source": {
+    "cartridge": "IRBO POKEMON B",
+    "note": "written by mmo/tools/gen5_tables.py; do not edit by hand"
+  },
+  "abilities": {
+    "124": "PICKPOCKET",
+    "125": "SHEER_FORCE",
+    "126": "CONTRARY",
+    "127": "UNNERVE",
+    "128": "DEFIANT",
+    "129": "DEFEATIST",
+    "130": "CURSED_BODY",
+    "131": "HEALER",
+    "132": "FRIEND_GUARD",
+    "133": "WEAK_ARMOR",
+    "134": "HEAVY_METAL",
+    "135": "LIGHT_METAL",
+    "136": "MULTISCALE",
+    "137": "TOXIC_BOOST",
+    "138": "FLARE_BOOST",
+    "139": "HARVEST",
+    "140": "TELEPATHY",
+    "141": "MOODY",
+    "142": "OVERCOAT",
+    "143": "POISON_TOUCH",
+    "144": "REGENERATOR",
+    "145": "BIG_PECKS",
+    "146": "SAND_RUSH",
+    "147": "WONDER_SKIN",
+    "148": "ANALYTIC",
+    "149": "ILLUSION",
+    "150": "IMPOSTER",
+    "151": "INFILTRATOR",
+    "152": "MUMMY",
+    "153": "MOXIE",
+    "154": "JUSTIFIED",
+    "155": "RATTLED",
+    "156": "MAGIC_BOUNCE",
+    "157": "SAP_SIPPER",
+    "158": "PRANKSTER",
+    "159": "SAND_FORCE",
+    "160": "IRON_BARBS",
+    "161": "ZEN_MODE",
+    "162": "VICTORY_STAR",
+    "163": "TURBOBLAZE",
+    "164": "TERAVOLT"
+  },
+  "ability_text": {
+    "124": {
+      "name": "Pickpocket",
+      "description": "Steals an item when hit by another Pok\u00e9mon."
+    },
+    "125": {
+      "name": "Sheer Force",
+      "description": "Removes added effects to increase move damage."
+    },
+    "126": {
+      "name": "Contrary",
+      "description": "Makes stat changes have an opposite effect."
+    },
+    "127": {
+      "name": "Unnerve",
+      "description": "Makes the foe nervous and unable to eat Berries."
+    },
+    "128": {
+      "name": "Defiant",
+      "description": "When its stats are lowered its Attack increases."
+    },
+    "129": {
+      "name": "Defeatist",
+      "description": "Lowers stats when HP becomes half or less."
+    },
+    "130": {
+      "name": "Cursed Body",
+      "description": "May disable a move used on the Pok\u00e9mon."
+    },
+    "131": {
+      "name": "Healer",
+      "description": "May heal an ally's status conditions."
+    },
+    "132": {
+      "name": "Friend Guard",
+      "description": "Reduces damage done to allies."
+    },
+    "133": {
+      "name": "Weak Armor",
+      "description": "Physical attacks lower Defense and raise Speed."
+    },
+    "134": {
+      "name": "Heavy Metal",
+      "description": "Doubles the Pok\u00e9mon's weight."
+    },
+    "135": {
+      "name": "Light Metal",
+      "description": "Halves the Pok\u00e9mon's weight."
+    },
+    "136": {
+      "name": "Multiscale",
+      "description": "Reduces damage when HP is full."
+    },
+    "137": {
+      "name": "Toxic Boost",
+      "description": "Powers up physical attacks when poisoned."
+    },
+    "138": {
+      "name": "Flare Boost",
+      "description": "Powers up special attacks when burned."
+    },
+    "139": {
+      "name": "Harvest",
+      "description": "May create another Berry after one is used."
+    },
+    "140": {
+      "name": "Telepathy",
+      "description": "Anticipates an ally's attack and dodges it."
+    },
+    "141": {
+      "name": "Moody",
+      "description": "Raises one stat and lowers another."
+    },
+    "142": {
+      "name": "Overcoat",
+      "description": "Protects the Pok\u00e9mon from damage from weather."
+    },
+    "143": {
+      "name": "Poison Touch",
+      "description": "May poison targets when a Pok\u00e9mon makes contact."
+    },
+    "144": {
+      "name": "Regenerator",
+      "description": "Restores a little HP when withdrawn from battle."
+    },
+    "145": {
+      "name": "Big Pecks",
+      "description": "Protects the Pok\u00e9mon from Defense-lowering attacks."
+    },
+    "146": {
+      "name": "Sand Rush",
+      "description": "Boosts the Pok\u00e9mon's Speed in a sandstorm."
+    },
+    "147": {
+      "name": "Wonder Skin",
+      "description": "Makes status-changing moves more likely to miss."
+    },
+    "148": {
+      "name": "Analytic",
+      "description": "Boosts move power when the Pok\u00e9mon moves last."
+    },
+    "149": {
+      "name": "Illusion",
+      "description": "Comes out disguised as the Pok\u00e9mon in back."
+    },
+    "150": {
+      "name": "Imposter",
+      "description": "It transforms itself into the Pok\u00e9mon it is facing."
+    },
+    "151": {
+      "name": "Infiltrator",
+      "description": "Passes through the foe's barrier and strikes."
+    },
+    "152": {
+      "name": "Mummy",
+      "description": "Contact with this Pok\u00e9mon spreads this Ability."
+    },
+    "153": {
+      "name": "Moxie",
+      "description": "Boosts Attack after knocking out any Pok\u00e9mon."
+    },
+    "154": {
+      "name": "Justified",
+      "description": "Raises Attack when hit by a Dark-type move."
+    },
+    "155": {
+      "name": "Rattled",
+      "description": "Some move types scare it and boost its Speed."
+    },
+    "156": {
+      "name": "Magic Bounce",
+      "description": "Reflects status- changing moves."
+    },
+    "157": {
+      "name": "Sap Sipper",
+      "description": "Boosts Attack when hit by a Grass-type move."
+    },
+    "158": {
+      "name": "Prankster",
+      "description": "Gives priority to a status move."
+    },
+    "159": {
+      "name": "Sand Force",
+      "description": "Boosts certain moves' power in a sandstorm."
+    },
+    "160": {
+      "name": "Iron Barbs",
+      "description": "Inflicts damage to the Pok\u00e9mon on contact."
+    },
+    "161": {
+      "name": "Zen Mode",
+      "description": "Changes the Pok\u00e9mon's shape when HP is halved."
+    },
+    "162": {
+      "name": "Victory Star",
+      "description": "Boosts the accuracy of its allies and itself."
+    },
+    "163": {
+      "name": "Turboblaze",
+      "description": "Moves can be used regardless of Abilities."
+    },
+    "164": {
+      "name": "Teravolt",
+      "description": "Moves can be used regardless of Abilities."
+    }
+  },
+  "move_effects": {
+    "277": "HONE_CLAWS",
+    "278": "WIDE_GUARD",
+    "279": "GUARD_SPLIT",
+    "280": "POWER_SPLIT",
+    "281": "WONDER_ROOM",
+    "282": "PSYSHOCK",
+    "283": "VENOSHOCK",
+    "284": "AUTOTOMIZE",
+    "285": "TELEKINESIS",
+    "286": "MAGIC_ROOM",
+    "287": "SMACK_DOWN",
+    "288": "STORM_THROW",
+    "289": "FLAME_BURST",
+    "290": "QUIVER_DANCE",
+    "291": "HEAVY_SLAM",
+    "292": "SYNCHRONOISE",
+    "293": "ELECTRO_BALL",
+    "294": "SOAK",
+    "295": "FLAME_CHARGE",
+    "296": "ACID_SPRAY",
+    "297": "FOUL_PLAY",
+    "298": "SIMPLE_BEAM",
+    "299": "ENTRAINMENT",
+    "300": "AFTER_YOU",
+    "301": "ROUND",
+    "302": "ECHOED_VOICE",
+    "303": "CHIP_AWAY",
+    "304": "CLEAR_SMOG",
+    "305": "STORED_POWER",
+    "306": "QUICK_GUARD",
+    "307": "ALLY_SWITCH",
+    "308": "SHELL_SMASH",
+    "309": "HEAL_PULSE",
+    "310": "HEX",
+    "311": "SKY_DROP",
+    "312": "SHIFT_GEAR",
+    "313": "CIRCLE_THROW",
+    "314": "INCINERATE",
+    "315": "QUASH",
+    "316": "UNUSED_316",
+    "317": "ACROBATICS",
+    "318": "REFLECT_TYPE",
+    "319": "RETALIATE",
+    "320": "FINAL_GAMBIT",
+    "321": "UNUSED_321",
+    "322": "COIL",
+    "323": "BESTOW",
+    "324": "WATER_PLEDGE",
+    "325": "FIRE_PLEDGE",
+    "326": "GRASS_PLEDGE",
+    "327": "WORK_UP",
+    "328": "COTTON_GUARD",
+    "329": "RELIC_SONG",
+    "330": "GLACIATE",
+    "331": "FREEZE_SHOCK",
+    "332": "ICE_BURN",
+    "333": "UNUSED_333",
+    "334": "V_CREATE",
+    "335": "FUSION_FLARE",
+    "336": "FUSION_BOLT",
+    "337": "HURRICANE"
+  }
+}

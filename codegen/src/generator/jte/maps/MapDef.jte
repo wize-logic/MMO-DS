@@ -21,7 +21,10 @@ import de.fiereu.openmmo.maps.MapDef
 import de.fiereu.openmmo.maps.MapFrameScript
 import de.fiereu.openmmo.maps.NpcDef
 import de.fiereu.openmmo.maps.WarpTile
+import de.fiereu.openmmo.items.generated.Items
 import de.fiereu.openmmo.maps.EncounterVariant
+import de.fiereu.openmmo.maps.HeadbuttTree
+import de.fiereu.openmmo.maps.RockSmashRubble
 import de.fiereu.openmmo.maps.WildEncounterForms
 import de.fiereu.openmmo.maps.WildEncounterOverride
 import de.fiereu.openmmo.maps.WildEncounterSlot
@@ -57,7 +60,14 @@ internal val ${objectName}: MapDef =
         healLocation = ${RenderUtil.INSTANCE.healLocation(map.getHealLocation())},
         onFrameScripts = ${RenderUtil.INSTANCE.frameScripts(map.getOnFrameScripts())},
         coordScripts = ${RenderUtil.INSTANCE.coordScripts(map.getCoordScripts())},
+        staticSite = "${map.getStaticSite()}",
+@if(map.getFlyAllowed())
+        flyAllowed = true,
+@endif
 @if(!map.getTerrainRef().isEmpty())
+        hasGrass = ${map.getHasGrass()},
         terrain = ${map.getTerrainRef()},
+        headbuttTrees = ${RenderUtil.INSTANCE.headbuttTrees(map.getHeadbuttTrees())},
+        rubble = ${RenderUtil.INSTANCE.rubble(map.getRubble())},
 @endif
     )

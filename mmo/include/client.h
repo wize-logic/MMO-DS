@@ -86,6 +86,7 @@ typedef enum {
     OPENMMO_EV_ENTITY_STEP,    /* commit one tile: .entity.{x,z} is the new tile */
     OPENMMO_EV_ENTITY_TURN,    /* face .entity.dir without moving */
     OPENMMO_EV_ENTITY_DESPAWN, /* delete the avatar in .entity.slot */
+    OPENMMO_EV_ENTITY_PLACE,   /* set the avatar down on .entity.{x,z}, no walk */
     /*
      * The server rejected or corrected the local player's movement. The overworld is server-
      * authoritative: the client predicts each step and animates it at once, then sends it up,
@@ -335,11 +336,19 @@ typedef struct {
         int localid;   /* map-object local id: 0x100 + slot (the remote-avatar band) */
         int x, z;      /* tile the event refers to (field x, field z) */
         int dir;       /* engine facing DIR_* (NORTH=0/SOUTH=1/WEST=2/EAST=3) */
+        int speed;     /* OPENMMO_ENTITY_SPEED_*: the pace the model timed this
+                        * step at, and the pace the host has to draw it at */
         int gender;    /* which trainer model to build the avatar from, as the
                         * spawn packet gave it: 0 male, 1 female */
         int version;   /* dp-sprite selector; no packet carries one yet */
         int has_body;  /* 1 when gfx is an explicit catalog body */
         int gfx;       /* object-event graphics id; meaningful when has_body */
+        /*
+         * The Pokemon walking behind this peer: `has_follower` says whether there is one and
+         * `follower_gfx` is the object-event graphics id a filled package planted for it.
+         */
+        int has_follower;
+        int follower_gfx;
         /* The peer's display name as the spawn packet carried it, Latin-1 and
          * NUL-terminated (see openmmo_entity_appearance). It rides the slot's
          * appearance, so every ENTITY_* event for a live slot carries it, not
@@ -453,7 +462,7 @@ typedef struct {
     struct {
         int count;                    /* characters the account now holds */
         s64 id;                       /* the list's first id, 0 if still empty */
-        char name[33];                /* the name that was submitted */
+        char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)]; /* the name that was submitted */
         int gender;                   /* 0 male, 1 female, as submitted */
         int region;                   /* starting region as submitted */
     } character;                      /* valid for OPENMMO_EV_CHARACTERS */
@@ -461,8 +470,8 @@ typedef struct {
         int type;                     /* MMO_CHAT_* wire byte */
         int language;                 /* Language ordinal, or -1 */
         s64 sender_id;
-        char sender[MMO_CHAR_NAME_MAX + 1];
-        char text[MMO_CHAT_TEXT_MAX + 1];
+        char sender[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
+        char text[MMO_TEXT_BYTES(MMO_CHAT_TEXT_MAX)];
     } chat;                           /* valid for OPENMMO_EV_CHAT */
     struct {
         int open;                     /* 1 if a box with a text id is up */
@@ -497,7 +506,7 @@ typedef struct {
         s64 player;                   /* the row this packet named; 0 on a replace */
         int added;                    /* 1 if 0x64 inserted a new name */
         int removed;                  /* 1 if 0x65 dropped a name */
-        char name[MMO_CHAR_NAME_MAX + 1];
+        char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
     } friends;                        /* valid for OPENMMO_EV_FRIENDS */
     struct {
         int in_guild;                 /* 1 if 0x80 said we are in one */
@@ -506,9 +515,9 @@ typedef struct {
         s64 guild_id;
         int added;                    /* 1 if 0x83 inserted a name */
         int removed;                  /* 1 if 0x85 dropped a name */
-        char name[MMO_GUILD_NAME_MAX + 1];
-        char tag[MMO_GUILD_TAG_MAX + 1];
-        char member[MMO_CHAR_NAME_MAX + 1];
+        char name[MMO_TEXT_BYTES(MMO_GUILD_NAME_MAX)];
+        char tag[MMO_TEXT_BYTES(MMO_GUILD_TAG_MAX)];
+        char member[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
     } guild;                          /* valid for OPENMMO_EV_GUILD */
     struct {
         int sent;                     /* 1 if the held page is the sent box */
@@ -518,8 +527,8 @@ typedef struct {
         int result;                   /* 0x96 sj1 byte; -1 if this was not one */
         s64 mail_id;                  /* the opened letter, or 0 */
         int is_detail;
-        char subject[MMO_MAIL_SUBJECT_MAX + 1];
-        char other[MMO_CHAR_NAME_MAX + 1];
+        char subject[MMO_TEXT_BYTES(MMO_MAIL_SUBJECT_MAX)];
+        char other[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
     } mail;                           /* valid for OPENMMO_EV_MAIL */
     struct {
         int present;                  /* 1 if 0xD0 said we are in one */
@@ -527,7 +536,7 @@ typedef struct {
         s64 leader;                   /* 0 when not in a link */
         int added;                    /* 1 if 0xD1 inserted a name */
         int removed;                  /* 1 if 0xD2 dropped a name */
-        char name[MMO_CHAR_NAME_MAX + 1];
+        char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
     } link;                           /* valid for OPENMMO_EV_LINK */
     struct {
         int opcode;                   /* the s2c that updated the store */
@@ -605,7 +614,7 @@ typedef struct {
     s32 money;
     int gender;
     s64 character_id;         /* the selected character's id; 0 until pick */
-    char name[33];            /* Latin-1, as the list / SelectedCharacter carried it */
+    char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)]; /* as the list / SelectedCharacter carried it */
     int party_count;          /* party members present (<= 6) */
     u16 party_species[6];     /* engine species ids; 0 = untranslatable */
     int party_untranslatable; /* party species with no engine id */
@@ -616,6 +625,12 @@ typedef struct {
     int item_untranslatable;  /* stacks whose item id had no engine id */
     int flag_count;           /* story flags set (enabled), summary of the store */
     int var_count;            /* story variables received, summary of the store */
+    /* The badges earned, in the wire's own numbering (the first gym's 0), as
+     * many as MMO_WS_BADGE_MAX holds of badge_count on the wire. The fused
+     * client seats them into the save's TrainerInfo, which this engine's own
+     * field-move routines ask before every rock, tree and boulder. */
+    int badge_count;
+    s16 badges[MMO_WS_BADGE_MAX];
 } openmmo_world_state;
 
 /* --- the server-owned progression store ---------------------------------- * */
@@ -651,6 +666,8 @@ typedef struct {
     int vars_set;                                     /* non-zero vars */
     int out_of_range;                                 /* ids the seat could not hold */
     int running_shoes;                                /* synthetic flag 3000, see below */
+    unsigned badges;                                  /* bit i = Sinnoh badge i, flags 3001.. */
+    int respawn;                                      /* synthetic var 3009; 0 = none seated */
     /* Save blocks seated whole (game.h, mmo_save_block). Held by value because
      * the frame they arrived in is reused before the field this seats into
      * exists: a seat lands in the join burst, ahead of the map. */
@@ -669,6 +686,18 @@ typedef struct {
  * rolls a fresh save every join.
  */
 #define MMO_SCRIPT_FLAG_RUNNING_SHOES 3000
+/*
+ * The eight Sinnoh badges, one flag each: 3001 is the Coal Badge and 3008 the Beacon Badge.
+ * They are TrainerInfo bits the gym scripts set, and nothing reported them, so a badge earned
+ * online was gone at the next login and every HM gate refused again.
+ */
+#define MMO_SCRIPT_FLAG_BADGE_BASE 3001
+#define MMO_SCRIPT_BADGE_COUNT 8
+/* The engine's black-out warp id (spawn_locations.c, 1..20), as a synthetic
+ * Var row in the same band: FieldOverworldState is not on the wire, and a
+ * fresh save answers 1, the player's own bed in Twinleaf, for every white
+ * out of the session, however far the character has come. */
+#define MMO_SCRIPT_VAR_RESPAWN 3009
 
 /* --- the server-owned party ---------------------------------------------- * */
 #define OPENMMO_PARTY_MAX 6
@@ -682,8 +711,8 @@ typedef struct {
     int hp;                   /* current HP */
     s32 xp;
     int egg;
-    char nickname[32];        /* empty when the species name is shown */
-    char ot[32];              /* original trainer */
+    char nickname[MMO_TEXT_BYTES(MMO_MON_NAME)]; /* empty when the species name is shown */
+    char ot[MMO_TEXT_BYTES(MMO_MON_NAME)];       /* original trainer */
     u16 move_id[4];           /* server move ids; 0 = empty slot */
     u16 move[4];              /* engine move ids; 0 = empty slot or untranslatable */
     u8  move_pp[4];
@@ -695,8 +724,20 @@ typedef struct {
     u8  cond[MMO_MON_CONDITIONS];
     u8  sheen;
     u64 ribbons_super;
+    /*
+     * The personality the engine rolled for this monster when it was caught, carried on the
+     * record ever since.
+     */
+    u32 seed;
     int nature;               /* 0..24, engine nature ids (identical numbering) */
     int friendship;           /* 0..255 */
+    /*
+     * What it is carrying, both ways round: the server's wire id and the engine id the seat
+     * writes onto the monster. 0 is carrying nothing in both, and `held_item` non-zero with
+     * `held_item_engine` 0 is an item the record names and this build cannot seat (idmap.h).
+     */
+    int held_item;            /* server wire item id; 0 = carrying nothing */
+    u16 held_item_engine;     /* engine item id; 0 = nothing or untranslatable */
     int form;                 /* alternate forme id, 0 for the ordinary one */
     int shiny;
     /* 0 or 1 index the species' two engine abilities. 2 means the hidden ability,
@@ -711,7 +752,19 @@ typedef struct {
      * used to invent.
      */
     int caught_map_header;
+    /*
+     * The engine's own location label, where the record carries one in place of a map; 0 for a
+     * record that carries none. It crosses unchanged: the file it came from is this engine's
+     * own save, so its label is already an index into this engine's location names.
+     */
+    int caught_location_label;
     s32 caught_at;
+    /*
+     * What it is suffering from, as the engine's own condition word: the sleep counter in the
+     * bottom three bits, then poison, burn, freeze, paralysis and bad poison a bit each, and
+     * the bad poison's own counter above them. 0 is a healthy monster.
+     */
+    int status;
 } openmmo_party_mon;
 
 typedef struct {
@@ -730,6 +783,13 @@ typedef struct {
 
 /* --- the PC ---------------------------------------------------------------- * */
 #define OPENMMO_STORAGE_MAX 660
+
+/* Slots to a box, which is the box screen's own count and the server's
+ * (PC_BOX_SIZE). The wire never says it: a box is `slot / OPENMMO_BOX_SIZE`. */
+#define OPENMMO_BOX_SIZE 30
+
+/* The day care's slots, which is what the building holds. */
+#define OPENMMO_DAYCARE_MAX 2
 
 typedef struct {
     int valid;      /* 1 once a PC container has been received */
@@ -886,7 +946,7 @@ typedef struct {
     s64 player;
     s32 unknown;
     int online;
-    char name[MMO_CHAR_NAME_MAX + 1];
+    char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
     u8  unk0;
     s32 last_seen;
     u8  kind;
@@ -911,7 +971,7 @@ typedef struct {
     s64 entity_id;
     s32 joined_at;
     int online;
-    char name[MMO_CHAR_NAME_MAX + 1];
+    char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
     u8  unk0;
     s32 last_seen;
     u8  kind;
@@ -1076,11 +1136,17 @@ openmmo_client *openmmo_client_new(void);
 /* Tear down any live session and free the client. */
 void openmmo_client_free(openmmo_client *c);
 
-/* Begin the session described by cfg (copied). Non-blocking: it kicks off the
- * connect and returns 0. Returns -1 only if the connect could not even be
- * started, in which case the status is already FAILED and an OPENMMO_EV_FAILED
- * event is queued. */
+/*
+ * Begin the session described by cfg (copied). Non-blocking: it kicks off the connect and
+ * returns 0.
+ */
 int openmmo_client_start(openmmo_client *c, const openmmo_config *cfg);
+
+/*
+ * The state byte (MMO_LOGIN_* in login.h) of the last LoginResponse that refused this client,
+ * or -1 if the current session has not been refused. Cleared by every start.
+ */
+int openmmo_client_login_refusal(const openmmo_client *c);
 
 /* Advance the session by one frame's worth of I/O. Never blocks, never sleeps.
  * Call once per frame; it is a no-op on a terminal (DISCONNECTED/FAILED) client. */
@@ -1092,6 +1158,12 @@ int openmmo_client_poll_event(openmmo_client *c, openmmo_event *ev);
 
 /* The current coarse status, for a connection indicator. */
 openmmo_status openmmo_client_status(const openmmo_client *c);
+
+/* Give whatever has already been queued up to ms milliseconds to reach the
+ * server. Returns 0 once nothing is left, -1 if something never went (and says
+ * so on stderr). The last thing a session sends needs this: the disconnect
+ * below frees the send queue rather than emptying it. */
+int openmmo_client_flush(openmmo_client *c, int ms);
 
 /* Close the session (TCP FIN) and return the client to DISCONNECTED. Safe to
  * call at any time; a fresh start() reuses the same handle. */
@@ -1106,9 +1178,23 @@ const char *openmmo_status_name(openmmo_status s);
  * ports are unused. Returns 0, or -1 if the client is not idle. */
 int openmmo_client_attach_fd(openmmo_client *c, int fd, const openmmo_config *cfg);
 
+/*
+ * Say `timestamp` in every ClientHello this client sends from now on, instead of reading the
+ * clock.
+ */
+void openmmo_client_pin_hello_time(openmmo_client *c, s64 timestamp);
+
 /* Send the local player's confirmed one-tile step to the server. */
 int openmmo_client_send_move(openmmo_client *c, int from_x, int from_z,
                              int dir, int running);
+
+/*
+ * Send a step that covered more than one tile. `tiles` is 1..3, the number the engine's own
+ * movement action moves the avatar: a walk is 1, a ledge hop (JUMP_FAR) 2, a Distortion World
+ * gap (JUMP_DISTORTION_WORLD) or a top-gear ramp jump (JUMP_FARTHER) 3.
+ */
+int openmmo_client_send_move_tiles(openmmo_client *c, int from_x, int from_z,
+                                   int dir, int running, int tiles);
 
 /* Send a turn in place. `dir` is the engine facing DIR_* the avatar is now
  * looking. Frames a FaceDirectionPacket. No-op returning -1 unless IN_GAME;
@@ -1164,6 +1250,13 @@ const openmmo_party *openmmo_client_party(const openmmo_client *c);
  * first PC container arrives. The pointer is owned by the client and stays live
  * until the next start(). */
 const openmmo_storage *openmmo_client_storage(const openmmo_client *c);
+
+/*
+ * Who the server says is boarding at the day care, in the same shape as the PC and seated from
+ * the same container packet. Never NULL; `valid` is 0 until the first day care container
+ * arrives.
+ */
+const openmmo_storage *openmmo_client_daycare(const openmmo_client *c);
 
 /* The server-owned bag (see openmmo_bag). Never NULL; `valid` is 0 until the
  * first item snapshot arrives. The pointer is owned by the client and stays
@@ -1387,9 +1480,10 @@ int openmmo_client_shop_sell(openmmo_client *c, s64 item_entity_id,
 int openmmo_client_use_item(openmmo_client *c, u16 item_id,
                             s64 target_entity_id);
 
-/* The two containers a move can name. They are the wire's own container bytes. */
+/* The three containers a move can name. They are the wire's own container bytes. */
 #define OPENMMO_CONTAINER_PC    0
 #define OPENMMO_CONTAINER_PARTY 1
+#define OPENMMO_CONTAINER_DAYCARE 3
 
 /*
  * Move one monster from a container slot onto another: a deposit, a withdrawal, or a reorder,
@@ -1501,6 +1595,11 @@ typedef struct {
     int net_id;                   /* 0 computes the fight, 1 presents it */
     char peer_name[OPENMMO_ENTITY_NAME_MAX];
     int peer_gender;              /* 0 male, 1 female */
+    /*
+     * The object-event graphics id the opponent walks as, resolved from the cosmetic slots the
+     * seat carries (appearance.h).
+     */
+    int peer_body_gfx;
     openmmo_party party;          /* the opponent's */
 } openmmo_link_battle;
 
@@ -1912,6 +2011,63 @@ int openmmo_client_send_script_state(openmmo_client *c,
                                      const mmo_script_flag *flags, int nflags,
                                      const mmo_script_var *vars, int nvars,
                                      const mmo_save_block *blocks, int nblocks);
+
+/* Offer a whole save file to the server, as this character. */
+int openmmo_client_send_offline_report(openmmo_client *c,
+                                       const u8 *report, size_t len);
+
+/* Offer the session records behind that save, as the evidence for it. */
+int openmmo_client_send_offline_chain(openmmo_client *c,
+                                      const u8 *chain, size_t len);
+
+/* Offer the image a session just wrote out for offline play, encoded as
+ * offline_chain.h's offline-copy blob, in the same numbered pieces. The
+ * answer lands in the same place as the other two. */
+int openmmo_client_send_offline_export(openmmo_client *c,
+                                       const u8 *blob, size_t len);
+
+/* What the server said about the last save this client offered. */
+#define MMO_IMPORT_STATUS_NONE      (-1)
+#define MMO_IMPORT_STATUS_LANDED    0
+#define MMO_IMPORT_STATUS_TRY_AGAIN 1
+#define MMO_IMPORT_STATUS_REFUSED   2
+/* The two answers to a session chain rather than to a save: what the server
+ * did with the evidence offered for the import that just landed. Neither says
+ * anything about the save, which has already landed either way. */
+#define MMO_IMPORT_STATUS_CHECK_QUEUED   3
+#define MMO_IMPORT_STATUS_CHECK_DECLINED 4
+/* The two answers to the offline copy a session sends as it leaves: whether
+ * the server kept the image, to check the offline play that follows against.
+ * The copy on the player's disk is theirs either way. */
+#define MMO_IMPORT_STATUS_EXPORT_KEPT     5
+#define MMO_IMPORT_STATUS_EXPORT_DECLINED 6
+/* The session records behind the save are on file; nothing is replayed until
+ * the player asks for a monster, or for everything, and pays for the stretch. */
+#define MMO_IMPORT_STATUS_CHAIN_KEPT      7
+/* One past the last status. An answer at or past this is one this build has
+ * no word for and reads as no answer at all; grow it with the list above, and
+ * the table of words in openmmo_import.c grows with it by construction. */
+#define MMO_IMPORT_STATUS_COUNT 8
+
+#define MMO_IMPORT_NOTE_MAX  32
+#define MMO_IMPORT_TEXT_MAX  256
+
+typedef struct {
+    int  status;
+    char message[MMO_IMPORT_TEXT_MAX];
+    char notes[MMO_IMPORT_NOTE_MAX][MMO_IMPORT_TEXT_MAX];
+    int  nnotes;
+    /* How many notes the server sent, which may be more than were kept. */
+    int  nnotes_sent;
+    /* Set on a landed save when this server would look at the session records
+     * behind it. Nothing is owed either way: a server that is not checking is
+     * one where the import simply stays marked, so a client that sends nothing
+     * loses nothing but the chance to have the mark lifted. */
+    int  wants_chain;
+} openmmo_import_answer;
+
+/* The last answer, or NULL before one has arrived. */
+const openmmo_import_answer *openmmo_client_import_answer(const openmmo_client *c);
 
 /*
  * Report that a local script (or a local door) has already changed map. `header` is the engine

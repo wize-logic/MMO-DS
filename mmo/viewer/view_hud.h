@@ -33,6 +33,10 @@ void view_hud_close(struct view_hud *h);
 int view_hud_poll(struct view_hud *h);
 
 void view_hud_push(struct view_hud *h, uint32_t kind, int32_t arg);
+/* A verb naming one listing, letter or item by its id rather than by where it
+ * sat on the page the window drew. */
+void view_hud_push_id(struct view_hud *h, uint32_t kind, int32_t arg,
+                      uint32_t id_lo, uint32_t id_hi);
 /* CMD_PLAYER with its name: the official client's player menu acting through the guest. */
 void view_hud_push_player(struct view_hud *h, int32_t verb, const char *name);
 void view_hud_dump(const struct view_hud *h, FILE *out);

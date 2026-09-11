@@ -20,6 +20,8 @@ data class BattleRules(
     val catchable: Boolean = true,
     val escapable: Boolean = true,
     val trainer: TrainerDef? = null,
+    /** A Great Marsh encounter: balls out of the Safari allowance, and no attacking. */
+    val safari: Boolean = false,
 )
 
 /** The other player in a player battle. */
@@ -42,6 +44,8 @@ class BattleInstance(
     /** The trainer who owns [opponent], or null for a wild encounter. */
     val trainer: TrainerDef? = null,
     val pvp: PvpFoe? = null,
+    /** A Safari game's encounter. */
+    val safari: Boolean = false,
 ) {
   val key: BattleInterestKey = BattleInterestKey(battleId)
   val foeSession: SessionContext? = pvp?.session

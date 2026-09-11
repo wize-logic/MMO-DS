@@ -16,6 +16,7 @@ object RenderUtil {
           " friendship = ${s.friendship}, growthRate = ${s.growthRate}," +
           " eggGroup1 = ${s.eggGroup1}, eggGroup2 = ${s.eggGroup2}," +
           " ability1 = ${s.ability1}, ability2 = ${s.ability2}," +
+          " abilityHidden = ${s.abilityHidden}," +
           " safariZoneFleeRate = ${s.safariZoneFleeRate}, bodyColor = ${s.bodyColor}," +
           " flipSprite = ${s.flipSprite})"
 

@@ -58,3 +58,45 @@
      if (MapHeader_GetMapLabelTextID(usageContext->mapHeaderID) == LocationNames_Text_MysteryZone) {
          return ITEM_USE_CANNOT_USE_GENERIC;
      }
+@@ -429,6 +466,14 @@
+ 
+     switch (*state) {
+     case 0:
++        /* openmmo: the follower finishes its step and changes gait first
++         * (HeartGold's bicycle task, field_use_item.c sub_02068BB0). */
++        {
++            extern int openmmo_follow_bike_ready(FieldSystem *fs);
++            if (!openmmo_follow_bike_ready(fieldSystem)) {
++                break;
++            }
++        }
+         (*state)++;
+         break;
+     case 1:
+@@ -439,6 +484,13 @@
+ 
+             FieldBGM_SetOverride(fieldSystem, SEQ_NONE);
+             FieldBGM_TryFadeOut(fieldSystem, FieldBGM_GetEffective(fieldSystem, fieldSystem->location->mapHeaderID), 1);
++
++            /* openmmo: dismounting puts the follower under the player, in
++             * its ball until the next step. */
++            {
++                extern void openmmo_follow_dismounted(FieldSystem *fs);
++                openmmo_follow_dismounted(fieldSystem);
++            }
+         } else {
+             FieldBGM_SetOverride(fieldSystem, SEQ_BICYCLE_sseq);
+             FieldBGM_TryFadeOut(fieldSystem, SEQ_BICYCLE_sseq, 1);
+@@ -448,6 +500,12 @@
+             PlayerAvatar_RequestChangeState(fieldSystem->playerAvatar);
+ 
+             RadarChain_Clear(fieldSystem->chain);
++
++            /* openmmo: mounting recalls the follower into its ball. */
++            {
++                extern void openmmo_follow_mounted(FieldSystem *fs, void *task);
++                openmmo_follow_mounted(fieldSystem, task);
++            }
+         }
+ 
+         (*state)++;

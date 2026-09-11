@@ -1,6 +1,7 @@
 /* Game server transport (compression framing) and JoinPacket. See
  * game.h. */
 #include "game.h"
+#include "idmap.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -158,11 +159,15 @@ int mmo_game_dir_to_ds(u8 wire_dir)
     }
 }
 
-void mmo_game_write_movement(mmo_wbuf *body, s16 x, s16 y, u8 wire_dir, int running)
+void mmo_game_write_movement(mmo_wbuf *body, s16 x, s16 y, u8 wire_dir,
+                             int running, int tiles)
 {
+    int span = tiles < 1 ? 1 : tiles > 3 ? 3 : tiles;
+
     mmo_put_s16le(body, x);
     mmo_put_s16le(body, y);
-    mmo_put_u8(body, (u8)((wire_dir & 0x03) | (running ? 0x80 : 0)));
+    mmo_put_u8(body, (u8)((wire_dir & 0x03) | (running ? 0x80 : 0)
+                          | ((span - 1) << 2)));
 }
 
 void mmo_game_write_face(mmo_wbuf *body, u8 wire_dir)
@@ -608,8 +613,8 @@ int mmo_game_write_create_character(mmo_wbuf *w, const mmo_create_character *in)
 {
     if (!w || !in || !in->name)
         return -1;
-    size_t nlen = strlen(in->name);
-    if (nlen == 0 || nlen > MMO_CHAR_NAME_MAX)
+    if (in->name[0] == '\0' ||
+        mmo_utf16_units(in->name) > MMO_CHAR_NAME_MAX)
         return -1;
     if (in->gender != 0 && in->gender != 1)
         return -1;
@@ -696,10 +701,7 @@ int mmo_game_read_load_entity(const u8 *body, size_t n, mmo_load_entity *out)
     out->transportation = mmo_get_u8(&r);
     out->entity_state = mmo_get_u8(&r);
 
-    /* The flags byte and its conditional trailer. Only 0x04 (a follower) is ever
-     * set by this server, but the other bits are read so a fuller packet still
-     * decodes to its true end rather than leaving stray bytes the next reader
-     * would misalign on. */
+    /* The flags byte and its conditional trailer. */
     int flags = mmo_get_u8(&r);
     if (flags & 0x01)
         mmo_get_u8(&r);                   /* S8 */
@@ -715,6 +717,11 @@ int mmo_game_read_load_entity(const u8 *body, size_t n, mmo_load_entity *out)
         mmo_get_u8(&r);                   /* S8 */
     if (flags & 0x10)
         mmo_get_utf16_nt(&r, out->name_prefix, sizeof out->name_prefix);
+    if (flags & 0x20) {
+        out->follower_form = mmo_get_u8(&r);
+        out->follower_gender = mmo_get_u8(&r);
+        out->follower_shiny = mmo_get_u8(&r) != 0;
+    }
     return r.err ? -1 : 0;
 }
 
@@ -1626,8 +1633,11 @@ int mmo_game_read_local_player_state(const u8 *body, size_t n,
     /* badges: a U8-prefixed S16LE list. */
     int badges = mmo_get_u8(&r);
     out->badge_count = badges;
-    for (int i = 0; i < badges; i++)
-        mmo_get_s16le(&r);
+    for (int i = 0; i < badges; i++) {
+        s16 id = mmo_get_s16le(&r);
+        if (i < MMO_WS_BADGE_MAX)
+            out->badges[i] = id;
+    }
     /* variables: a U16LE-prefixed list of (key S16LE, value S8). The key is the
      * GBA var offset (gbaVar - 0x4000); keep the first MMO_WS_VAR_MAX. */
     int vars = mmo_get_u16le(&r);
@@ -1688,6 +1698,89 @@ int mmo_game_write_script_state(mmo_wbuf *w,
             mmo_put_u8(w, blocks[i].data[k]);
     }
     return w->err ? -1 : 0;
+}
+
+/* OfflineSaveReport (c2s 0xCA): one piece of a save report. The pieces are
+ * numbered so the far end refuses a report assembled out of order rather than
+ * silently mis-joining one, a report joined wrong is a character. */
+int mmo_game_write_offline_report(mmo_wbuf *w, int sequence, int last,
+                                  const u8 *chunk, size_t len)
+{
+    if (sequence < 0 || sequence > 0xffff)
+        return -1;
+    if (len > 0xffff || (len > 0 && chunk == NULL))
+        return -1;
+    mmo_put_u16le(w, (u16)sequence);
+    mmo_put_bool(w, last);
+    mmo_put_u16le(w, (u16)len);
+    if (len > 0)
+        mmo_put_bytes(w, chunk, len);
+    return w->err ? -1 : 0;
+}
+
+/* One UTF-8 string with a U16LE byte-count prefix, into `dst` (always
+ * NUL-terminated). Returns the length the wire claimed, which may be longer
+ * than what was kept. */
+static int get_text_u16(mmo_rbuf *r, char *dst, size_t cap)
+{
+    u16 n = mmo_get_u16le(r);
+    size_t kept = 0;
+
+    for (u16 i = 0; i < n; i++) {
+        u8 ch = mmo_get_u8(r);
+
+        if (dst != NULL && kept + 1 < cap)
+            dst[kept++] = (char)ch;
+    }
+    if (dst != NULL && cap > 0)
+        dst[kept] = '\0';
+    return r->err ? -1 : (int)n;
+}
+
+/* OfflineImportResult (s2c 0xCE): the one answer to a whole report. Notes past
+ * `note_cap` are counted in *out_nnotes_sent and dropped, so a caller can say
+ * "and eleven more" rather than believing it read them all. */
+int mmo_game_read_offline_result(const u8 *body, size_t n, int *out_status,
+                                 char *message, size_t message_cap,
+                                 char *notes, size_t note_stride, int note_cap,
+                                 int *out_nnotes, int *out_nnotes_sent,
+                                 int *out_wants_chain)
+{
+    mmo_rbuf r;
+    int status;
+    int sent;
+    int kept = 0;
+
+    mmo_rbuf_init(&r, body, n);
+    status = mmo_get_u8(&r);
+    if (get_text_u16(&r, message, message_cap) < 0)
+        return -1;
+    sent = mmo_get_u16le(&r);
+    if (r.err)
+        return -1;
+    for (int i = 0; i < sent; i++) {
+        char *dst = (notes != NULL && kept < note_cap)
+                        ? notes + (size_t)kept * note_stride
+                        : NULL;
+
+        if (get_text_u16(&r, dst, dst != NULL ? note_stride : 0) < 0)
+            return -1;
+        if (dst != NULL)
+            kept++;
+    }
+    if (out_status != NULL)
+        *out_status = status;
+    if (out_nnotes != NULL)
+        *out_nnotes = kept;
+    if (out_nnotes_sent != NULL)
+        *out_nnotes_sent = sent;
+    /* Whether this server would look at the session records behind the save.
+     * A trailing field, so a server that predates it simply reads as one that
+     * wants nothing, which is the honest answer for one that cannot replay
+     * anything either. */
+    if (out_wants_chain != NULL)
+        *out_wants_chain = r.err ? 0 : (mmo_get_u8(&r) != 0 && !r.err);
+    return 0;
 }
 
 int mmo_game_read_script_state(const u8 *body, size_t n,
@@ -1968,6 +2061,11 @@ void mmo_game_write_battle_outcome(mmo_wbuf *w,
             mmo_put_u8(w, mons[i].cond[s]);
         mmo_put_u8(w, mons[i].sheen);
         mmo_put_s64le(w, (s64)mons[i].ribbons_super);
+        mmo_put_u16le(w, mons[i].species);
+        mmo_put_s16le(w, mons[i].friendship);
+        mmo_put_s16le(w, mons[i].held_item);
+        mmo_put_u8(w, (u8)(mons[i].egg != 0));
+        mmo_put_u16le(w, (u16)(mons[i].status & MMO_MON_STATUS_MASK));
     }
 }
 
@@ -2314,7 +2412,7 @@ static int read_dialog_arg(mmo_rbuf *r, int depth, mmo_dialog_action *out)
             if (!r->err)
                 out->strvar_count++;
         } else {
-            char sink[MMO_DIALOG_STRVAR_CHARS + 1];
+            char sink[MMO_TEXT_BYTES(MMO_DIALOG_STRVAR_CHARS)];
             mmo_get_utf16_nt(r, sink, sizeof sink);
         }
         return r->err ? -1 : 0;
@@ -2364,7 +2462,12 @@ int mmo_game_read_dialog_action(const u8 *body, size_t n,
         (void)mmo_get_u8(&r); /* bG1: unused, carried */
         (void)mmo_get_u8(&r); /* KK0: unused, carried */
         bank = mmo_get_s16le(&r);
-        if (bank < 0)
+        /*
+         * An allowlist, not a sign test. The bank is handed straight to the engine's message
+         * loader, which indexes the text archive's members with it, so one the archive does
+         * not hold is a read past the end of that table.
+         */
+        if (bank != MMO_DIALOG_BANK_MAP_LABEL && !mmo_id_text_bank_valid(bank))
             return -1;
         count = mmo_get_u8(&r);
         if (count > MMO_DIALOG_MENU_MAX)
@@ -2539,6 +2642,39 @@ void mmo_game_write_item_use(mmo_wbuf *w, u16 item_id, s64 target, s32 trailer)
 #define MMO_MON_TAIL_MAX  127
 #define MMO_MON_LIST_MAX  255
 
+int mmo_mon_is_shiny(u32 otid, u32 personality)
+{
+    return ((((otid >> 16) ^ (otid & 0xFFFFu)
+              ^ (personality >> 16) ^ (personality & 0xFFFFu)) & 0xFFFFu) < 8);
+}
+
+/* Solving that rule for the personality, with the trainer id fixed (game.h). */
+u32 mmo_mon_shiny_personality(u32 base, u32 otid, int shiny, int nature)
+{
+    u32 low = base & 0xFFu;
+    u32 fold = ((otid >> 16) ^ (otid & 0xFFFFu)) & 0xFFFFu;
+    int first = shiny ? 0 : 8;
+    int last = shiny ? 8 : 16;
+    int j, k;
+
+    if (nature < 0 || nature >= MMO_MON_NATURES)
+        nature = 0;
+    /* The ordinary monster keeps the personality it has always had. */
+    if (!shiny == !mmo_mon_is_shiny(otid, base))
+        return base;
+    for (j = 0; j < 256; j++) {
+        u32 lo = low + (u32)j * 256u;
+
+        for (k = first; k < last; k++) {
+            u32 hi = (lo ^ fold ^ (u32)k) & 0xFFFFu;
+
+            if ((11u * hi + lo) % 25u == (u32)nature)
+                return (hi << 16) | lo;
+        }
+    }
+    return base;
+}
+
 /*
  * Walk one monster record, the way the client's own reader walks it. Every field is crossed at
  * its own width, the ones without an established meaning too, since the point of the walk is
@@ -2635,6 +2771,18 @@ static int read_monster(mmo_rbuf *r, mmo_monster *out)
             out->caught_region = mmo_get_s16le(r);
             out->caught_bank = mmo_get_s16le(r);
             out->caught_map = mmo_get_s16le(r);
+            continue;
+        }
+        if (tag == MMO_MON_TLV_HELD_ITEM && len == 2) {
+            out->held_item = mmo_get_u16le(r);
+            continue;
+        }
+        if (tag == MMO_MON_TLV_CAUGHT_LABEL && len == 2) {
+            out->caught_location_label = mmo_get_u16le(r);
+            continue;
+        }
+        if (tag == MMO_MON_TLV_STATUS && len == 2) {
+            out->status = mmo_get_u16le(r) & MMO_MON_STATUS_MASK;
             continue;
         }
         for (int i = 0; i < len; i++)
@@ -3003,7 +3151,21 @@ int mmo_game_read_link_battle_open(const u8 *body, size_t n,
         if (out->count < cap)
             mons[out->count++] = m;
     }
-    return r.err ? -1 : 0;
+    if (r.err)
+        return -1;
+    /* The opponent's body, appended after the party by a server newer than the
+     * packet. A server without it leaves nothing here and the seat is still
+     * good, the fight is drawn with the gender's own trainer, which is what
+     * every client did before the field existed. */
+    if (mmo_rbuf_remaining(&r) > 0) {
+        int skins = 0;
+
+        read_skin_set(&r, &out->appearance, &skins, 1);
+        if (r.err)
+            return -1;
+        out->has_appearance = 1;
+    }
+    return 0;
 }
 
 int mmo_game_read_link_battle_data(const u8 *body, size_t n,

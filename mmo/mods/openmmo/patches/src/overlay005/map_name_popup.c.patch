@@ -1,0 +1,61 @@
+--- a/src/overlay005/map_name_popup.c	2026-09-02 23:26:19.459977657 -0400
++++ b/src/overlay005/map_name_popup.c	2026-09-02 23:28:24.117900360 -0400
+@@ -23,6 +23,19 @@
+ #define POPUP_HEIGHT_TILES 5
+ #define POPUP_SIZE_TILES   (POPUP_WIDTH_TILES * POPUP_HEIGHT_TILES)
+ 
++/* openmmo: a ported region's own signs. This game ships nine area windows
++ * (arc/area_win_gra, two members each); a region port appends the source
++ * cartridge's nine after them (mmo/tools/portmap.py, DST_AREAWIN) and gives
++ * each ported header the window its own header named, past this game's. A
++ * window from that half is drawn the way the source draws it: its sheet is
++ * 17x4 tiles from the second tile on, the name sits on the first text row,
++ * and its palette keeps the text colour at index 1 (draw_map_name.c in the
++ * source's decompilation). */
++#define OPENMMO_PORTED_AREA_WINDOW_FIRST 9
++#define PORTED_POPUP_HEIGHT_TILES 4
++#define PORTED_POPUP_SIZE_TILES (POPUP_WIDTH_TILES * PORTED_POPUP_HEIGHT_TILES)
++#define PORTED_POPUP_NAME_FIELD 132
++
+ enum MapNamePopUpState {
+     MAP_NAME_POPUP_STATE_END,
+     MAP_NAME_POPUP_STATE_SLIDE_IN,
+@@ -66,6 +79,22 @@
+ 
+ static void MapNamePopUp_DrawWindowFrame(MapNamePopUp *mapPopUp, s32 strWidth)
+ {
++    if (mapPopUp->windowID >= OPENMMO_PORTED_AREA_WINDOW_FIRST) {
++        /* openmmo: the source's DrawAreaIcon, tile for tile. */
++        mapPopUp->xOffset = ((PORTED_POPUP_NAME_FIELD - strWidth) / 2) + 4;
++
++        MapNamePopUp_LoadAreaGfx(mapPopUp, BG_LAYER_MAIN_3, BASE_TILE_MAP_TRANSITION_DROPDOWN, 7, 0);
++        Window_FillTilemap(&mapPopUp->window, 0);
++
++        for (int i = 0; i < PORTED_POPUP_SIZE_TILES; i++) {
++            Window_BlitBitmapRect(&mapPopUp->window, mapPopUp->charData->pRawData, (i + 1) * 8, 0, 8, 8, (i % POPUP_WIDTH_TILES) * 8, (i / POPUP_WIDTH_TILES) * 8, 8, 8);
++        }
++
++        Window_CopyToVRAM(&mapPopUp->window);
++        Heap_Free(mapPopUp->tiles);
++        return;
++    }
++
+     int marginSize = ((strWidth + 8) / 8 * 8) - strWidth;
+     int leftMargin = marginSize / 2;
+ 
+@@ -181,6 +210,15 @@
+ static void MapNamePopUp_PrintMapName(MapNamePopUp *mapPopUp, const String *string)
+ {
+     TextColor color = TEXT_COLOR(3, 2, 0);
++
++    if (mapPopUp->windowID >= OPENMMO_PORTED_AREA_WINDOW_FIRST) {
++        /* openmmo: the source's PrintMapNameOnIcon, colour 1 on its
++         * palette, one text row up. */
++        color = TEXT_COLOR(1, 2, 0);
++        Text_AddPrinterWithParamsAndColor(&mapPopUp->window, FONT_SYSTEM, string, mapPopUp->xOffset, 8, TEXT_SPEED_INSTANT, color, NULL);
++        return;
++    }
++
+     Text_AddPrinterWithParamsAndColor(&mapPopUp->window, FONT_SYSTEM, string, mapPopUp->xOffset, 8 * 2, TEXT_SPEED_INSTANT, color, NULL);
+ }
+ 

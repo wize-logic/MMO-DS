@@ -19,12 +19,14 @@ import de.fiereu.openmmo.server.game.battle.MoveLearner
 import de.fiereu.openmmo.server.game.battle.TurnEngine
 import de.fiereu.openmmo.server.game.battle.WildMonFactory
 import de.fiereu.openmmo.server.game.services.BattleService
+import de.fiereu.openmmo.server.game.services.ChatLimits
 import de.fiereu.openmmo.server.game.services.GrantBudget
 import de.fiereu.openmmo.server.game.services.MapLoadService
 import de.fiereu.openmmo.server.game.services.PresenceService
 import de.fiereu.openmmo.server.game.services.StoryPlayerService
 import de.fiereu.openmmo.server.game.services.ViolationLog
 import de.fiereu.openmmo.server.game.services.WarpService
+import de.fiereu.openmmo.server.game.services.WorldClock
 import de.fiereu.openmmo.server.game.services.WorldStateService
 import de.fiereu.openmmo.server.game.storage.CharacterStore
 import de.fiereu.openmmo.server.game.storage.EntityIdService
@@ -32,6 +34,7 @@ import de.fiereu.openmmo.server.game.storage.NewGameStarts
 import de.fiereu.openmmo.server.game.testsupport.FakeCharacterRepository
 import de.fiereu.openmmo.server.game.testsupport.FakeSession
 import de.fiereu.openmmo.server.game.testsupport.blackoutService
+import de.fiereu.openmmo.server.game.testsupport.safariService
 import de.fiereu.openmmo.server.game.testsupport.scriptRunner
 import de.fiereu.openmmo.server.game.world.interest.InterestManager
 import de.fiereu.openmmo.server.game.world.interest.PassThroughInterestPolicy
@@ -51,14 +54,14 @@ class StoryResetTest :
     FunSpec({
       fun storyCommand(store: CharacterStore): StoryCommand {
         val mapManager = MapManager()
-        val mapLoad = MapLoadService(mapManager)
+        val mapLoad = MapLoadService(mapManager, SpeciesRegistry())
         val interest = InterestManager()
         val species = SpeciesRegistry()
         val moves = MoveRegistry()
         val items = ItemRegistry()
         return StoryCommand(
             characterStore = store,
-            worldStateService = WorldStateService(),
+            worldStateService = WorldStateService(WorldClock()),
             storyPlayerService =
                 StoryPlayerService(
                     store,
@@ -92,6 +95,8 @@ class StoryResetTest :
                     blackout = blackoutService(store) { scriptRunner(store, mapManager, interest) },
                     budget = GrantBudget(),
                     violations = ViolationLog(),
+                    safariService = safariService(store, mapManager),
+                    chatLimits = ChatLimits(ViolationLog()),
                 ),
             items = items,
         )

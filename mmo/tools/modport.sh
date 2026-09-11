@@ -11,12 +11,31 @@
 #              back-to-front for Diamond and front-to-back for Platinum, so a
 #              fill re-encodes them on the way in. That direction, and nothing
 #              else, was "the sheet does not decode through this sprite path".
-#   Black      nothing. A species is not six members there and the sheets are
-#              compressed; mmo/tests/import_test.sh measures the shape.
+#   Black      no sprites. A species is not six members there and the sheets are
+#              compressed; mmo/tests/import_test.sh measures the shape. What it
+#              does serve is everything else about a species, through its own
+#              door: tools/portspecies.py appends the personal data, the
+#              learnset, the evolutions, the icon and the name for all 156 it
+#              adds, so a Gen 5 monster has stats, a type, a name and a face in
+#              a box and the engine's placeholder where its battle sprite would
+#              be. Like the region and follower fills below, that is not a
+#              Pairing and so not a recipe line.
+#   region     a whole region of another game's world, since 2026-08-30. It is
+#              the one map port a recipe line can say, and for the reason the
+#              single-map one still cannot: a region needs no header id, no
+#              label and no bgm in the line, because every one of them is a
+#              function of the region, the address is `base + i` over its
+#              maps in source header order, the place names come from the
+#              cartridge's own map sections, and the music is whatever each
+#              map already asked for. `IPKE region johto -` is the whole line.
 #   map/music  ported by their own tools (tools/portmap.py, tools/portmusic.py)
-#              and named here so a recipe line points at them. A map needs a
-#              header id, a label and a bgm; the recipe grammar has no column
-#              for any of them yet.
+#              and named here so a recipe line points at them. A single map
+#              needs a header id, a label and a bgm; the recipe grammar has no
+#              column for any of them yet.
+#   species    tools/portspecies.py, since 2026-08-30, and the same shape: all
+#              156 cross at once because appended members must run without a
+#              gap, and what a species gets is five archive members that did not
+#              exist before.
 #   follower   the same shape again: tools/portfollow.py, since 2026-08-26. A
 #              recipe line is a pairing and a follower fill is not one, there
 #              is no Sinnoh follower for a Johto one to land on, all 566 cross
@@ -127,9 +146,10 @@ while read -r want kind src dst rest; do
         # column here. Scripts still do not cross, so a ported map is silent;
         # that refusal is on its own page.
         echo "modport: $RECIPE: '$kind' is not a kind this driver carries --" \
-             "mmo/tools/portmap.py ports one, and needs a header id, a label" \
-             "and a bgm that a recipe line has no column for; see" \
-             "mmo/MAPFORMATS.md" >&2
+             "one map needs a header id, a label and a bgm that a recipe line" \
+             "has no column for, so mmo/tools/portmap.py takes those directly." \
+             "A WHOLE REGION needs none of them and is a line here: try" \
+             "'$want region johto -'; see mmo/MAPFORMATS.md" >&2
         exit 1 ;;
     follower|follow_mon|tsurepoke)
         # Same shape as map and music: the porter exists, the grammar does not
@@ -265,6 +285,17 @@ SRC_TRGRA_NARC=a/0/5/8
 DST_TRGRA_NARC=poketool/trgra/trfgra.narc
 GFX=${OPENMMO_TRAINER_GFX:-$(dirname "$0")/../TRAINER_GFX}
 
+# The map table, generated from the source game's own headers. It is what says
+# which region a map is in, and therefore what a `region` line may name.
+MAPS=${OPENMMO_MAPS:-$(dirname "$0")/../MAPS}
+
+# This game'S own image, which a region port needs and the other kinds do not:
+# the place-name bank a ported banner is appended to is the destination's, and
+# so is the material-shape table an appended prop needs a row in. The engine's
+# ROM build is where it is; a run without one is refused by name rather than
+# filling a package whose maps have no names and whose buildings hang the field.
+DEST_ROM=${OPENMMO_DEST_ROM:-$ENGINE/build/rom/pokeplatinum.us.nds}
+
 # The first of one class's five members on one side, or nothing.
 gfx_row() {
     awk -v side="$1" -v cls="$2" '
@@ -312,6 +343,37 @@ while read -r want kind src dst rest; do
     # registry row is what says so, and a line asking a cartridge for something
     # it was never measured to hold is refused naming both.
     case "$kind" in
+    region)
+        # A region's endpoints are not a pairing: there is no Sinnoh region for
+        # a Johto one to land on, and the destination column has nothing true
+        # to say. `-` is what a line with no destination writes elsewhere here,
+        # so it is what this takes.
+        if [ "$dst" != "-" ]; then
+            echo "modport: $RECIPE: a region lands nowhere in particular --" \
+                 "its maps are appended with addresses of their own rather" \
+                 "than onto this game's, so the destination column is '-'" >&2
+            exit 1
+        fi
+        case ",$kinds," in
+        *",$kind,"*) ;;
+        *) echo "modport: $RECIPE asks $slot_name for '$kind' and" \
+                "mmo/CARTRIDGES says it serves: ${kinds:--}" >&2
+           exit 1 ;;
+        esac
+        # A region with no maps is a typo, and mmo/MAPS is committed, so it is
+        # answerable before the image is opened.
+        # Field 11, and it has moved twice: mmo/MAPS grew a column both times
+        # and this index did not, so the check read the kind column and refused
+        # every region there is. tests/mapformat_test.sh now holds it to the
+        # column the porter's own reader takes.
+        if ! awk -v r="$src" '$1 == "hg" && $11 == r { found = 1; exit }
+                              END { exit !found }' "$MAPS" 2>/dev/null; then
+            echo "modport: $RECIPE: no map in mmo/MAPS is in region '$src'." \
+                 "The column takes the word the cartridge's own map headers" \
+                 "use: $(awk '$1 == "hg" { print $11 }' "$MAPS" 2>/dev/null |
+                          sort -u | tr '\n' ' ')" >&2
+            exit 1
+        fi ;;
     pokemon|item_icon|trainer)
         case ",$kinds," in
         *",$kind,"*) ;;
@@ -336,7 +398,20 @@ while read -r want kind src dst rest; do
                 exit 1
             }
         fi
-        if [ "$kind" = item_icon ]; then
+        if [ "$kind" = region ]; then
+        # Every region line is one run, which is why this collects them rather
+        # than porting each. A package's appended members have to start at the
+        # built image's own counts and run without a gap, so a second run would
+        # start at the same count and claim the same numbers, and the doors
+        # between two regions only work when both ends are in one package. The
+        # porter allocates every archive from a single cursor for every map of
+        # every region at once.
+        regions="${regions:+$regions,}$src"
+        echo "region $code:$src -> the maps mmo/MAPS names in it" \
+            >> "$STAGE/port.log"
+        continue
+    fi
+    if [ "$kind" = item_icon ]; then
             # A name with no row is refused, and the refusal names both games:
             # "Heart Gold has no red_apricrn" is a typo somebody can fix, and
             # if the name is really the other game's the answer says so. Never
@@ -441,6 +516,19 @@ while read -r want kind src dst rest; do
              "$DST_TRGRA_NARC members $dst_at..$((dst_at + 4)) as $dst"
         continue
     fi
+    if [ "$kind" = region ]; then
+        # Every region line is one run, which is why this collects them rather
+        # than porting each. A package's appended members have to start at the
+        # built image's own counts and run without a gap, so a second run would
+        # start at the same count and claim the same numbers, and the doors
+        # between two regions only work when both ends are in one package. The
+        # porter allocates every archive from a single cursor for every map of
+        # every region at once.
+        regions="${regions:+$regions,}$src"
+        echo "region $code:$src -> the maps mmo/MAPS names in it" \
+            >> "$STAGE/port.log"
+        continue
+    fi
     if [ "$kind" = item_icon ]; then
         # Two members, and the porter writes a raw member at ITS OWN index,
         # which is the source's, not the destination's. So the placement is
@@ -540,6 +628,22 @@ while read -r want kind src dst rest; do
         done
     fi
 done < "$RECIPE"
+
+if [ -n "${regions:-}" ]; then
+    if [ ! -f "$DEST_ROM" ]; then
+        echo "modport: a region port needs this game's own image at" \
+             "$DEST_ROM (OPENMMO_DEST_ROM), the place-name bank and the" \
+             "material-shape table a ported map appends to are the" \
+             "destination's, and neither is in the cartridge" >&2
+        exit 1
+    fi
+    "$PYTHON" "$(dirname "$0")/portmap.py" "$ROM" "$STAGE" \
+        --dest-rom "$DEST_ROM" --region "$regions" --music --scripts \
+        --trainers || {
+            echo "modport: $regions was refused, so nothing was written" >&2
+            exit 1
+        }
+fi
 rm -f "$STAGE/port.err"
 
 # What filled this package.
@@ -575,6 +679,15 @@ if [ "$OUT" != "$PKG" ]; then
     cp "$STAGE/port.recipe" "$OUT/port.recipe"
 fi
 if [ -d "$STAGE/narc" ]; then cp -R "$STAGE/narc" "$OUT/"; fi
+# A region port writes cooked members instead of raw ones, `.cooked/narc` for
+# the archives, `.cooked/fs` for the two whole files it replaces, and
+# `.cooked/generated` for the map header table and the billboard list the running
+# port reads. Publishing the one directory and not the other would leave a
+# package that loads and has no maps in it.
+if [ -d "$STAGE/.cooked" ]; then
+    rm -rf "$OUT/.cooked"
+    cp -R "$STAGE/.cooked" "$OUT/"
+fi
 echo "$stamp_line" >> "$OUT/port.log"
 if [ -f "$STAGE/port.log" ]; then cat "$STAGE/port.log" >> "$OUT/port.log"; fi
 

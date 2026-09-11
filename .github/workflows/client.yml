@@ -6,7 +6,10 @@ on:
       - "mmo/**"
       - ".github/workflows/client.yml"
   push:
-    branches: [ "master" ]
+    # The development branch as well as master: everything lands on
+    # native-client first, so a gate that ran on master alone ran too late to
+    # stop anything.
+    branches: [ "master", "native-client" ]
     paths:
       - "mmo/**"
       - ".github/workflows/client.yml"
@@ -70,8 +73,10 @@ jobs:
       - name: Install packages
         run: sudo apt-get update && sudo apt-get install -y $(mmo/ci.sh packages)
 
-      - name: Build the -m32 client
-        run: mmo/ci.sh build
-
-      - name: Stand up server.login and prove a real login
-        run: mmo/ci.sh server
+      # One stage rather than a build step and a server step, because the
+      # order is the point: the servers generate their keypair per machine and
+      # the client pins one root key at build time, so a client built before
+      # that pair exists trusts a key nothing here signs with and the login
+      # ends on "built for another server". mmo/ci.sh's stage_keys has it.
+      - name: Pin a client to this runner's server key and prove a real login
+        run: mmo/ci.sh oracle

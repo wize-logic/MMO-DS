@@ -14,6 +14,11 @@ data class LoginServerConfig(
     val admin: AdminAccountConfig? = null,
     val rootKey: String? = null,
     val rootKeyFile: String? = null,
+    /**
+     * Path to the operator's published `main_feed.txt`, whose `<min_revision>` is the oldest client
+     * this server admits. Unset means no update gate at all, which is what a checkout wants.
+     */
+    val clientFeed: String? = null,
 ) {
   override fun equals(other: Any?): Boolean =
       other is LoginServerConfig &&
@@ -23,6 +28,7 @@ data class LoginServerConfig(
           rootKeyResource == other.rootKeyResource &&
           rootKey == other.rootKey &&
           rootKeyFile == other.rootKeyFile &&
+          clientFeed == other.clientFeed &&
           sessionSecret.contentEquals(other.sessionSecret) &&
           rememberMeMaxAge == other.rememberMeMaxAge &&
           db == other.db &&
@@ -36,6 +42,7 @@ data class LoginServerConfig(
     h = h * 31 + rootKeyResource.hashCode()
     h = h * 31 + rootKey.hashCode()
     h = h * 31 + rootKeyFile.hashCode()
+    h = h * 31 + clientFeed.hashCode()
     h = h * 31 + sessionSecret.contentHashCode()
     h = h * 31 + rememberMeMaxAge.hashCode()
     h = h * 31 + db.hashCode()

@@ -166,7 +166,7 @@ if [ -n "${OPENMMO_STRINGS_XML:-}" ] && [ -f "$OPENMMO_STRINGS_XML" ]; then
     if diff -u "$OVERLAY_TABLE" "$tmp/regen_overlay.h" > "$tmp/overlay.diff" 2>&1; then
         echo "  ok   the overlay re-derives from strings_en.xml at the four bases"
     else
-        echo " FAIL the overlay and the official client catalogue have drifted apart"
+        echo "  FAIL the overlay and the official client catalogue have drifted apart"
         head -30 "$tmp/overlay.diff"
         fail=1
     fi
@@ -177,7 +177,7 @@ if [ -n "${OPENMMO_STRINGS_XML:-}" ] && [ -f "$OPENMMO_STRINGS_XML" ]; then
         fail=1
     fi
 else
-    echo " skip overlay re-derive (no official client string catalogue)"
+    echo "  skip overlay re-derive (no official client string catalogue)"
 fi
 
 if [ "$fail" -eq 0 ]; then

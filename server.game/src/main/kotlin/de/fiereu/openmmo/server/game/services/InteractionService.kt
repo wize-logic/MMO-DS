@@ -3,10 +3,15 @@ package de.fiereu.openmmo.server.game.services
 import de.fiereu.network.PacketEvent
 import de.fiereu.network.SessionContext
 import de.fiereu.openmmo.common.enums.Direction
+import de.fiereu.openmmo.common.enums.Region
 import de.fiereu.openmmo.common.enums.TileBehavior
+import de.fiereu.openmmo.items.ItemRegistry
 import de.fiereu.openmmo.maps.MapManager
+import de.fiereu.openmmo.maps.NpcDef
+import de.fiereu.openmmo.maps.generated.ported.PortedMarts
 import de.fiereu.openmmo.net.game.packets.EntityInteractPacket
 import de.fiereu.openmmo.net.game.packets.TileInteractPacket
+import de.fiereu.openmmo.server.game.script.Badge
 import de.fiereu.openmmo.server.game.script.Script
 import de.fiereu.openmmo.server.game.script.ScriptRegistry
 import de.fiereu.openmmo.server.game.script.ScriptRunner
@@ -20,6 +25,14 @@ import javax.inject.Singleton
 
 private val log = KotlinLogging.logger {}
 
+// The ordinary mart's tier for a badge count, which both cartridges spell as the same switch:
+// none buys tier 1, one or two buy 2, three or four buy 3, five or six buy 4, seven buys 5, and
+// the eighth buys the whole table.
+private val COMMON_MART_TIER_BY_BADGES = listOf(1, 2, 2, 3, 3, 4, 4, 5, 6)
+
+// An item's wire id is its engine index in the region-5 block (mmo/include/idmap.h).
+private const val ITEM_WIRE_BLOCK = 5000
+
 @Singleton
 class InteractionService
 @Inject
@@ -31,6 +44,9 @@ constructor(
     private val scriptRunner: ScriptRunner,
     private val trainerSight: TrainerSightService,
     private val violations: ViolationLog,
+    private val shopService: ShopService,
+    private val items: ItemRegistry,
+    private val staticEncounters: StaticEncounterService,
 ) {
 
   /** The player pressed the action button on a specific entity, that is an npc. */
@@ -53,11 +69,8 @@ constructor(
 
     for (npc in currentMap.npcs) {
       if (npcService.getNpcEntityId(regionId, bankId, mapId, npc.entityIdx) == npcEntityId) {
-        // Its sibling onTileInteract never asks this, because it works out who is in front of the
-        // player from a position this server holds. This one is handed a name, and took any name
-        // on the map: the ids are not secret, so one walk up to a clerk reopened that mart from
-        // anywhere for the rest of the session. The reach is the data's own: the person's tile
-        // plus the box their movement range names, plus the tile you talk across.
+        // Its sibling [onTileInteract] never has to ask this, because it works out who is in
+        // front of the player from a position and a facing this server already holds.
         val reachX = 1 + npc.movementRangeX
         val reachY = 1 + npc.movementRangeY
         val playerX = stored.info.positionX.toInt()
@@ -116,11 +129,48 @@ constructor(
     val bankId = stored.info.positionBankId.toInt()
     val mapId = stored.info.positionMapId.toInt()
 
-    val npc = npcService.visibleNpcAt(session, regionId, bankId, mapId, facingX, facingY)
+    // A counter between the player and the person: the engine's own lookup steps one tile past
+    // a table tile before asking who stands there (`TileBehavior_IsTable`), which is how every
+    // clerk in both cartridges is spoken to.
+    var npcX = facingX
+    var npcY = facingY
+    if (currentMap.tileAt(facingX, facingY)?.behavior == TileBehavior.COUNTER) {
+      when (state.facingDirection) {
+        Direction.RIGHT -> npcX += 1
+        Direction.LEFT -> npcX -= 1
+        Direction.UP -> npcY -= 1
+        Direction.DOWN -> npcY += 1
+        else -> {}
+      }
+    }
+
+    val npc = npcService.visibleNpcAt(session, regionId, bankId, mapId, npcX, npcY)
     if (npc != null) {
       // A trainer the table owns has no script to look up: its object carries the trainer id in the
       // place a script id would go, so the fight is the table's and talking to it starts the fight.
-      if (npc.trainerId != 0 && trainerSight.challengeOnInteract(session, state, npc)) return
+      val map = mapManager.getMap(regionId, bankId, mapId)
+      if (npc.trainerId != 0 &&
+          map != null &&
+          trainerSight.challengeOnInteract(session, state, npc, map))
+          return
+      // A clerk on a ported map has no script here either: the bag and the money are this
+      // server's, so the shelf has to be, and the client sends the press across rather than
+      // opening its own copy of the cartridge's list.
+      if (npc.martShelf >= 0) {
+        openPortedMart(
+            session,
+            state,
+            stored,
+            npc,
+            npcService.entityIdFor(regionId, bankId, mapId, npc.entityIdx))
+        return
+      }
+      // A person whose script stages a wild fight has no script here either: the fight is this
+      // server's to deal, and the lead-up the client plays is the package's folded scene.
+      if (npc.script.startsWith(StaticEncounterService.MARK)) {
+        staticEncounters.challenge(session, state, npc, regionId, bankId, mapId)
+        return
+      }
       val script = scriptRegistry.forMap(regionId, bankId, mapId, npc.script)
       if (script == null) {
         log.info {
@@ -139,6 +189,12 @@ constructor(
           it.x == facingX && it.y == facingY && facingDirOk(it.facingDir, state.facingDirection)
         }
     if (bgEvent != null) {
+      // A sign whose script stages a wild fight, the orbs on the Spear Pillar, the Old Chateau's
+      // television, the Hallowed Tower, is dealt here for the same reason a person is.
+      if (bgEvent.script.startsWith(StaticEncounterService.MARK)) {
+        staticEncounters.challengeScenery(session, state, bgEvent.script, regionId, bankId, mapId)
+        return
+      }
       val script = scriptRegistry.forMap(regionId, bankId, mapId, bgEvent.script)
       if (script != null) {
         runScript(session, state, script, entityId = -1)
@@ -163,6 +219,15 @@ constructor(
       return
     }
 
+    // A fight this map's own scripts stage that nobody on the map carries. Two of Sinnoh's are
+    // like that: the Hall of Origin's Arceus runs off a coord event the player walks onto, and
+    // the Distortion World's Giratina stands on a map with no event table at all.
+    if (currentMap.staticSite.isNotEmpty() &&
+        staticEncounters.challengeScenery(
+            session, state, currentMap.staticSite, regionId, bankId, mapId)) {
+      return
+    }
+
     log.debug { "Tile interaction at ($facingX, $facingY) has no bg event" }
   }
 
@@ -179,6 +244,41 @@ constructor(
         behavior == TileBehavior.SURFABLE_WATER && !surfing -> FIELD_MOVE_SURF
         else -> null
       }
+
+  /** The shelf a ported clerk sells, opened here. */
+  private fun openPortedMart(
+      session: SessionContext,
+      state: PlayerState,
+      stored: StoredCharacter,
+      npc: NpcDef,
+      npcEntityId: Long,
+  ) {
+    val region = Region.byWireValue(stored.info.positionRegionId)?.name?.lowercase()
+    val badges =
+        if (region == null) 0 else Badge.entries.count { it.keyIn(region) in stored.storyFlags }
+    val ids =
+        if (npc.martShelf == 0) {
+          val tier =
+              COMMON_MART_TIER_BY_BADGES.getOrElse(badges) { COMMON_MART_TIER_BY_BADGES.last() }
+          PortedMarts.COMMON.filter { it.second <= tier }.map { it.first }
+        } else {
+          PortedMarts.SPECIALTIES.getOrNull(npc.martShelf - 1)
+              ?: run {
+                log.warn { "npc ${npc.entityIdx} sells shelf ${npc.martShelf}, which is not one" }
+                return
+              }
+        }
+    val shelf = ids.mapNotNull { items.get(ITEM_WIRE_BLOCK + it) }
+    if (shelf.isEmpty()) {
+      log.warn { "npc ${npc.entityIdx} sells ${ids.size} item(s) this build has none of" }
+      return
+    }
+    log.info {
+      "Mart: npc ${npc.entityIdx} on ${state.regionId}:${state.bankId}:${state.mapId} opens " +
+          "shelf ${npc.martShelf} with ${shelf.size} line(s) at $badges badge(s)"
+    }
+    shopService.open(session, npcEntityId, shelf)
+  }
 
   private fun currentCharacter(state: PlayerState): StoredCharacter? {
     val charId = state.characterId ?: return null

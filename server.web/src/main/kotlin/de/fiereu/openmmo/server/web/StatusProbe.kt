@@ -11,9 +11,6 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * Whether the login and game servers are accepting connections, for the panel on the front page. A
  * TCP handshake is the whole test: neither protocol says anything before the client does.
- *
- * When the game answers, its online-count endpoint is asked how many are playing, so the panel can
- * name a number. A build without that endpoint loses the number, never the panel.
  */
 class StatusProbe(
     private val loginHost: String,
@@ -70,7 +67,6 @@ private fun tcpReachable(host: String, port: Int, timeoutMillis: Int): Boolean =
 
 private val PLAYERS = Regex(""""players"\s*:\s*(\d{1,9})""")
 
-/** Reads the count out of the game server's status json. Any failure means no number. */
 private fun httpPlayers(host: String, port: Int, timeoutMillis: Int): Int? =
     try {
       val connection =

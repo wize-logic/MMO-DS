@@ -1,5 +1,5 @@
---- a/src/sound.c
-+++ b/src/sound.c
+--- a/src/sound.c	2026-09-03 00:15:39.954153965 -0400
++++ b/src/sound.c	2026-09-03 00:15:39.995544842 -0400
 @@ -391,11 +391,20 @@
      u16 *currentBGM = SoundSystem_GetParam(SOUND_SYSTEM_PARAM_FIELD_BGM);
      u16 currentBankID = Sound_GetBankIDFromSequenceID(*currentBGM);
@@ -53,7 +53,22 @@
          }
  
          SoundSystem_SaveHeapState(SoundSystem_GetParam(SOUND_SYSTEM_PARAM_HEAP_STATE_BGM));
-@@ -1358,9 +1376,11 @@
+@@ -1336,6 +1354,14 @@
+ {
+     if (config == SOUND_CHANNEL_CONFIG_DEFAULT) {
+         Sound_SetBGMAllocatableChannels(BGM_PLAYER_NORMAL_CHANNELS);
++        /* openmmo: a carried track's own allotment, on its own player, when
++         * the field's is being reset around it (mods/openmmo/src/openmmo_mixer.c). */
++        {
++            extern void openmmo_bgm_channels_widen(int seqID);
++            u16 *fieldBGM = SoundSystem_GetParam(SOUND_SYSTEM_PARAM_FIELD_BGM);
++
++            openmmo_bgm_channels_widen(*fieldBGM);
++        }
+         Sound_StopReverb(0);
+     } else if (config == SOUND_CHANNEL_CONFIG_TITLE) {
+         Sound_SetBGMAllocatableChannels(BGM_PLAYER_EXTRA_CHANNELS);
+@@ -1358,9 +1384,11 @@
      }
  }
  

@@ -1,4 +1,4 @@
-/* One HTTP GET over the client's own socket layer. */
+/* One HTTP GET over the client's own socket layer, plain or under TLS. */
 
 #include "fetch.h"
 
@@ -9,9 +9,16 @@
 
 #include "platform.h"
 #include "sockets.h"
+#include "tls.h"
 
 /* One transfer stalls out after this long with no bytes moving. */
 #define FETCH_STALL_SECONDS 30
+/* Redirects followed before the server is said to be going in circles. */
+#define FETCH_MAX_HOPS 3
+/* A path with a query, as long as a Location may make one. */
+#define FETCH_PATHMAX 2048
+/* fetch_once's answer when a redirect wants following. */
+#define FETCH_REDIRECT (-2)
 
 static int fail(char *err, size_t cap, const char *fmt, const char *a,
                 const char *b)
@@ -21,23 +28,39 @@ static int fail(char *err, size_t cap, const char *fmt, const char *a,
     return -1;
 }
 
-int mmo_fetch_split(const char *url, char *host, size_t hostcap,
-                    char *port, size_t portcap, char *base, size_t basecap,
-                    char *err, size_t errcap)
+/* The same, only where nothing has been said yet: the TLS layer names its
+ * own failures and those words are the ones a player should see. */
+static int fail_quiet(char *err, size_t cap, const char *fmt, const char *a,
+                      const char *b)
+{
+    if (err != NULL && cap > 0 && err[0] != '\0')
+        return -1;
+    return fail(err, cap, fmt, a, b);
+}
+
+/*
+ * `scheme://host[:port]rest` into its parts; `rest` is everything from the
+ * first slash on, or "". Returns 0, or -1 with the reason in `err`.
+ */
+static int parse_url(const char *url, int *tls, char *host, size_t hostcap,
+                     char *port, size_t portcap, char *rest, size_t restcap,
+                     char *err, size_t errcap)
 {
     const char *p, *slash, *colon;
     size_t n;
 
     if (url == NULL || url[0] == '\0')
         return fail(err, errcap, "no update URL is configured", NULL, NULL);
-    if (strncmp(url, "https://", 8) == 0)
-        return fail(err, errcap,
-                    "%.200s is an https URL; the update fetch speaks plain "
-                    "http, because the feed's signature is what is trusted, "
-                    "serve the update path over http", url, NULL);
-    if (strncmp(url, "http://", 7) != 0)
-        return fail(err, errcap, "%.200s is not an http:// URL", url, NULL);
-    p = url + 7;
+    if (strncmp(url, "https://", 8) == 0) {
+        *tls = 1;
+        p = url + 8;
+    } else if (strncmp(url, "http://", 7) == 0) {
+        *tls = 0;
+        p = url + 7;
+    } else {
+        return fail(err, errcap, "%.200s is not an http:// or https:// URL",
+                    url, NULL);
+    }
     slash = strchr(p, '/');
     colon = memchr(p, ':', slash != NULL ? (size_t)(slash - p) : strlen(p));
     n = (colon != NULL ? (size_t)(colon - p)
@@ -57,22 +80,34 @@ int mmo_fetch_split(const char *url, char *host, size_t hostcap,
         memcpy(port, colon + 1, pn);
         port[pn] = '\0';
     } else {
-        snprintf(port, portcap, "80");
+        snprintf(port, portcap, "%s", *tls ? "443" : "80");
     }
     if (slash == NULL) {
-        if (basecap > 0)
-            base[0] = '\0';
+        if (restcap > 0)
+            rest[0] = '\0';
         return 0;
     }
-    n = strlen(slash);
-    while (n > 1 && slash[n - 1] == '/')
-        n--;
-    if (n >= basecap)
+    if (strlen(slash) >= restcap)
         return fail(err, errcap, "%.200s has a path too long to use", url, NULL);
-    memcpy(base, slash, n);
-    base[n] = '\0';
-    if (strcmp(base, "/") == 0)
-        base[0] = '\0';
+    memcpy(rest, slash, strlen(slash) + 1);
+    return 0;
+}
+
+int mmo_fetch_split(const char *url, mmo_fetch_origin *o,
+                    char *err, size_t errcap)
+{
+    size_t n;
+
+    memset(o, 0, sizeof *o);
+    if (parse_url(url, &o->tls, o->host, sizeof o->host, o->port,
+                  sizeof o->port, o->base, sizeof o->base, err, errcap) != 0)
+        return -1;
+    n = strlen(o->base);
+    while (n > 1 && o->base[n - 1] == '/')
+        n--;
+    o->base[n] = '\0';
+    if (strcmp(o->base, "/") == 0)
+        o->base[0] = '\0';
     return 0;
 }
 
@@ -119,6 +154,18 @@ static int file_sink(void *ud, const void *data, size_t n)
     return 0;
 }
 
+/* ---------------------------------------------------------------------- */
+
+/* One connection: the socket, and the TLS session over it when the origin
+ * is https. The deadline moves forward whenever bytes do. */
+struct conn {
+    int fd;
+    mmo_tls *tls;
+    long deadline;
+    char *err;
+    size_t errcap;
+};
+
 /* Wait until the socket is readable (or writable, when asked), sleeping in
  * millisecond steps; the poll itself never blocks. -1 on error or stall. */
 static int wait_io(int fd, int want_write, long deadline)
@@ -139,54 +186,123 @@ static int wait_io(int fd, int want_write, long deadline)
     }
 }
 
-static int send_all(int fd, const char *data, size_t n, long *deadline)
+/* The two wire calls TLS is handed: one attempt each, never waiting, in the
+ * words tls.h defines. */
+static long wire_send(void *ud, const void *buf, size_t n)
+{
+    struct conn *c = ud;
+    long w = mmo_sock_send(c->fd, buf, n, MSG_NOSIGNAL);
+    int e;
+
+    if (w > 0)
+        return w;
+    if (w == 0)
+        return MMO_TLS_WANT_WRITE;
+    e = mmo_sock_errno();
+    if (e == MMO_EAGAIN || e == MMO_EWOULDBLOCK || e == MMO_EINTR)
+        return MMO_TLS_WANT_WRITE;
+    return MMO_TLS_ERR;
+}
+
+static long wire_recv(void *ud, void *buf, size_t n)
+{
+    struct conn *c = ud;
+    long r = mmo_sock_recv(c->fd, buf, n, 0);
+    int e;
+
+    if (r >= 0)
+        return r;
+    e = mmo_sock_errno();
+    if (e == MMO_EAGAIN || e == MMO_EWOULDBLOCK || e == MMO_EINTR)
+        return MMO_TLS_WANT_READ;
+    return MMO_TLS_ERR;
+}
+
+/* Let the TLS layer's "not yet" become a wait on the socket. 0 to try
+ * again, -1 on a stall. */
+static int tls_wait(struct conn *c, long want)
+{
+    return wait_io(c->fd, want == MMO_TLS_WANT_WRITE, c->deadline);
+}
+
+static int conn_send_all(struct conn *c, const char *data, size_t n)
 {
     while (n > 0) {
-        long w = mmo_sock_send(fd, data, n, MSG_NOSIGNAL);
+        long w;
 
-        if (w > 0) {
-            data += w;
-            n -= (size_t)w;
-            *deadline = mmo_plat_seconds() + FETCH_STALL_SECONDS;
-            continue;
-        }
-        if (w == 0)
-            return -1;
-        {
-            int e = mmo_sock_errno();
-
-            if (e != MMO_EAGAIN && e != MMO_EWOULDBLOCK && e != MMO_EINTR)
+        if (c->tls != NULL) {
+            w = mmo_tls_send(c->tls, data, n, c->err, c->errcap);
+            if (w == MMO_TLS_WANT_READ || w == MMO_TLS_WANT_WRITE) {
+                if (tls_wait(c, w) != 0)
+                    return -1;
+                continue;
+            }
+            if (w < 0)
                 return -1;
+            if (w == 0)
+                continue;
+        } else {
+            w = mmo_sock_send(c->fd, data, n, MSG_NOSIGNAL);
+            if (w == 0)
+                return -1;
+            if (w < 0) {
+                int e = mmo_sock_errno();
+
+                if (e != MMO_EAGAIN && e != MMO_EWOULDBLOCK && e != MMO_EINTR)
+                    return -1;
+                if (wait_io(c->fd, 1, c->deadline) != 0)
+                    return -1;
+                continue;
+            }
         }
-        if (wait_io(fd, 1, *deadline) != 0)
-            return -1;
+        data += w;
+        n -= (size_t)w;
+        c->deadline = mmo_plat_seconds() + FETCH_STALL_SECONDS;
     }
     return 0;
 }
 
 /* One recv, waiting for readiness first. >0 bytes, 0 on orderly close, -1 on
  * error or stall. */
-static long recv_some(int fd, char *buf, size_t cap, long *deadline)
+static long conn_recv_some(struct conn *c, char *buf, size_t cap)
 {
     for (;;) {
         long r;
 
-        if (wait_io(fd, 0, *deadline) != 0)
-            return -1;
-        r = mmo_sock_recv(fd, buf, cap, 0);
-        if (r > 0) {
-            *deadline = mmo_plat_seconds() + FETCH_STALL_SECONDS;
-            return r;
-        }
-        if (r == 0)
-            return 0;
-        {
-            int e = mmo_sock_errno();
-
-            if (e != MMO_EAGAIN && e != MMO_EWOULDBLOCK && e != MMO_EINTR)
+        if (c->tls != NULL) {
+            r = mmo_tls_recv(c->tls, buf, cap, c->err, c->errcap);
+            if (r == MMO_TLS_WANT_READ || r == MMO_TLS_WANT_WRITE) {
+                if (tls_wait(c, r) != 0)
+                    return -1;
+                continue;
+            }
+            if (r < 0)
                 return -1;
+        } else {
+            if (wait_io(c->fd, 0, c->deadline) != 0)
+                return -1;
+            r = mmo_sock_recv(c->fd, buf, cap, 0);
+            if (r < 0) {
+                int e = mmo_sock_errno();
+
+                if (e != MMO_EAGAIN && e != MMO_EWOULDBLOCK && e != MMO_EINTR)
+                    return -1;
+                continue;
+            }
         }
+        if (r > 0)
+            c->deadline = mmo_plat_seconds() + FETCH_STALL_SECONDS;
+        return r;
     }
+}
+
+static void conn_close(struct conn *c)
+{
+    mmo_tls_close(c->tls);
+    c->tls = NULL;
+    if (c->fd >= 0)
+        mmo_sock_close(c->fd);
+    c->fd = -1;
 }
 
 /* A header's value, matched without case, out of the raw header block. */
@@ -222,8 +338,8 @@ static int header_value(const char *hdr, const char *name, char *out,
  * The transfer, once the response head is in hand: either a known length, a chunked stream, or
  * bytes until the server closes. `first` is body bytes already read past the head.
  */
-static long read_body(int fd, const char *hdr, const char *first,
-                      size_t firstlen, sink_fn sink, void *ud, long *deadline,
+static long read_body(struct conn *c, const char *hdr, const char *first,
+                      size_t firstlen, sink_fn sink, void *ud,
                       char *err, size_t errcap)
 {
     char buf[8192], val[64];
@@ -257,9 +373,9 @@ static long read_body(int fd, const char *hdr, const char *first,
 
             while (i < n) {
                 if (left < 0) {
-                    char c = p[i++];
+                    char ch = p[i++];
 
-                    if (c == '\n') {
+                    if (ch == '\n') {
                         line[linelen] = '\0';
                         linelen = 0;
                         left = strtol(line, NULL, 16);
@@ -267,10 +383,10 @@ static long read_body(int fd, const char *hdr, const char *first,
                             /* The trailer is not read; the body is done. */
                             return got;
                         }
-                    } else if (c != '\r' && linelen < sizeof line - 1) {
+                    } else if (ch != '\r' && linelen < sizeof line - 1) {
                         /* A chunk extension after ';' rides along and strtol
                          * stops at it. */
-                        line[linelen++] = c;
+                        line[linelen++] = ch;
                     }
                 } else if (left == 0) {
                     /* The CRLF after a chunk's bytes. */
@@ -290,11 +406,11 @@ static long read_body(int fd, const char *hdr, const char *first,
                 }
             }
             {
-                long r = recv_some(fd, buf, sizeof buf, deadline);
+                long r = conn_recv_some(c, buf, sizeof buf);
 
                 if (r <= 0) {
-                    fail(err, errcap,
-                         "the connection ended mid-download", NULL, NULL);
+                    fail_quiet(err, errcap,
+                               "the connection ended mid-download", NULL, NULL);
                     return -1;
                 }
                 p = buf;
@@ -312,10 +428,11 @@ static long read_body(int fd, const char *hdr, const char *first,
         got = (long)firstlen;
     }
     while (want < 0 || got < want) {
-        long r = recv_some(fd, buf, sizeof buf, deadline);
+        long r = conn_recv_some(c, buf, sizeof buf);
 
         if (r < 0) {
-            fail(err, errcap, "the connection ended mid-download", NULL, NULL);
+            fail_quiet(err, errcap, "the connection ended mid-download", NULL,
+                       NULL);
             return -1;
         }
         if (r == 0)
@@ -334,73 +451,110 @@ static long read_body(int fd, const char *hdr, const char *first,
     return got;
 }
 
-static long fetch(const char *host, const char *port, const char *path,
-                  sink_fn sink, void *ud, char *err, size_t errcap)
+/*
+ * One request to one origin. The body's length on a 200; FETCH_REDIRECT with
+ * the Location in `loc` on a redirect this fetch may follow; -1 otherwise.
+ */
+static long fetch_once(const mmo_fetch_origin *o, const char *path,
+                       sink_fn sink, void *ud, char *loc, size_t loccap,
+                       char *err, size_t errcap)
 {
     /* Room for a base, an escaped feed name and a hash query, with slack. */
-    char req[4096];
-    char head[8192], val[MMO_FETCH_PATH];
+    char req[FETCH_PATHMAX + 512];
+    char head[8192], val[FETCH_PATHMAX];
     struct addrinfo *ai = NULL, *a;
-    long deadline, r, body;
+    struct conn c;
+    long r, body;
     size_t at = 0;
     char *sep;
-    int fd = -1, code, rc;
+    int code, rc, defport;
 
     if (err != NULL && errcap > 0)
         err[0] = '\0';
+    c.fd = -1;
+    c.tls = NULL;
+    c.err = err;
+    c.errcap = errcap;
     if (mmo_sock_ready() != 0)
         return fail(err, errcap, "sockets cannot be used on this host", NULL,
                     NULL);
-    rc = mmo_sock_resolve(host, port, &ai);
+    rc = mmo_sock_resolve(o->host, o->port, &ai);
     if (rc != 0)
-        return fail(err, errcap, "%.200s cannot be found: %.100s", host,
+        return fail(err, errcap, "%.200s cannot be found: %.100s", o->host,
                     mmo_sock_resolve_error(rc));
-    deadline = mmo_plat_seconds() + FETCH_STALL_SECONDS;
+    c.deadline = mmo_plat_seconds() + FETCH_STALL_SECONDS;
     for (a = ai; a != NULL; a = a->ai_next) {
-        fd = mmo_sock_open(a->ai_family, a->ai_socktype, a->ai_protocol);
-        if (fd < 0)
+        c.fd = mmo_sock_open(a->ai_family, a->ai_socktype, a->ai_protocol);
+        if (c.fd < 0)
             continue;
-        if (mmo_sock_connect(fd, a->ai_addr, (unsigned)a->ai_addrlen) == 0)
+        if (mmo_sock_connect(c.fd, a->ai_addr, (unsigned)a->ai_addrlen) == 0)
             break;
         {
             int e = mmo_sock_errno();
 
             if ((e == MMO_EINPROGRESS || e == MMO_EAGAIN) &&
-                wait_io(fd, 1, deadline) == 0 && mmo_sock_error(fd) == 0)
+                wait_io(c.fd, 1, c.deadline) == 0 && mmo_sock_error(c.fd) == 0)
                 break;
         }
-        mmo_sock_close(fd);
-        fd = -1;
+        mmo_sock_close(c.fd);
+        c.fd = -1;
     }
     mmo_sock_free_resolved(ai);
-    if (a == NULL || fd < 0)
-        return fail(err, errcap, "%.200s:%.20s does not answer", host, port);
-    mmo_sock_nodelay(fd);
+    if (a == NULL || c.fd < 0)
+        return fail(err, errcap, "%.200s:%.20s does not answer", o->host,
+                    o->port);
+    mmo_sock_nodelay(c.fd);
 
+    if (o->tls) {
+        c.tls = mmo_tls_open(o->host, o->ca, wire_send, wire_recv, &c, err,
+                             errcap);
+        if (c.tls == NULL) {
+            conn_close(&c);
+            return -1;
+        }
+        for (;;) {
+            rc = mmo_tls_handshake(c.tls, err, errcap);
+            if (rc == 0)
+                break;
+            if (rc == MMO_TLS_WANT_READ || rc == MMO_TLS_WANT_WRITE) {
+                if (tls_wait(&c, rc) == 0)
+                    continue;
+                fail_quiet(err, errcap, "%.200s stopped answering during the "
+                                        "TLS handshake", o->host, NULL);
+            }
+            conn_close(&c);
+            return -1;
+        }
+    }
+
+    defport = strcmp(o->port, o->tls ? "443" : "80") == 0;
     snprintf(req, sizeof req,
              "GET %s HTTP/1.1\r\n"
-             "Host: %s\r\n"
+             "Host: %s%s%s\r\n"
              "User-Agent: openmmo-launch\r\n"
              "Accept: */*\r\n"
              "Connection: close\r\n\r\n",
-             path[0] != '\0' ? path : "/", host);
-    if (send_all(fd, req, strlen(req), &deadline) != 0) {
-        mmo_sock_close(fd);
-        return fail(err, errcap, "%.200s stopped answering", host, NULL);
+             path[0] != '\0' ? path : "/", o->host,
+             defport ? "" : ":", defport ? "" : o->port);
+    if (conn_send_all(&c, req, strlen(req)) != 0) {
+        conn_close(&c);
+        return fail_quiet(err, errcap, "%.200s stopped answering", o->host,
+                          NULL);
     }
 
     /* The head, up to the blank line; what follows it is body. */
     sep = NULL;
     while (sep == NULL) {
         if (at >= sizeof head - 1) {
-            mmo_sock_close(fd);
+            conn_close(&c);
             return fail(err, errcap, "the server's response head never ends",
                         NULL, NULL);
         }
-        r = recv_some(fd, head + at, sizeof head - 1 - at, &deadline);
+        r = conn_recv_some(&c, head + at, sizeof head - 1 - at);
         if (r <= 0) {
-            mmo_sock_close(fd);
-            return fail(err, errcap, "%.200s stopped answering", host, NULL);
+            conn_close(&c);
+            return fail_quiet(err, errcap, "%.200s stopped answering", o->host,
+                              NULL);
         }
         at += (size_t)r;
         head[at] = '\0';
@@ -409,30 +563,90 @@ static long fetch(const char *host, const char *port, const char *path,
     *sep = '\0';
 
     if (sscanf(head, "HTTP/%*d.%*d %d", &code) != 1) {
-        mmo_sock_close(fd);
+        conn_close(&c);
         return fail(err, errcap, "the server did not answer with HTTP", NULL,
                     NULL);
     }
     if (code != 200) {
-        mmo_sock_close(fd);
-        if (code >= 300 && code < 400 &&
-            header_value(head, "Location", val, sizeof val) == 1)
-            return fail(err, errcap,
-                        "the server redirects to %.300s, if that is https, "
-                        "exempt the update path from the proxy's forced "
-                        "https", val, NULL);
+        conn_close(&c);
+        if ((code == 301 || code == 302 || code == 303 || code == 307 ||
+             code == 308) &&
+            header_value(head, "Location", loc, loccap) == 1)
+            return FETCH_REDIRECT;
+        if (code >= 300 && code < 400)
+            return fail(err, errcap, "the server redirects %.300s and does "
+                                     "not say where", path, NULL);
         snprintf(val, sizeof val, "%d", code);
         return fail(err, errcap, "the server answered %.20s for %.300s", val,
                     path);
     }
 
-    body = read_body(fd, head, sep + 4, at - (size_t)(sep + 4 - head), sink,
-                     ud, &deadline, err, errcap);
-    mmo_sock_close(fd);
+    body = read_body(&c, head, sep + 4, at - (size_t)(sep + 4 - head), sink,
+                     ud, err, errcap);
+    conn_close(&c);
     return body;
 }
 
-long mmo_fetch_buf(const char *host, const char *port, const char *path,
+/*
+ * Turn a Location into the next origin and path, under the redirect rule at
+ * the top of this file. Returns 0, or -1 with the reason in `err`.
+ */
+static int follow(mmo_fetch_origin *o, char *path, size_t pathcap,
+                  const char *loc, char *err, size_t errcap)
+{
+    if (strncmp(loc, "http://", 7) == 0 || strncmp(loc, "https://", 8) == 0) {
+        mmo_fetch_origin n;
+
+        memset(&n, 0, sizeof n);
+        if (parse_url(loc, &n.tls, n.host, sizeof n.host, n.port,
+                      sizeof n.port, path, pathcap, err, errcap) != 0)
+            return -1;
+        if (o->tls && !n.tls)
+            return fail(err, errcap, "%.200s redirects to plain http, which "
+                                     "this fetch refuses: a channel that "
+                                     "starts on https stays there", o->host,
+                        NULL);
+        o->tls = n.tls;
+        memcpy(o->host, n.host, sizeof o->host);
+        memcpy(o->port, n.port, sizeof o->port);
+        return 0;
+    }
+    if (loc[0] == '/') {
+        if (strlen(loc) >= pathcap)
+            return fail(err, errcap, "the server redirects to a path too long "
+                                     "to use", NULL, NULL);
+        memcpy(path, loc, strlen(loc) + 1);
+        return 0;
+    }
+    return fail(err, errcap, "the server redirects to %.300s, which this "
+                             "fetch cannot follow", loc, NULL);
+}
+
+static long fetch(const mmo_fetch_origin *o0, const char *path0,
+                  sink_fn sink, void *ud, char *err, size_t errcap)
+{
+    mmo_fetch_origin o = *o0;
+    char path[FETCH_PATHMAX], loc[FETCH_PATHMAX];
+    int hops;
+
+    if (strlen(path0) >= sizeof path)
+        return fail(err, errcap, "%.300s is a path too long to fetch", path0,
+                    NULL);
+    memcpy(path, path0, strlen(path0) + 1);
+    for (hops = 0;; hops++) {
+        long r = fetch_once(&o, path, sink, ud, loc, sizeof loc, err, errcap);
+
+        if (r != FETCH_REDIRECT)
+            return r;
+        if (hops >= FETCH_MAX_HOPS)
+            return fail(err, errcap, "%.200s redirects too many times",
+                        o.host, NULL);
+        if (follow(&o, path, sizeof path, loc, err, errcap) != 0)
+            return -1;
+    }
+}
+
+long mmo_fetch_buf(const mmo_fetch_origin *o, const char *path,
                    void *buf, size_t cap, char *err, size_t errcap)
 {
     struct memsink m;
@@ -440,10 +654,10 @@ long mmo_fetch_buf(const char *host, const char *port, const char *path,
     m.buf = buf;
     m.cap = cap;
     m.at = 0;
-    return fetch(host, port, path, mem_sink, &m, err, errcap);
+    return fetch(o, path, mem_sink, &m, err, errcap);
 }
 
-long mmo_fetch_file(const char *host, const char *port, const char *path,
+long mmo_fetch_file(const mmo_fetch_origin *o, const char *path,
                     const char *dest, long cap,
                     void (*tick)(void *ud, long got, long total), void *tickud,
                     char *err, size_t errcap)
@@ -458,7 +672,7 @@ long mmo_fetch_file(const char *host, const char *port, const char *path,
     s.at = 0;
     s.tick = tick;
     s.tickud = tickud;
-    n = fetch(host, port, path, file_sink, &s, err, errcap);
+    n = fetch(o, path, file_sink, &s, err, errcap);
     if (fclose(s.f) != 0 && n >= 0)
         n = fail(err, errcap, "%.300s cannot be written", dest, NULL);
     if (n < 0)

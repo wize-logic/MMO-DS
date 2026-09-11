@@ -1,6 +1,7 @@
 package de.fiereu.openmmo.server.game.services.command
 
 import de.fiereu.openmmo.common.auth.AccountRole
+import de.fiereu.openmmo.server.game.script.Badge
 import de.fiereu.openmmo.server.game.services.StoryClientState
 import de.fiereu.openmmo.server.game.services.StoryService
 import de.fiereu.openmmo.story.generated.kanto.KantoFlags
@@ -89,7 +90,10 @@ class FlagCommand @Inject constructor(private val story: StoryService) : ChatCom
               it.isAccessible = true
               it.get(obj) as? String
             }
-      }
+      } +
+          // The badges of every region, which are story flags too (Badge) and the only way a
+          // developer hands one over without fighting the leader for it.
+          Badge.entries.map { it.key }
     }
 
     fun search(text: String): List<String> {

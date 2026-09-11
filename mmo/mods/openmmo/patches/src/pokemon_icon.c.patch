@@ -1,0 +1,39 @@
+--- a/src/pokemon_icon.c
++++ b/src/pokemon_icon.c
+@@ -84,6 +84,20 @@
+         }
+     }
+ 
++    /* openmmo: a species past this game's own table is not always one without a
++     * picture. A fill that appended a Gen 5 cartridge's icons put real ones in
++     * this archive, and the answer is that member itself rather than
++     * IconTilesIndex of anything: the base this file adds is already in it.
++     * Anything the fill does not serve falls through and draws the "?" ball. */
++    {
++        extern int openmmo_species_icon_member(unsigned species, unsigned *out);
++        unsigned ported;
++
++        if (openmmo_species_icon_member(species, &ported)) {
++            return ported;
++        }
++    }
++
+     if (species > NATIONAL_DEX_COUNT) {
+         species = SPECIES_NONE;
+     }
+@@ -121,6 +135,15 @@
+             species = ICON_EGG;
+         }
+     } else if (species > NATIONAL_DEX_COUNT) {
++        /* openmmo: a ported icon keeps the palette the cartridge it came from
++         * gave it. Only a species no fill served reaches the clamp. */
++        extern int openmmo_species_icon_palette(unsigned species, unsigned *out);
++        unsigned ported;
++
++        if (openmmo_species_icon_palette(species, &ported)) {
++            return (u8)ported;
++        }
++
+         species = SPECIES_NONE;
+     } else if (form != 0) {
+         if (species == SPECIES_DEOXYS) {

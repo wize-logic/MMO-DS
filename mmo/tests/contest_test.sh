@@ -93,6 +93,18 @@ else
     fail=1
 fi
 
+# And the seat the one who stayed holds has to come back. Nobody is left to
+# report, so the placements it sends are the whole agreement; a server that
+# waits for the seat that walked out anyway leaves this player in a contest
+# forever, unable to enter another for the rest of the session.
+if printf '%s\n' "$drop" | grep -q 'the seat that stayed was released'; then
+    echo "  ok   the last seat's own report settles the contest and frees it"
+else
+    echo "  FAIL the last seat's own report settles the contest and frees it"
+    printf '%s\n' "$drop" | tail -12 | sed 's/^/       /'
+    fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
     echo "contest: FAILED"
     printf '%s\n' "$out" | tail -20 | sed 's/^/    /'

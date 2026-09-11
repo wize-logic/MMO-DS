@@ -1,4 +1,4 @@
-# MMO DS
+# MMO-DS
 
 ORIGINAL REPO: https://github.com/openmmo-org/OpenMMO
 

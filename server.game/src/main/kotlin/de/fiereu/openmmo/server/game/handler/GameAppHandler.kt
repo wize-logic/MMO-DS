@@ -39,6 +39,7 @@ import de.fiereu.openmmo.net.game.packets.MatchmakingLanguagePrefsPacket
 import de.fiereu.openmmo.net.game.packets.MoneyDeltaPacket
 import de.fiereu.openmmo.net.game.packets.MovementPacket
 import de.fiereu.openmmo.net.game.packets.NullPacket
+import de.fiereu.openmmo.net.game.packets.OfflineSaveReportPacket
 import de.fiereu.openmmo.net.game.packets.PokemonMovePacket
 import de.fiereu.openmmo.net.game.packets.PokemonReleasePacket
 import de.fiereu.openmmo.net.game.packets.RegisteredItemPacket
@@ -107,11 +108,14 @@ import de.fiereu.openmmo.net.game.packets.guild.GuildRankPermissionUpdatePacket
 import de.fiereu.openmmo.net.game.packets.matchmaking.MatchmakingSignupPacket
 import de.fiereu.openmmo.server.game.matchmaking.MatchmakingService
 import de.fiereu.openmmo.server.game.script.ScriptRunner
+import de.fiereu.openmmo.server.game.services.ApricornService
 import de.fiereu.openmmo.server.game.services.BattleService
 import de.fiereu.openmmo.server.game.services.ChatService
 import de.fiereu.openmmo.server.game.services.ContestService
 import de.fiereu.openmmo.server.game.services.DialogService
 import de.fiereu.openmmo.server.game.services.DuelService
+import de.fiereu.openmmo.server.game.services.EncounterService
+import de.fiereu.openmmo.server.game.services.FieldEncounterService
 import de.fiereu.openmmo.server.game.services.GtlService
 import de.fiereu.openmmo.server.game.services.GuildService
 import de.fiereu.openmmo.server.game.services.InteractionService
@@ -122,10 +126,13 @@ import de.fiereu.openmmo.server.game.services.LoginService
 import de.fiereu.openmmo.server.game.services.MailService
 import de.fiereu.openmmo.server.game.services.MovementService
 import de.fiereu.openmmo.server.game.services.MultiplayerService
+import de.fiereu.openmmo.server.game.services.OfflineImportSessionService
 import de.fiereu.openmmo.server.game.services.PokemonStorageService
 import de.fiereu.openmmo.server.game.services.PresenceService
+import de.fiereu.openmmo.server.game.services.SafariService
 import de.fiereu.openmmo.server.game.services.ShopService
 import de.fiereu.openmmo.server.game.services.SocialService
+import de.fiereu.openmmo.server.game.services.StaticEncounterService
 import de.fiereu.openmmo.server.game.services.TradeService
 import de.fiereu.openmmo.server.game.services.UndergroundTalkService
 import de.fiereu.openmmo.server.game.session.PLAYER_STATE
@@ -141,7 +148,10 @@ import kotlinx.coroutines.cancel
 
 private val log = KotlinLogging.logger {}
 
-/** How much of a ping's token this server hands back. The client writes one byte and reads one. */
+/**
+ * How much of a ping's token this server hands back. The client writes one byte and reads one back;
+ * the rest of the frame is the codec's to carry and nobody's to use.
+ */
 private const val MAX_KEEPALIVE_BYTES = 8
 
 class GameAppHandler
@@ -163,6 +173,11 @@ constructor(
     private val tradeService: TradeService,
     private val gtlService: GtlService,
     private val undergroundTalkService: UndergroundTalkService,
+    private val encounterService: EncounterService,
+    private val safariService: SafariService,
+    private val apricornService: ApricornService,
+    private val fieldEncounterService: FieldEncounterService,
+    private val staticEncounterService: StaticEncounterService,
     private val contestService: ContestService,
     private val chatService: ChatService,
     private val shopService: ShopService,
@@ -170,6 +185,7 @@ constructor(
     private val pokemonStorageService: PokemonStorageService,
     private val scriptRunner: ScriptRunner,
     private val localScriptService: LocalScriptService,
+    private val offlineImportService: OfflineImportSessionService,
     private val sessionRegistry: SessionRegistry,
     private val characterStore: CharacterStore,
     scope: CoroutineScope,
@@ -198,6 +214,9 @@ constructor(
     onSuspend<PokemonReleasePacket> { event -> localScriptService.onPokemonRelease(event) }
     on<RegisteredItemPacket> { event -> localScriptService.onRegisteredItem(event) }
 
+    // A whole save file, in pieces, offered as this character (OfflineImportSessionService).
+    onSuspend<OfflineSaveReportPacket> { event -> offlineImportService.onSaveReport(event) }
+
     onSuspend<EntityInteractPacket> { event -> interactionService.onEntityInteract(event) }
     onSuspend<TileInteractPacket> { event -> interactionService.onTileInteract(event) }
     onSuspend<DialogActionResponsePacket> { event -> dialogService.onInteractive(event) }
@@ -206,10 +225,10 @@ constructor(
     onSuspend<ExchangeItemRequestPacket> { event -> shopService.onBuy(event) }
     onSuspend<ShopSellRequestPacket> { event -> shopService.onSell(event) }
 
-    on<AddFriendPacket> { event -> socialService.onAddFriend(event) }
-    on<RemoveFriendPacket> { event -> socialService.onRemoveFriend(event) }
-    on<BlockPlayerPacket> { event -> socialService.onBlockPlayer(event) }
-    on<UnblockPlayerPacket> { event -> socialService.onUnblockPlayer(event) }
+    onSuspend<AddFriendPacket> { event -> socialService.onAddFriend(event) }
+    onSuspend<RemoveFriendPacket> { event -> socialService.onRemoveFriend(event) }
+    onSuspend<BlockPlayerPacket> { event -> socialService.onBlockPlayer(event) }
+    onSuspend<UnblockPlayerPacket> { event -> socialService.onUnblockPlayer(event) }
     on<SendChatCommandPacket> { event -> linkService.onInvite(event) }
     on<LinkKickMemberPacket> { event -> linkService.onKick(event) }
     on<CancelSocialInteractionPacket> { event -> linkService.onLeave(event) }
@@ -292,9 +311,21 @@ constructor(
     on<MarketSearchFilterPacket> { event -> gtlService.onMarketSearch(event) }
     onSuspend<CreateMarketListingPacket> { event -> gtlService.onCreateListing(event) }
 
-    // Pressing A on someone in the Underground, and the conversation it opens. This server is the
-    // console that decides the pairing; the conversation itself crosses unread.
-    on<UndergroundTalkPacket> { event -> undergroundTalkService.onPacket(event) }
+    // Pressing A on someone in the Underground, and the conversation it opens. This server is
+    // the console that decides the pairing; the conversation itself crosses unread.
+    onSuspend<UndergroundTalkPacket> { event ->
+      when {
+        event.packet.kind == UndergroundTalkPacket.KIND_STATIC_WON ->
+            staticEncounterService.onWon(event.session)
+        event.packet.kind >= UndergroundTalkPacket.KIND_ROCK_SMASH ->
+            fieldEncounterService.onPacket(event)
+        event.packet.kind >= UndergroundTalkPacket.KIND_APRICORN_PICK ->
+            apricornService.onPick(event)
+        event.packet.kind >= UndergroundTalkPacket.KIND_FISHING_CAST ->
+            encounterService.onFishing(event)
+        else -> undergroundTalkService.onPacket(event)
+      }
+    }
     // The link Super Contest: the queue, the relay and the agreed result.
     on<ContestCommPacket> { event -> contestService.onContestComm(event) }
 
@@ -302,9 +333,7 @@ constructor(
 
     // The client sends an empty heartbeat packet.
     on<NullPacket> {}
-    // A ping, answered with the same token so the client can time the round trip. The codec takes
-    // the whole rest of the frame, and this handed every byte back before the session had
-    // authenticated, so the reply is trimmed to what a ping is.
+    // A ping, answered with the same token so the client can time the round trip.
     on<KeepAlivePacket> { event ->
       val data = event.packet.sessionData
       if (data.size > MAX_KEEPALIVE_BYTES) {
@@ -326,27 +355,41 @@ constructor(
     log.info { "Player ${state.characterId} disconnected." }
     val charId = state.characterId
     if (charId != null) {
-      // The battle flush must land before the unload evicts the character from the cache, and
-      // before the rollback, which would otherwise be overwritten by the party it persists.
-      battleService.onDisconnect(session)
-      duelService.onDisconnect(session)
-      matchmakingService.onDisconnect(session)
-      tradeService.onDisconnect(session)
-      undergroundTalkService.onDisconnect(session)
-      contestService.onDisconnect(session)
+      // Give this session's hold on the character up first, and find out whether it still had
+      // one.
+      val ours = sessionRegistry.unbindCharacter(charId, session)
+      if (!ours) {
+        log.info { "Character $charId is on a newer session; leaving its teardown to that one" }
+      }
+      if (ours) {
+        // The battle flush must land before the unload evicts the character from the cache, and
+        // before the rollback, which would otherwise be overwritten by the party it persists.
+        battleService.onDisconnect(session)
+        duelService.onDisconnect(session)
+        matchmakingService.onDisconnect(session)
+        tradeService.onDisconnect(session)
+        undergroundTalkService.onDisconnect(session)
+        encounterService.onLeave(charId)
+        safariService.onLeave(charId)
+        contestService.onDisconnect(session)
+      }
       // Undo the interrupted script here rather than leaving it to the coroutine's own
       // cleanup, which runs on another thread and would race the flush below.
       val unfinishedScript = scriptRunner.takeRollback(session)
       state.inDialog = false
-      presenceService.leave(session)
-      characterStore.getCharacter(charId)?.info?.name?.let { name ->
-        socialService.announcePresence(name, false)
+      // The interest group is this socket's and has to be left either way, or a dead session goes
+      // on being sent every movement on the map it remembers. The departure it announces is the
+      // character's, and must not be announced for one somebody else is standing on.
+      presenceService.leave(session, announceDeparture = ours)
+      if (ours) {
+        characterStore.getCharacter(charId)?.info?.name?.let { name ->
+          socialService.announcePresence(name, false)
+        }
+        guildService.announcePresence(charId, false)
+        linkService.onDisconnect(charId)
+        surfaceIfUnderground(charId, state)
+        characterStore.unloadCharacterAsync(charId, unfinishedScript)
       }
-      guildService.announcePresence(charId, false)
-      linkService.onDisconnect(charId)
-      surfaceIfUnderground(charId, state)
-      sessionRegistry.unbindCharacter(charId, session)
-      characterStore.unloadCharacterAsync(charId, unfinishedScript)
     }
     sessionRegistry.unregister(session)
     multiplayerService.broadcastMessage(

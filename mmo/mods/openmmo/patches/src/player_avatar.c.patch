@@ -1,0 +1,23 @@
+--- a/src/player_avatar.c
++++ b/src/player_avatar.c
+@@ -849,6 +849,20 @@
+  */
+ int Player_GetSpriteFromStateAndGender(int playerState, int gender)
+ {
++    /* openmmo: the look the player picked answers for its own states, a
++     * HeartGold or Black hero sheet where the packages composed one, its
++     * walk where they did not, and -1 for Platinum's own pair, offline,
++     * and any avatar that is not the local player's
++     * (mods/openmmo/src/openmmo_look.c). */
++    {
++        extern int openmmo_look_sprite(int playerState, int gender);
++        int looked = openmmo_look_sprite(playerState, gender);
++
++        if (looked >= 0) {
++            return looked;
++        }
++    }
++
+     // TODO: Some OBJ_EVENT_GFX_ constants are being worked on by a different contributor, will need to add the missing constants once those get expanded
+     if (gender == 0) {
+         switch (playerState) {

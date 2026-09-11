@@ -1,10 +1,12 @@
 /* The frame channel's layout, from the game's side of it. */
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "platform.h"
 #include "view_channel.h"
+#include "vsync_channel.h"
 
 static int failures;
 
@@ -208,6 +210,111 @@ static void test_page_both_ways(void)
           "and the default is still the three-process page");
 }
 
+/* ------------------------------------------------------------------ */
+/* The window's refreshes, on their own page                            */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Which displays the guest may be paced against, which is the one thing in that path that
+ * fails silently and expensively.
+ */
+static void vsync_write(struct openmmo_vsync_shm *v, long long period_ns)
+{
+    long long now = mmo_plat_mono_ns();
+
+    v->seq++;                       /* odd: a writer is inside */
+    v->last_lo = (uint32_t)((unsigned long long)now & 0xFFFFFFFFu);
+    v->last_hi = (uint32_t)((unsigned long long)now >> 32);
+    v->period_ns = (uint32_t)period_ns;
+    v->marks = 120u;
+    v->seq++;                       /* even: readable again */
+}
+
+static void test_vsync_lock_band(void)
+{
+    static const struct { long long period; int locked; long long out; }
+    row[] = {
+        /* the 60 Hz family, which is every display this can be run on */
+        { 16666667LL, 1, 16666667LL },  /*  60.000 Hz, one refresh a frame */
+        { 16683350LL, 1, 16683350LL },  /*  59.940 Hz, the same            */
+        {  8333333LL, 1, 16666666LL },  /* 120.000 Hz, two                 */
+        {  4166667LL, 1, 16666668LL },  /* 240.000 Hz, four                */
+        /* and the rates that would run the guest fast or slow */
+        { 13333333LL, 0, 0LL },         /*  75 Hz, a quarter fast          */
+        {  6944444LL, 0, 0LL },         /* 144 Hz, a fifth either way      */
+        {  6060606LL, 0, 0LL },         /* 165 Hz                          */
+        { 14830000LL, 0, 0LL },         /*  67.43 Hz, a WSLg desktop       */
+    };
+    char name[128];
+    mmo_shm page = MMO_SHM_INIT;
+    struct openmmo_vsync_shm *v;
+    unsigned i;
+
+    snprintf(name, sizeof name, "omvsynctest-%u", (unsigned)mmo_plat_pid());
+    /* The window's end. */
+    setenv("PC_VIEW", name, 1);
+    mmo_plat_vsync_publish(name);
+    /* A writable view of the same page, standing in for the marking thread:
+     * publish keeps its own pointer inside platform.c and this suite is not
+     * the presenter. */
+    {
+        char full[160];
+
+        snprintf(full, sizeof full, "%s%s", name, OPENMMO_VSYNC_SUFFIX);
+        if (mmo_shm_attach(&page, full, sizeof *v, 1) != 0) {
+            CHECK(0, "the window's vsync page can be attached");
+            unsetenv("PC_VIEW");
+            return;
+        }
+    }
+    v = (struct openmmo_vsync_shm *)page.addr;
+    CHECK(v->magic == OPENMMO_VSYNC_MAGIC
+          && v->version == OPENMMO_VSYNC_VERSION,
+          "the published page is stamped before anything reads it");
+
+    for (i = 0; i < sizeof row / sizeof row[0]; i++) {
+        long long when = 0, period = 0;
+        int got;
+
+        vsync_write(v, row[i].period);
+        got = mmo_plat_vsync_next(&when, &period);
+        if (row[i].locked) {
+            char msg[96];
+
+            snprintf(msg, sizeof msg, "%.2f Hz is a rate the guest can run at",
+                     1e9 / (double)row[i].period);
+            CHECK(got == 1, msg);
+            snprintf(msg, sizeof msg, "...and one guest frame there is %lld ns",
+                     row[i].out);
+            CHECK(got == 1 && period == row[i].out, msg);
+            snprintf(msg, sizeof msg, "...and the wake it names is still ahead");
+            CHECK(got == 1 && when > mmo_plat_mono_ns() - (long long)row[i].out,
+                  msg);
+        } else {
+            char msg[96];
+
+            snprintf(msg, sizeof msg,
+                     "%.2f Hz is refused, so the console's frame is kept",
+                     1e9 / (double)row[i].period);
+            CHECK(got == 0, msg);
+        }
+    }
+
+    /* A page whose window has gone is not a clock. */
+    v->period_ns = 0u;
+    v->marks = 0u;
+    {
+        long long when = 0, period = 0;
+
+        CHECK(mmo_plat_vsync_next(&when, &period) == 0,
+              "a page with no refreshes on it is not paced against");
+    }
+
+    mmo_shm_close(&page);
+    mmo_plat_vsync_unpublish();
+    unsetenv("PC_VIEW");
+}
+
 int view_channel_tests_run(void)
 {
     printf("view_channel:\n");
@@ -217,5 +324,6 @@ int view_channel_tests_run(void)
     test_aspect_width();
     test_audio_ring();
     test_page_both_ways();
+    test_vsync_lock_band();
     return failures;
 }

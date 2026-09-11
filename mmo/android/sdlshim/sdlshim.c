@@ -17,6 +17,10 @@
 
 #include "view_font.h"   /* the 5x7: OSK key labels with no FreeType */
 
+/* mmo_device.c, the app's own; declared here rather than through its header
+ * because the shim's include path is the viewer's, not the app's. */
+void mmo_device_note_gl(const char *renderer);
+
 #define TAG "openmmo.sdl"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
@@ -581,6 +585,9 @@ SDL_Renderer *SDL_CreateRenderer(SDL_Window *win, int index, Uint32 flags)
      */
     atexit(shim_exit_sync);
     LOGI("renderer: up, %s", (const char *)glGetString(GL_RENDERER));
+    /* The driver's name is a fact about the device the defaults read
+     * (mmo_device.c): a software rasteriser caps the 3D scale. */
+    mmo_device_note_gl((const char *)glGetString(GL_RENDERER));
     return &g_ren_obj;
 }
 
@@ -1546,17 +1553,12 @@ static void pad_release_locked(void)
  */
 static int pad_mode(void)
 {
-    static int v = -1;
+    const char *e = getenv("OPENMMO_TOUCH_PAD");
 
-    if (v < 0) {
-        const char *e = getenv("OPENMMO_TOUCH_PAD");
-
-        if (e == NULL || *e == '\0')      v = 2;   /* auto */
-        else if (e[0] == '0')             v = 0;
-        else if (e[0] == '1')             v = 1;
-        else                              v = 2;
-    }
-    return v;
+    if (e == NULL || *e == '\0') return 2;      /* auto */
+    if (e[0] == '0')             return 0;
+    if (e[0] == '1')             return 1;
+    return 2;
 }
 
 static int pad_on(void)
@@ -2337,9 +2339,198 @@ static pthread_mutex_t g_audio_lock = PTHREAD_MUTEX_INITIALIZER;
 static AAudioStream *g_stream;
 static SDL_AudioSpec g_spec;
 static int g_audio_paused = 1;          /* SDL opens devices paused */
+static int g_audio_open;                /* a device is open: reopens allowed */
+static int g_audio_reopens;             /* consecutive ones that delivered
+                                           nothing; only AAudio's own
+                                           callbacks touch it, and AAudio.h
+                                           promises never two at once */
 static int g_out_rate;
 static double g_res_pos;
 static int16_t g_res_scratch[4096 * 2];
+/* The device's own underrun count, and the buffer we have grown to answer it
+ * see audio_tune() below. Touched only from the data callback, which
+ * AAudio.h promises is never two at once. */
+static int32_t g_audio_xruns;
+static int32_t g_audio_bufsize;
+static int g_audio_grown;
+
+/* How many reopens in a row may deliver no audio at all before the shim stops trying. */
+/*
+ * The TAP, for a session under measurement: every byte this stream hands the device, and when
+ * each callback ran.
+ */
+enum { TAP_RING = 8u << 20, TAP_EVENTS = 8192 };
+struct tap_event { int64_t ns; int32_t frames; int32_t xruns; int32_t paused;
+                   uint32_t step, tail, frac; };
+/* The viewer's reader state, for the event line: weak, so a shim linked
+ * without the viewer still builds. */
+extern volatile uint32_t openmmo_view_audio_step __attribute__((weak));
+extern volatile uint32_t openmmo_view_audio_tail __attribute__((weak));
+extern volatile uint32_t openmmo_view_audio_frac __attribute__((weak));
+static uint8_t *g_tap_ring;
+static struct tap_event *g_tap_events;
+static uint32_t g_tap_w;                 /* bytes the callback appended */
+static uint32_t g_tap_ev_w;              /* events the callback recorded */
+static uint32_t g_tap_lost;
+static FILE *g_tap_pcm, *g_tap_txt;
+static pthread_t g_tap_thread;
+static int g_tap_stop;
+static int g_tap_on;
+
+static void tap_note(AAudioStream *stream, const void *data, int32_t frames,
+                     int paused)
+{
+    uint32_t w, n, off, first, ew;
+    struct timespec ts;
+    struct tap_event *ev;
+
+    if (!g_tap_on || frames <= 0)
+        return;
+    n = (uint32_t)frames * 4u;
+    w = g_tap_w;
+    off = w % TAP_RING;
+    first = TAP_RING - off < n ? TAP_RING - off : n;
+    memcpy(g_tap_ring + off, data, first);
+    if (first < n)
+        memcpy(g_tap_ring, (const uint8_t *)data + first, n - first);
+    __atomic_store_n(&g_tap_w, w + n, __ATOMIC_RELEASE);
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    ew = g_tap_ev_w;
+    ev = &g_tap_events[ew % TAP_EVENTS];
+    ev->ns = (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+    ev->frames = frames;
+    ev->xruns = AAudioStream_getXRunCount(stream);
+    ev->paused = paused;
+    ev->step = &openmmo_view_audio_step != NULL ? openmmo_view_audio_step : 0;
+    ev->tail = &openmmo_view_audio_tail != NULL ? openmmo_view_audio_tail : 0;
+    ev->frac = &openmmo_view_audio_frac != NULL ? openmmo_view_audio_frac : 0;
+    __atomic_store_n(&g_tap_ev_w, ew + 1, __ATOMIC_RELEASE);
+}
+
+static void *tap_writer(void *arg)
+{
+    uint32_t r = 0, er = 0;
+
+    (void)arg;
+    for (;;) {
+        uint32_t w = __atomic_load_n(&g_tap_w, __ATOMIC_ACQUIRE);
+        uint32_t ew = __atomic_load_n(&g_tap_ev_w, __ATOMIC_ACQUIRE);
+        int stop = __atomic_load_n(&g_tap_stop, __ATOMIC_ACQUIRE);
+
+        if (w - r > TAP_RING) {
+            g_tap_lost += (w - r) - TAP_RING;
+            r = w - TAP_RING;
+        }
+        while (r != w) {
+            uint32_t off = r % TAP_RING;
+            uint32_t n = w - r;
+
+            if (n > TAP_RING - off)
+                n = TAP_RING - off;
+            fwrite(g_tap_ring + off, 1, n, g_tap_pcm);
+            r += n;
+        }
+        if (ew - er > TAP_EVENTS)
+            er = ew - TAP_EVENTS;
+        while (er != ew) {
+            const struct tap_event *ev = &g_tap_events[er % TAP_EVENTS];
+
+            fprintf(g_tap_txt, "%lld %d %d %d %u %u %u\n", (long long)ev->ns,
+                    (int)ev->frames, (int)ev->xruns, (int)ev->paused,
+                    (unsigned)ev->step, (unsigned)ev->tail, (unsigned)ev->frac);
+            er++;
+        }
+        fflush(g_tap_pcm);
+        fflush(g_tap_txt);
+        if (stop)
+            break;
+        usleep(100000);
+    }
+    return NULL;
+}
+
+static void tap_open(int rate)
+{
+    const char *prefix = getenv("OPENMMO_AUDIO_TAP");
+    char path[1024];
+
+    if (prefix == NULL || prefix[0] == '\0' || g_tap_on)
+        return;
+    g_tap_ring = malloc(TAP_RING);
+    g_tap_events = calloc(TAP_EVENTS, sizeof *g_tap_events);
+    snprintf(path, sizeof path, "%s.pcm", prefix);
+    g_tap_pcm = fopen(path, "wb");
+    snprintf(path, sizeof path, "%s.txt", prefix);
+    g_tap_txt = fopen(path, "w");
+    if (g_tap_ring == NULL || g_tap_events == NULL || g_tap_pcm == NULL
+        || g_tap_txt == NULL) {
+        LOGE("audio: tap %s could not be opened", prefix);
+        free(g_tap_ring); free(g_tap_events);
+        if (g_tap_pcm) fclose(g_tap_pcm);
+        if (g_tap_txt) fclose(g_tap_txt);
+        g_tap_ring = NULL; g_tap_events = NULL;
+        g_tap_pcm = NULL; g_tap_txt = NULL;
+        return;
+    }
+    fprintf(g_tap_txt, "# rate %d ns frames xruns paused step tail frac\n", rate);
+    g_tap_w = 0; g_tap_ev_w = 0; g_tap_lost = 0; g_tap_stop = 0;
+    if (pthread_create(&g_tap_thread, NULL, tap_writer, NULL) != 0) {
+        LOGE("audio: tap has no writer thread");
+        fclose(g_tap_pcm); fclose(g_tap_txt);
+        free(g_tap_ring); free(g_tap_events);
+        g_tap_ring = NULL; g_tap_events = NULL;
+        g_tap_pcm = NULL; g_tap_txt = NULL;
+        return;
+    }
+    __atomic_store_n(&g_tap_on, 1, __ATOMIC_RELEASE);
+    LOGI("audio: tap on, %s.pcm at %d Hz", prefix, rate);
+}
+
+static void tap_close(void)
+{
+    if (!g_tap_on)
+        return;
+    __atomic_store_n(&g_tap_on, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_tap_stop, 1, __ATOMIC_RELEASE);
+    pthread_join(g_tap_thread, NULL);
+    fclose(g_tap_pcm); fclose(g_tap_txt);
+    free(g_tap_ring); free(g_tap_events);
+    g_tap_ring = NULL; g_tap_events = NULL;
+    g_tap_pcm = NULL; g_tap_txt = NULL;
+    LOGI("audio: tap off, %u bytes appended, %u lost to the writer",
+         (unsigned)g_tap_w, (unsigned)g_tap_lost);
+}
+
+enum { AUDIO_REOPEN_MAX = 8 };
+
+/*
+ * DYNAMIC BUFFER SIZING, which a LOW_LATENCY stream on a busy device needs and this shim did
+ * not have.
+ */
+static void audio_tune(AAudioStream *stream)
+{
+    int32_t xruns = AAudioStream_getXRunCount(stream);
+    int32_t burst, cap, want;
+
+    if (xruns <= g_audio_xruns)
+        return;
+    g_audio_xruns = xruns;
+    burst = AAudioStream_getFramesPerBurst(stream);
+    cap = AAudioStream_getBufferCapacityInFrames(stream);
+    if (burst <= 0 || cap <= 0)
+        return;
+    want = AAudioStream_getBufferSizeInFrames(stream) + burst;
+    if (want > cap)
+        want = cap;
+    if (want == g_audio_bufsize)
+        return;
+    g_audio_bufsize = AAudioStream_setBufferSizeInFrames(stream, want);
+    /* Said once a growth rather than once an underrun: a device that clicks
+     * steadily would otherwise fill the log from the audio thread. */
+    if (++g_audio_grown <= 16)
+        LOGI("audio: %d underrun(s); buffer now %d frames of %d (burst %d)",
+             (int)xruns, (int)g_audio_bufsize, (int)cap, (int)burst);
+}
 
 static aaudio_data_callback_result_t audio_cb(AAudioStream *stream,
                                               void *user, void *data,
@@ -2350,10 +2541,15 @@ static aaudio_data_callback_result_t audio_cb(AAudioStream *stream,
     (void)stream; (void)user;
     if (frames <= 0)
         return AAUDIO_CALLBACK_RESULT_CONTINUE;
+    audio_tune(stream);
+    /* This stream is delivering, so whatever it took to get here worked and
+     * the next disconnection starts its own count. */
+    g_audio_reopens = 0;
     pthread_mutex_lock(&g_audio_lock);
     if (g_audio_paused || g_background || g_spec.callback == NULL) {
         memset(data, 0, (size_t)frames * 4);
         pthread_mutex_unlock(&g_audio_lock);
+        tap_note(stream, data, frames, 1);
         return AAUDIO_CALLBACK_RESULT_CONTINUE;
     }
     if (g_out_rate == g_spec.freq) {
@@ -2389,7 +2585,129 @@ static aaudio_data_callback_result_t audio_cb(AAudioStream *stream,
         g_res_pos = pos - (double)(unsigned)pos;
     }
     pthread_mutex_unlock(&g_audio_lock);
+    tap_note(stream, out, frames, 0);
     return AAUDIO_CALLBACK_RESULT_CONTINUE;
+}
+
+/* A stream that dies is opened again, on a thread of its own. */
+static void audio_err_cb(AAudioStream *stream, void *user,
+                         aaudio_result_t err);
+
+/* Build, open and start a stream for the rate the game asked for, and say
+ * what the device gave back. Holds no lock: opening blocks, and the data
+ * callback wants that lock. */
+static AAudioStream *audio_stream_open(int freq, int *rate)
+{
+    AAudioStreamBuilder *b = NULL;
+    AAudioStream *s = NULL;
+
+    if (AAudio_createStreamBuilder(&b) != AAUDIO_OK)
+        return NULL;
+    AAudioStreamBuilder_setDirection(b, AAUDIO_DIRECTION_OUTPUT);
+    AAudioStreamBuilder_setFormat(b, AAUDIO_FORMAT_PCM_I16);
+    AAudioStreamBuilder_setChannelCount(b, 2);
+    AAudioStreamBuilder_setSampleRate(b, freq);
+    AAudioStreamBuilder_setPerformanceMode(b,
+                                           AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
+    AAudioStreamBuilder_setDataCallback(b, audio_cb, NULL);
+    AAudioStreamBuilder_setErrorCallback(b, audio_err_cb, NULL);
+    if (AAudioStreamBuilder_openStream(b, &s) != AAUDIO_OK) {
+        AAudioStreamBuilder_delete(b);
+        return NULL;
+    }
+    AAudioStreamBuilder_delete(b);
+    *rate = AAudioStream_getSampleRate(s);
+    /*
+     * Four bursts to begin with, one is what a device hands back by default and leaves no
+     * room at all for a late callback, and two was measured on the RG556 (2026-09-10, the tap)
+     * with callbacks arriving up to 10.6 ms after a 10 ms burst: the whole buffer, nothing
+     * spare.
+     */
+    {
+        int32_t burst = AAudioStream_getFramesPerBurst(s);
+
+        g_audio_xruns = 0;
+        g_audio_grown = 0;
+        g_audio_bufsize = burst > 0
+            ? AAudioStream_setBufferSizeInFrames(s, burst * 4)
+            : AAudioStream_getBufferSizeInFrames(s);
+        LOGI("audio: stream open, buffer %d frames of %d (burst %d)",
+             (int)g_audio_bufsize,
+             (int)AAudioStream_getBufferCapacityInFrames(s), (int)burst);
+    }
+    if (AAudioStream_requestStart(s) != AAUDIO_OK) {
+        AAudioStream_close(s);
+        return NULL;
+    }
+    return s;
+}
+
+/* The recovery. `arg` is the stream the error arrived on, which is this
+ * thread's to stop and close and nobody else's. */
+static void *audio_restart(void *arg)
+{
+    AAudioStream *dead = arg, *fresh;
+    struct timespec ts;
+    int freq, rate = 0;
+
+    pthread_mutex_lock(&g_audio_lock);
+    if (g_stream != dead) {        /* closed, or already replaced */
+        pthread_mutex_unlock(&g_audio_lock);
+        return NULL;
+    }
+    g_stream = NULL;
+    freq = g_spec.freq;
+    pthread_mutex_unlock(&g_audio_lock);
+
+    AAudioStream_requestStop(dead);
+    AAudioStream_close(dead);
+
+    /* A moment for the route to settle. A device in the middle of being
+     * swapped refuses the open, and the wait is also what stops a stream
+     * that dies the instant it starts from spinning threads here. */
+    ts.tv_sec = 0;
+    ts.tv_nsec = 200 * 1000 * 1000;
+    nanosleep(&ts, NULL);
+
+    fresh = audio_stream_open(freq, &rate);
+    pthread_mutex_lock(&g_audio_lock);
+    if (fresh == NULL) {
+        pthread_mutex_unlock(&g_audio_lock);
+        LOGE("audio: the stream disconnected and would not reopen");
+        return NULL;
+    }
+    if (!g_audio_open || g_stream != NULL) {
+        /* The game closed the device while this was opening, or something
+         * else got there first: this stream has no owner. */
+        pthread_mutex_unlock(&g_audio_lock);
+        AAudioStream_requestStop(fresh);
+        AAudioStream_close(fresh);
+        return NULL;
+    }
+    g_stream = fresh;
+    g_out_rate = rate;
+    g_res_pos = 0.0;
+    pthread_mutex_unlock(&g_audio_lock);
+    LOGI("audio: reopened, device at %d Hz (%d wanted)", rate, freq);
+    return NULL;
+}
+
+static void audio_err_cb(AAudioStream *stream, void *user,
+                         aaudio_result_t err)
+{
+    pthread_t t;
+
+    (void)user;
+    LOGI("audio: stream error %s", AAudio_convertResultToText(err));
+    if (++g_audio_reopens > AUDIO_REOPEN_MAX) {
+        LOGE("audio: %d reopens delivered nothing; leaving it silent",
+             AUDIO_REOPEN_MAX);
+        return;
+    }
+    if (pthread_create(&t, NULL, audio_restart, stream) != 0)
+        LOGE("audio: no thread to reopen the stream on");
+    else
+        pthread_detach(t);
 }
 
 SDL_AudioDeviceID SDL_OpenAudioDevice(const char *device, int iscapture,
@@ -2397,59 +2715,56 @@ SDL_AudioDeviceID SDL_OpenAudioDevice(const char *device, int iscapture,
                                       SDL_AudioSpec *obtained,
                                       int allowed_changes)
 {
-    AAudioStreamBuilder *b = NULL;
+    AAudioStream *s;
+    int rate = 0;
 
     (void)device; (void)iscapture; (void)allowed_changes;
     if (want == NULL || g_stream != NULL) {
         set_err("audio: already open");
         return 0;
     }
-    if (AAudio_createStreamBuilder(&b) != AAUDIO_OK) {
-        set_err("audio: no stream builder");
-        return 0;
-    }
-    AAudioStreamBuilder_setDirection(b, AAUDIO_DIRECTION_OUTPUT);
-    AAudioStreamBuilder_setFormat(b, AAUDIO_FORMAT_PCM_I16);
-    AAudioStreamBuilder_setChannelCount(b, 2);
-    AAudioStreamBuilder_setSampleRate(b, want->freq);
-    AAudioStreamBuilder_setPerformanceMode(b,
-                                           AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
-    AAudioStreamBuilder_setDataCallback(b, audio_cb, NULL);
-    if (AAudioStreamBuilder_openStream(b, &g_stream) != AAUDIO_OK) {
-        AAudioStreamBuilder_delete(b);
-        g_stream = NULL;
+    g_spec = *want;
+    g_res_pos = 0.0;
+    g_audio_paused = 1;
+    g_audio_reopens = 0;
+    s = audio_stream_open(want->freq, &rate);
+    if (s == NULL) {
         set_err("audio: cannot open a stream");
         return 0;
     }
-    AAudioStreamBuilder_delete(b);
-    g_spec = *want;
-    g_out_rate = AAudioStream_getSampleRate(g_stream);
-    g_res_pos = 0.0;
-    g_audio_paused = 1;
+    pthread_mutex_lock(&g_audio_lock);
+    g_stream = s;
+    g_out_rate = rate;
+    g_audio_open = 1;
+    pthread_mutex_unlock(&g_audio_lock);
+    tap_open(rate);
     if (obtained != NULL) {
         *obtained = *want;
         /* The resampler above keeps the callback at want->freq whatever the
          * device runs, which is SDL's own no-changes-allowed promise. */
     }
-    if (AAudioStream_requestStart(g_stream) != AAUDIO_OK) {
-        AAudioStream_close(g_stream);
-        g_stream = NULL;
-        set_err("audio: cannot start");
-        return 0;
-    }
-    LOGI("audio: %d Hz wanted, device at %d Hz%s", want->freq, g_out_rate,
-         g_out_rate == want->freq ? "" : " (resampled)");
+    LOGI("audio: %d Hz wanted, device at %d Hz%s", want->freq, rate,
+         rate == want->freq ? "" : " (resampled)");
     return 1;
 }
 
 void SDL_CloseAudioDevice(SDL_AudioDeviceID dev)
 {
+    AAudioStream *s;
+
     (void)dev;
-    if (g_stream != NULL) {
-        AAudioStream_requestStop(g_stream);
-        AAudioStream_close(g_stream);
-        g_stream = NULL;
+    /* Cleared under the lock and closed outside it: closing waits for the
+     * data callback to return, and that callback holds this lock. */
+    pthread_mutex_lock(&g_audio_lock);
+    s = g_stream;
+    g_stream = NULL;
+    g_audio_open = 0;
+    pthread_mutex_unlock(&g_audio_lock);
+    if (s != NULL) {
+        AAudioStream_requestStop(s);
+        AAudioStream_close(s);
     }
+    tap_close();
 }
 
 void SDL_PauseAudioDevice(SDL_AudioDeviceID dev, int pause_on)

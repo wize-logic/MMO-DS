@@ -16,11 +16,13 @@ import de.fiereu.openmmo.net.login.packets.PasswordLogin
 import de.fiereu.openmmo.net.login.packets.RequestGameServerListPacket
 import de.fiereu.openmmo.net.login.packets.SentCredentialsPacket
 import de.fiereu.openmmo.net.login.packets.TokenLogin
+import de.fiereu.openmmo.server.login.auth.CreateAccount
 import de.fiereu.openmmo.server.login.auth.LoginAttemptLimiter
 import de.fiereu.openmmo.server.login.auth.RememberMeTokens
 import de.fiereu.openmmo.server.login.auth.UserService
 import de.fiereu.openmmo.server.login.catalog.GameServerCatalog
 import de.fiereu.openmmo.server.login.session.AUTHED_USER_ID
+import de.fiereu.openmmo.server.login.update.ClientRevisionFloor
 import io.github.oshai.kotlinlogging.KotlinLogging
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -35,6 +37,7 @@ constructor(
     private val tokenIssuer: SessionTokenIssuer,
     private val rememberMe: RememberMeTokens,
     private val attempts: LoginAttemptLimiter,
+    private val updates: ClientRevisionFloor,
     scope: CoroutineScope,
 ) : CoroutineProtocolHandler<LoginProtocol>(LoginProtocol, Side.SERVER, scope) {
 
@@ -45,6 +48,27 @@ constructor(
   }
 
   internal suspend fun onLoginRequest(event: PacketEvent<LoginRequestPacket>) {
+    // Ahead of the credential, and ahead of the rate limiter, because this is a property of
+    // the client rather than of the attempt: a build that cannot play should not spend a
+    // password check to find that out, and should not use up an account's attempts doing it
+    // either.
+    if (!updates.admits(event.packet.installationRevision)) {
+      log.info {
+        "Refusing ${event.packet.username}: revision ${event.packet.installationRevision}" +
+            " is below ${updates.current()}"
+      }
+      event.session.send(LoginResponsePacket(LoginState.CLIENT_OUT_OF_DATE))
+      return
+    }
+    // A name no account here could have is refused on its shape, before it is carried into a rate
+    // limiter key or a query. The wire's string has no ceiling of its own, so without this a login
+    // could name thirty thousand characters and every layer below would carry them.
+    val badName = CreateAccount.validateUsername(event.packet.username)
+    if (badName != null) {
+      log.info { "Refusing a login: $badName" }
+      event.session.send(LoginResponsePacket(LoginState.INVALID_PASSWORD))
+      return
+    }
     when (val method = event.packet.method) {
       is PasswordLogin -> onPasswordLogin(event, method)
       is TokenLogin -> onTokenLogin(event, method)
@@ -81,16 +105,28 @@ constructor(
 
   private suspend fun onTokenLogin(event: PacketEvent<LoginRequestPacket>, method: TokenLogin) {
     val username = event.packet.username
-    // Spending it is the lookup, so the token that arrived is used up whatever happens next. A copy
-    // somebody else took stops working the moment the owner signs in, and the other way round.
+    val address = addressOf(event)
+    // The same counter a password goes through. A token is thirty-two random bytes, so this is
+    // not about guessing one; it is that the lookup is a database round trip, and an unnamed
+    // peer could buy one per packet at whatever rate the socket ran at.
+    if (!attempts.allow(username, address)) {
+      log.warn { "Too many failed logins for $username from $address" }
+      event.session.send(LoginResponsePacket(LoginState.RATE_LIMITED))
+      return
+    }
+    // Spending it is the lookup, so the token that just arrived is now used up whatever happens
+    // next. A copy somebody else took stops working the moment the owner signs in, and the other
+    // way round, which is the point of a credential that lives in a row rather than in a signature.
     val userId = rememberMe.consume(method.token)
     val user = userId?.let { users.findForToken(it) }
     if (user == null || !user.username.equals(username, ignoreCase = true)) {
       log.warn { "Rejected token login for $username" }
+      attempts.recordFailure(username, address)
       event.session.send(LoginResponsePacket(LoginState.INVALID_SAVED_CREDENTIALS))
       return
     }
     log.info { "Token login for ${user.displayName}: AUTHED" }
+    attempts.recordSuccess(username, address)
     event.session.attributes[AUTHED_USER_ID] = user.id
     // Sliding expiry, so a player who keeps logging in never has to type a password again.
     sendRememberMeToken(event, user.id, user.displayName)
@@ -132,9 +168,9 @@ constructor(
       event.session.send(GameServerNodesPacket(LoginState.INVALID_SAVED_CREDENTIALS))
       return
     }
-    // Read here rather than kept from the login, so a role granted while the player sits on the
-    // character screen lands on this join. The game server holds no user table, so this ticket is
-    // the only way it learns any of this.
+    // Read here rather than kept from the login, so a role granted or withdrawn while the player
+    // sits on the character screen lands on this join instead of the one after it. The game server
+    // holds no user table, so this ticket is the only way it can learn any of this.
     val roles = users.rolesOf(userId)
     val token = tokenIssuer.issue(userId = userId.toLong(), roles = roles)
     val data =

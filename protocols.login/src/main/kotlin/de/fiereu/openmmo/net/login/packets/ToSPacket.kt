@@ -7,27 +7,20 @@ import de.fiereu.bytecodec.S8
 import de.fiereu.bytecodec.U16LE
 import de.fiereu.bytecodec.bytesPrefixed
 import de.fiereu.bytecodec.imap
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
+import de.fiereu.openmmo.common.utils.gzipCompress
+import de.fiereu.openmmo.common.utils.gzipDecompress
 import java.nio.charset.StandardCharsets
-import java.util.zip.GZIPInputStream
-import java.util.zip.GZIPOutputStream
 
 data class ToSPacket(val confirmationKey: Byte, val tosText: String)
 
-private fun gzipDecompress(data: ByteArray): String =
-    GZIPInputStream(ByteArrayInputStream(data)).use {
-      String(it.readAllBytes(), StandardCharsets.UTF_8)
-    }
-
-private fun gzipCompress(text: String): ByteArray {
-  val baos = ByteArrayOutputStream()
-  GZIPOutputStream(baos).use { it.write(text.toByteArray(StandardCharsets.UTF_8)) }
-  return baos.toByteArray()
-}
-
+// The shared pair rather than a second one here, so the ceiling on what a gzip field may unpack to
+// is written once and both fields on these protocols get it.
 private val GzippedTextU16: Codec<String> =
-    bytesPrefixed(U16LE).imap(decode = ::gzipDecompress, encode = ::gzipCompress)
+    bytesPrefixed(U16LE)
+        .imap(
+            decode = { String(it.gzipDecompress(), StandardCharsets.UTF_8) },
+            encode = { it.toByteArray(StandardCharsets.UTF_8).gzipCompress() },
+        )
 
 object ToSPacketCodec : PacketCodec<ToSPacket>() {
   override fun CodecScope<ToSPacket>.body(): ToSPacket {

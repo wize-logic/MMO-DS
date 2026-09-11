@@ -3,6 +3,7 @@ package de.fiereu.openmmo.server.game.script
 import de.fiereu.network.SessionContext
 import de.fiereu.openmmo.maps.MapManager
 import de.fiereu.openmmo.server.game.services.BattleService
+import de.fiereu.openmmo.server.game.services.BlackoutService
 import de.fiereu.openmmo.server.game.services.DialogService
 import de.fiereu.openmmo.server.game.services.FieldMoveService
 import de.fiereu.openmmo.server.game.services.MapEntryScripts
@@ -18,6 +19,7 @@ import de.fiereu.openmmo.server.game.storage.CharacterStore
 import de.fiereu.openmmo.server.game.storage.StoredCharacter
 import io.github.oshai.kotlinlogging.KotlinLogging
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -47,6 +49,9 @@ constructor(
     private val entryScripts: MapEntryScripts,
     private val shopService: ShopService,
     private val fieldMoveService: FieldMoveService,
+    // Deferred: the white out is a script of its own, so the service that owns it runs through
+    // here.
+    private val blackoutService: Provider<BlackoutService>,
 ) {
   fun run(session: SessionContext, state: PlayerState, script: Script, entityId: Long) =
       runAll(session, state, listOf(script), entityId)
@@ -139,6 +144,10 @@ constructor(
         }
         dialogService.close(session, state)
       }
+      // Outside the try, so a disconnect that cancelled the script leaves the white out to the
+      // teardown rather than running it against a character that is being evicted, and so a script
+      // that threw is rolled back before the player is sent anywhere.
+      blackoutService.get().runDeferred(ctx, state)
     }
   }
 }

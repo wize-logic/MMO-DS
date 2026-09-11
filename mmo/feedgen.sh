@@ -102,5 +102,5 @@ done || fail "cannot copy the install into $OUT/files"
 
 printf 'feedgen: revision %s, %s files, signed into %s\n' \
     "$REV" "$COUNT" "$OUT"
-printf 'feedgen: serve that directory over plain http; the launcher wants\n'
-printf 'feedgen:   feed-url http://your.host/path-to-it\n'
+printf 'feedgen: serve that directory over https (plain http works too); the launcher wants\n'
+printf 'feedgen:   feed-url https://your.host/path-to-it\n'

@@ -26,3 +26,18 @@
          }
          break;
      case BATTLE_STATE_INIT_LINK_COMM:
+@@ -585,6 +596,14 @@
+ 
+     battleSys->monSpriteMan = PokemonSpriteManager_New(HEAP_ID_BATTLE);
+     PokemonSpriteManager_SetPlttBaseAddrAndSize(battleSys->monSpriteMan, 0, PALETTE_SIZE_BYTES * 6);
++    /* openmmo: a single battle draws its two sprites through a 128x88 frame in
++     * the same page; doubles keep the cartridge's four 80x80 slots
++     * (mods/openmmo/src/openmmo_spriteframe.c). */
++    {
++        extern void openmmo_spriteframe_set(void *man, int wide);
++
++        openmmo_spriteframe_set(battleSys->monSpriteMan, (battleSys->battleType & (BATTLE_TYPE_DOUBLES | BATTLE_TYPE_2vs2)) == 0);
++    }
+ 
+     BattleSystem_CreateHealthboxes(battleSys);
+     BattleMain_InitParticleSystem();

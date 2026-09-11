@@ -1,0 +1,27 @@
+# MAPWALLS, hand-written; tests/mapformat_test.sh checks every number
+# against the HeartGold tree.
+#
+# mmo/MAPSCENES puts each ported map in the scene a save whose story has
+# been CLEARED would show (mmo/STORYEND, since 2026-09-02; it was a save
+# never played before that, and this file was the hand that moved the
+# story's walls, twelve rows the cleared story now answers itself). What
+# is left here is what a cleared story does not move: a person the game's
+# own code stands there rather than a script, and a Pokemon the story
+# stands back in the road after the credits.
+#
+# A row names a map, a flag and what to pretend about it:
+#
+#   set    the flag is SET here, so the people under it are left behind
+#   clear  the flag is CLEAR here, so the people under it are carried
+#
+# Either wins over the scene. A row is a person on a tile, checked
+# against the map's own zone_event record (the x/z beside each one) and
+# the script that sets the flag in the real game (where the story would
+# have moved them), and nothing else: a person who merely belongs to a
+# scene the visitor never sees is not a wall and is not here.
+#
+# Rows: hg <map> set|clear <FLAG>=<number>   # who, where, and why
+
+# Johto: what a cleared story still leaves in the road.
+hg  route_36        set   FLAG_HIDE_ROUTE_36_SUDOWOODO=0x1C2        # the Sudowoodo at (415,246), across the only road between Route 36 and Route 37; the SquirtBottle fight hides it (scr_seq_0243_R36) and the credits script stands it back (scr_seq_0825_T10R0701), so a cleared save has it in the road again -- until the register's front 10 makes it a fight of the server's
+hg  mahogany        set   FLAG_UNK_205=0x205                        # the man at (540,175) on the town's east edge, the way to Route 44 and the Lake of Rage; no script sets his flag (the Lake of Rage event does it in code), so no table can move him

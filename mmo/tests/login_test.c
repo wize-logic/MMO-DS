@@ -50,7 +50,18 @@ static const char *LOGIN_REQ_TAIL_HEX =
 
 static void test_login_request(void)
 {
+    /* The capture is of an install that never said a revision of its own, so
+     * the comparison is only against official while this one says none either.
+     * Held and put back: a suite run under the front door has one. */
+    const char *had_revision = getenv("OPENMMO_REVISION");
+    char kept_revision[32];
+
     printf("login request (captures, user/pass \"test\"):\n");
+
+    kept_revision[0] = '\0';
+    if (had_revision != NULL)
+        snprintf(kept_revision, sizeof kept_revision, "%s", had_revision);
+    mmo_plat_unsetenv("OPENMMO_REVISION");
 
     /* expect = head || u8 hwid length || hwid || tail. */
     u8 expect[256];
@@ -106,6 +117,68 @@ static void test_login_request(void)
         mmo_wbuf_free(&stay);
     }
     mmo_wbuf_free(&w);
+    if (kept_revision[0] != '\0')
+        mmo_plat_setenv("OPENMMO_REVISION", kept_revision, 1);
+}
+
+/* What the login server compares against its update floor. */
+static void test_installation_revision(void)
+{
+    const char *had = getenv("OPENMMO_REVISION");
+    char kept[32];
+
+    printf("installation revision:\n");
+
+    kept[0] = '\0';
+    if (had != NULL)
+        snprintf(kept, sizeof kept, "%s", had);
+
+    mmo_plat_unsetenv("OPENMMO_REVISION");
+    CHECK(mmo_login_installation_revision() == MMO_CLIENT_REVISION,
+          "a tree with no published revision reports the compiled-in one");
+
+    mmo_plat_setenv("OPENMMO_REVISION", "1420", 1);
+    CHECK(mmo_login_installation_revision() == 1420,
+          "a published install reports what revision.txt said");
+
+    /* Commit counts are far below the compiled-in revision, which is why this
+     * takes the installed one whenever there is one rather than only when it
+     * is higher the way the official client does. */
+    CHECK(1420 < MMO_CLIENT_REVISION,
+          "and a real install revision is below the compiled-in one, so"
+          " 'only if higher' would have discarded every one of them");
+
+    mmo_plat_setenv("OPENMMO_REVISION", "0", 1);
+    CHECK(mmo_login_installation_revision() == MMO_CLIENT_REVISION,
+          "revision 0 is nothing to compare, not a revision below every floor");
+    mmo_plat_setenv("OPENMMO_REVISION", "not-a-number", 1);
+    CHECK(mmo_login_installation_revision() == MMO_CLIENT_REVISION,
+          "and neither is a line that does not parse");
+
+    {
+        mmo_wbuf w;
+        char pwhex[41];
+        u8 want[4];
+
+        mmo_plat_setenv("OPENMMO_REVISION", "1420", 1);
+        mmo_sha1_hex("test", 4, pwhex);
+        mmo_wbuf_init(&w);
+        mmo_login_write_request(&w, "test", pwhex, 0);
+        want[0] = 1420 & 0xff;
+        want[1] = (1420 >> 8) & 0xff;
+        want[2] = 0;
+        want[3] = 0;
+        /* Second to last field but one: os and an empty hwid cache follow. */
+        CHECK(!w.err && w.len > 6 &&
+              memcmp(w.data + w.len - 6, want, 4) == 0,
+              "and the request carries it where installationRevision goes");
+        mmo_wbuf_free(&w);
+    }
+
+    if (kept[0] != '\0')
+        mmo_plat_setenv("OPENMMO_REVISION", kept, 1);
+    else
+        mmo_plat_unsetenv("OPENMMO_REVISION");
 }
 
 /* The other way in: a token instead of a password. */
@@ -289,6 +362,12 @@ static void test_refusal_sentence(void)
     CHECK(n > 0 && n < MESSAGE_ROOM && strstr(why, "already signed in") != NULL,
           "ALREADY_LOGGED_IN is named");
 
+    n = mmo_login_explain_refusal(MMO_LOGIN_CLIENT_OUT_OF_DATE, why, sizeof why);
+    CHECK(n > 0 && n < MESSAGE_ROOM && strstr(why, "out of date") != NULL,
+          "CLIENT_OUT_OF_DATE says the client is, rather than reporting a number");
+    CHECK(strstr(why, "offline") != NULL,
+          "and that the offline game does not need the update either");
+
     n = mmo_login_explain_refusal(99, why, sizeof why);
     CHECK(n > 0 && n < MESSAGE_ROOM && strstr(why, "99") != NULL,
           "an unnamed state is reported by number rather than as 'rejected'");
@@ -298,6 +377,7 @@ int login_tests_run(void)
 {
     failures = 0;
     test_login_request();
+    test_installation_revision();
     test_token_request();
     test_credentials_decode();
     test_token_store();

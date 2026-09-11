@@ -154,4 +154,56 @@ class BattlePacketEmitterTest :
         target.targetMove shouldBe 0.toShort()
         target.subEvents.single().body shouldBe BattleEventBody.StatChange(6, -1)
       }
+
+      test("every stage of a multi-stat move rides under one target") {
+        val session = FakeSession(1L)
+        val interest = InterestManager()
+        val emitter = BattlePacketEmitter(interest)
+        val attacker = mon(10L)
+        val defender = mon(20L)
+        val battle =
+            BattleInstance(1L, 1L, session, listOf(attacker), listOf(defender), BattleRng())
+        interest.join(session, battle.key)
+
+        emitter.sendEvents(
+            battle,
+            listOf(
+                BattleEvent.MoveUsed(attacker.entityId, TACKLE, 0, 34),
+                BattleEvent.StageChanged(attacker.entityId, BattleStat.DEFENSE, -1, 0, -1, false),
+                BattleEvent.StageChanged(attacker.entityId, BattleStat.ATTACK, 2, 0, 2, false),
+                BattleEvent.StageChanged(attacker.entityId, BattleStat.SPEED, 6, 0, 0, true),
+            ),
+        )
+
+        val target =
+            session.sent.filterIsInstance<BattleEntityMoveEventPacket>().single().targets.single()
+        target.entityId shouldBe attacker.entityId
+        target.subEvents.map { it.body } shouldBe
+            listOf(BattleEventBody.StatChange(2, -1), BattleEventBody.StatChange(1, 2))
+      }
+
+      test("a hit whose rider lands on the user gets two targets, damage first") {
+        val session = FakeSession(1L)
+        val interest = InterestManager()
+        val emitter = BattlePacketEmitter(interest)
+        val attacker = mon(10L)
+        val defender = mon(20L)
+        val battle =
+            BattleInstance(1L, 1L, session, listOf(attacker), listOf(defender), BattleRng())
+        interest.join(session, battle.key)
+
+        emitter.sendEvents(
+            battle,
+            listOf(
+                BattleEvent.MoveUsed(attacker.entityId, TACKLE, 0, 34),
+                BattleEvent.DamageDealt(defender.entityId, 21, false, TypeChart.NEUTRAL),
+                BattleEvent.StageChanged(attacker.entityId, BattleStat.SPEED, 1, 0, 1, false),
+            ),
+        )
+
+        val targets = session.sent.filterIsInstance<BattleEntityMoveEventPacket>().single().targets
+        targets.map { it.entityId } shouldBe listOf(defender.entityId, attacker.entityId)
+        targets[0].subEvents.map { it.body } shouldBe listOf(BattleEventBody.HpUpdate(21))
+        targets[1].subEvents.map { it.body } shouldBe listOf(BattleEventBody.StatChange(3, 1))
+      }
     })

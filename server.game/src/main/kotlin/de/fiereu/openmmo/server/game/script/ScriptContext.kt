@@ -5,6 +5,7 @@ import de.fiereu.openmmo.common.DynamicWarp
 import de.fiereu.openmmo.common.dialog.DialogLine
 import de.fiereu.openmmo.common.enums.Direction
 import de.fiereu.openmmo.common.enums.Region
+import de.fiereu.openmmo.common.enums.Season
 import de.fiereu.openmmo.common.enums.TimeOfDay
 import de.fiereu.openmmo.items.ItemDef
 import de.fiereu.openmmo.maps.MapManager
@@ -238,9 +239,11 @@ internal constructor(
 
   /**
    * The server's time of day, the decomp's `GetTimeOfDay`. A cartridge asks the console's clock;
-   * here one clock answers for everyone on the map.
+   * here one clock answers for everyone on the map, and the season stretches it, so a script's
+   * "night" is the same night the encounter tables roll (WorldClock says why).
    */
-  fun timeOfDay(): TimeOfDay = TimeOfDay.forHour(LocalTime.now(clock).hour)
+  fun timeOfDay(): TimeOfDay =
+      TimeOfDay.forHour(LocalTime.now(clock).hour, Season.forMonth(LocalDate.now(clock).monthValue))
 
   /**
    * The server's day of the week, the decomp's `GetDayOfWeek`. Sunday is 0, matching
@@ -329,13 +332,19 @@ internal constructor(
           .startScriptedBattle(session, dexId, level, moveIds.toList())
 
   /** Fight the decomp trainer with this id, using the region the player is standing in. */
-  suspend fun trainerBattle(trainerId: Int): BattleResult {
-    val region =
-        checkNotNull(Region.byWireValue(state.regionId.toByte())) {
-          "Scene ran in unknown region ${state.regionId}"
-        }
+  /**
+   * [region] is for a map whose trainers are numbered in a table other than the region the player
+   * is standing in: a ported map travels as Sinnoh because it is a Platinum header, while its
+   * people are the cartridge it came out of.
+   */
+  suspend fun trainerBattle(trainerId: Int, region: Region? = null): BattleResult {
+    val fought =
+        region
+            ?: checkNotNull(Region.byWireValue(state.regionId.toByte())) {
+              "Scene ran in unknown region ${state.regionId}"
+            }
     return checkNotNull(battles) { "Battle service is unavailable" }
-        .startTrainerBattle(session, region, trainerId)
+        .startTrainerBattle(session, fought, trainerId)
   }
 
   /**

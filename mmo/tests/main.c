@@ -53,6 +53,7 @@ int netwin_tests_run(void);
 int partywin_tests_run(void);
 int widget_tests_run(void);
 int battle_anim_tests_run(void);
+int device_tests_run(void);
 
 int main(void)
 {
@@ -102,6 +103,7 @@ int main(void)
     failures += partywin_tests_run();
     failures += widget_tests_run();
     failures += battle_anim_tests_run();
+    failures += device_tests_run();
     failures += story_tests_run();
     failures += script_tests_run();
     failures += selftest_tests_run();

@@ -35,7 +35,10 @@ class ChatServiceTest :
           registry.bindCharacter(b, blue)
           val chat =
               ChatService(
-                  ChatCommandService(store, setOf(HelpCommand())), registry, store, ViolationLog())
+                  ChatCommandService(store, setOf(HelpCommand())),
+                  registry,
+                  store,
+                  ChatLimits(ViolationLog()))
 
           chat.onSend(a, ChatMessageSendPacket(mode = 0, target = "hello", message = null))
 
@@ -64,7 +67,10 @@ class ChatServiceTest :
           registry.bindCharacter(elsewhere, blue)
           val chat =
               ChatService(
-                  ChatCommandService(store, setOf(HelpCommand())), registry, store, ViolationLog())
+                  ChatCommandService(store, setOf(HelpCommand())),
+                  registry,
+                  store,
+                  ChatLimits(ViolationLog()))
 
           chat.onSend(a, ChatMessageSendPacket(mode = 0, target = "anyone here?", message = null))
 
@@ -86,7 +92,10 @@ class ChatServiceTest :
           registry.bindCharacter(elsewhere, blue)
           val chat =
               ChatService(
-                  ChatCommandService(store, setOf(HelpCommand())), registry, store, ViolationLog())
+                  ChatCommandService(store, setOf(HelpCommand())),
+                  registry,
+                  store,
+                  ChatLimits(ViolationLog()))
 
           chat.onSend(a, ChatMessageSendPacket(mode = 6, target = "hello world", message = null))
           chat.onSend(a, ChatMessageSendPacket(mode = 5, target = "wts pearls", message = null))
@@ -108,7 +117,10 @@ class ChatServiceTest :
           registry.bindCharacter(b, blue)
           val chat =
               ChatService(
-                  ChatCommandService(store, setOf(HelpCommand())), registry, store, ViolationLog())
+                  ChatCommandService(store, setOf(HelpCommand())),
+                  registry,
+                  store,
+                  ChatLimits(ViolationLog()))
 
           chat.onSend(a, ChatMessageSendPacket(mode = 0, target = "/help", message = null))
 
@@ -129,7 +141,10 @@ class ChatServiceTest :
           registry.bindCharacter(b, blue)
           val chat =
               ChatService(
-                  ChatCommandService(store, setOf(HelpCommand())), registry, store, ViolationLog())
+                  ChatCommandService(store, setOf(HelpCommand())),
+                  registry,
+                  store,
+                  ChatLimits(ViolationLog()))
 
           chat.onSend(a, ChatMessageSendPacket(mode = 4, target = "Blue", message = "psst"))
 
@@ -143,8 +158,9 @@ class ChatServiceTest :
       }
 
       /**
-       * Two of the types are the voice this server speaks in, and the codec short-forms both with
-       * no sender field, so a line sent on one arrived looking like a real announcement.
+       * The mode byte used to index straight into [ChatType], and two of them are the voice this
+       * server speaks in: both are short-formed by the codec with no sender field, so a line sent
+       * on one arrives looking exactly like a real announcement.
        */
       test("a client cannot speak in the server's own voice") {
         runTest {
@@ -158,10 +174,13 @@ class ChatServiceTest :
           registry.bindCharacter(b, blue)
           val chat =
               ChatService(
-                  ChatCommandService(store, setOf(HelpCommand())), registry, store, ViolationLog())
+                  ChatCommandService(store, setOf(HelpCommand())),
+                  registry,
+                  store,
+                  ChatLimits(ViolationLog()))
 
-          // 16 and 17 are the server's own channels, 18 is the battle one, which is scoped by its
-          // own packet and would arrive here only to get around that.
+          // 16 SYSTEM_ANNOUNCEMENTS, 17 GAME_NOTIFICATIONS, 18 battle, which is scoped to a battle
+          // by its own packet and would arrive here only to get around that.
           for (mode in listOf<Byte>(16, 17, 18)) {
             chat.onSend(
                 a, ChatMessageSendPacket(mode = mode, target = "free items!", message = null))
@@ -172,7 +191,11 @@ class ChatServiceTest :
         }
       }
 
-      /** A line is copied to every session on its channel, and the codec has no ceiling. */
+      /**
+       * A line is copied to every session on its channel before it leaves, and the codec reads a
+       * null-terminated string with no ceiling, so one frame is about 32,000 characters multiplied
+       * by the number of players online.
+       */
       test("a line longer than the client can type is cut to what it can") {
         runTest {
           val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
@@ -182,7 +205,10 @@ class ChatServiceTest :
           registry.bindCharacter(a, red)
           val chat =
               ChatService(
-                  ChatCommandService(store, setOf(HelpCommand())), registry, store, ViolationLog())
+                  ChatCommandService(store, setOf(HelpCommand())),
+                  registry,
+                  store,
+                  ChatLimits(ViolationLog()))
 
           chat.onSend(
               a, ChatMessageSendPacket(mode = 6, target = "A".repeat(30_000), message = null))
@@ -203,7 +229,10 @@ class ChatServiceTest :
           registry.bindCharacter(b, blue)
           val chat =
               ChatService(
-                  ChatCommandService(store, setOf(HelpCommand())), registry, store, ViolationLog())
+                  ChatCommandService(store, setOf(HelpCommand())),
+                  registry,
+                  store,
+                  ChatLimits(ViolationLog()))
 
           chat.onSend(a, ChatMessageSendPacket(mode = 4, target = "Missing", message = "hi"))
 

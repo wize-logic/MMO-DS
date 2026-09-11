@@ -5,21 +5,19 @@ import de.fiereu.network.SessionContext
 import de.fiereu.openmmo.common.MAX_PARTY_SIZE
 import de.fiereu.openmmo.common.Pokemon
 import de.fiereu.openmmo.common.enums.PokemonContainer
-import de.fiereu.openmmo.net.game.packets.PokemonContainerPacket
 import de.fiereu.openmmo.net.game.packets.PokemonMove
 import de.fiereu.openmmo.net.game.packets.PokemonMovePacket
 import de.fiereu.openmmo.server.game.battle.BattleRegistry
 import de.fiereu.openmmo.server.game.session.PLAYER_STATE
 import de.fiereu.openmmo.server.game.storage.CharacterStore
+import de.fiereu.openmmo.server.game.storage.Containers
+import de.fiereu.openmmo.server.game.storage.DAYCARE_SIZE
 import de.fiereu.openmmo.server.game.storage.PC_STORAGE_SIZE
 import io.github.oshai.kotlinlogging.KotlinLogging
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private val log = KotlinLogging.logger {}
-
-/** One record per packet is capped at a byte, so a full PC crosses in several. */
-private const val RECORDS_PER_PACKET = 255
 
 /**
  * Deposits, withdrawals and reorders, which are one gesture on the wire: a monster is picked up
@@ -50,34 +48,39 @@ constructor(
       resend(session, charId)
       return
     }
-    // A settlement is two separate writes, and this is the one gesture that can land between them:
-    // moving the monster the first write just handed over leaves the second nothing to give back,
-    // and both players keep a copy. The trade screen owns the display on the cartridge anyway.
+    // A settlement is two single-character writes, one after the other, and this is the one
+    // gesture that can land between them: the monster the first write just handed over is in
+    // the party, and moving it to the box there leaves the second write nothing to give back.
     if (state.atTradeTable) {
       log.warn { "char=$charId tried to move a monster while at a trade table" }
       resend(session, charId)
       return
     }
     val applied =
-        characterStore.rearrangeMonsters(charId) { party, pc -> apply(charId, moves, party, pc) }
+        characterStore.rearrangeMonsters(charId) { party, pc, daycare ->
+          apply(charId, moves, party, pc, daycare)
+        }
     // Resend either way: the client has already redrawn the slots it dragged, so a refusal has to
     // be corrected on screen and not only in the log.
     resend(session, charId)
     if (applied) log.info { "char=$charId moved ${moves.size} monster(s) between containers" }
   }
 
-  /** The rearranged party and PC, or null if any pair in the batch is one we will not make. */
+  /** The three rearranged containers, or null if any pair in the batch is one we will not make. */
   private fun apply(
       charId: Long,
       moves: List<PokemonMove>,
       party: List<Pokemon>,
       pc: List<Pokemon>,
-  ): Pair<List<Pokemon>, List<Pokemon>>? {
+      daycare: List<Pokemon>,
+  ): Containers? {
     val slots =
         mapOf(
             PokemonContainer.PARTY to
                 party.withIndex().associate { (i, m) -> i to m }.toMutableMap(),
             PokemonContainer.PC to pc.associateBy { it.containerSlot.toInt() }.toMutableMap(),
+            PokemonContainer.DAYCARE to
+                daycare.associateBy { it.containerSlot.toInt() }.toMutableMap(),
         )
     for (move in moves) {
       val from = slots[move.fromContainer]
@@ -123,13 +126,23 @@ constructor(
             .entries
             .sortedBy { it.key }
             .map { it.value.reseat(PokemonContainer.PC, it.key) }
-    return partyList to pcList
+    // The day care keeps the slots it was given rather than being packed down. Its two slots are
+    // the building's own, and the client reports them as the game holds them, including the shift
+    // the game makes when the first one empties, which arrives here as an ordinary pair.
+    val daycareList =
+        slots
+            .getValue(PokemonContainer.DAYCARE)
+            .entries
+            .sortedBy { it.key }
+            .map { it.value.reseat(PokemonContainer.DAYCARE, it.key) }
+    return Containers(partyList, pcList, daycareList)
   }
 
   private fun inRange(container: PokemonContainer, slot: Short): Boolean =
       when (container) {
         PokemonContainer.PARTY -> slot in 0 until MAX_PARTY_SIZE
         PokemonContainer.PC -> slot in 0 until PC_STORAGE_SIZE
+        PokemonContainer.DAYCARE -> slot in 0 until DAYCARE_SIZE
         else -> false
       }
 
@@ -137,27 +150,11 @@ constructor(
       if (this.container == container && containerSlot.toInt() == slot) this
       else copy(container = container, containerSlot = slot.toShort())
 
-  /** Send the two containers back as they now stand, so what the client shows is the server's. */
-  private fun resend(session: SessionContext, charId: Long) {
+  /** Send the three containers back as they now stand, so what the client shows is the server's. */
+  fun resend(session: SessionContext, charId: Long) {
     val stored = characterStore.getCharacter(charId) ?: return
-    session.send(
-        PokemonContainerPacket(
-            container = PokemonContainer.PARTY,
-            hasChange = true,
-            delete = false,
-            pokemon = stored.pokemon,
-        ))
-    // The first packet replaces the container, the rest merge into it by monster id, which is how
-    // the client applies a container that does not fit in one.
-    val pc = stored.pcStorage.chunked(RECORDS_PER_PACKET).ifEmpty { listOf(emptyList()) }
-    pc.forEachIndexed { i, chunk ->
-      session.send(
-          PokemonContainerPacket(
-              container = PokemonContainer.PC,
-              hasChange = i == 0,
-              delete = false,
-              pokemon = chunk,
-          ))
-    }
+    session.sendContainer(PokemonContainer.PARTY, stored.pokemon)
+    session.sendContainer(PokemonContainer.DAYCARE, stored.daycare)
+    session.sendContainer(PokemonContainer.PC, stored.pcStorage)
   }
 }

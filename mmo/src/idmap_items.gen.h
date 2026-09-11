@@ -444,9 +444,78 @@ static const u16 MMO_ITEM_SHARED[] = {
      465, /* Vs. Recorder; no gba */
      466, /* Gracidea; no gba */
      467, /* Secret Key; gba 351 */
+     468, /* Apricorn Box; no gba */
+     469, /* UNOWN Report; no gba */
+     470, /* Berry Pots; no gba */
+     471, /* Dowsing MCHN; no gba */
+     472, /* Blue Card; no gba */
+     473, /* SlowpokeTail; no gba */
+     474, /* Clear Bell; no gba */
+     475, /* Card Key; no gba */
+     476, /* Basement Key; no gba */
+     477, /* SquirtBottle; no gba */
+     478, /* Red Scale; no gba */
+     479, /* Lost Item; no gba */
+     480, /* Pass; no gba */
+     481, /* Machine Part; no gba */
+     482, /* Silver Wing; no gba */
+     483, /* Rainbow Wing; no gba */
+     484, /* Mystery Egg; no gba */
+     485, /* Red Apricorn; no gba */
+     486, /* Ylw Apricorn; no gba */
+     487, /* Blu Apricorn; no gba */
+     488, /* Grn Apricorn; no gba */
+     489, /* Pnk Apricorn; no gba */
+     490, /* Wht Apricorn; no gba */
+     491, /* Blk Apricorn; no gba */
+     492, /* Fast Ball; no gba */
+     493, /* Level Ball; no gba */
+     494, /* Lure Ball; no gba */
+     495, /* Heavy Ball; no gba */
+     496, /* Love Ball; no gba */
+     497, /* Friend Ball; no gba */
+     498, /* Moon Ball; no gba */
+     499, /* Sport Ball; no gba */
+     500, /* Park Ball; no gba */
+     501, /* Photo Album; no gba */
+     502, /* GB Sounds; no gba */
+     503, /* Tidal Bell; no gba */
+     504, /* RageCandyBar; no gba */
+     505, /* Data Card 01; no gba */
+     506, /* Data Card 02; no gba */
+     507, /* Data Card 03; no gba */
+     508, /* Data Card 04; no gba */
+     509, /* Data Card 05; no gba */
+     510, /* Data Card 06; no gba */
+     511, /* Data Card 07; no gba */
+     512, /* Data Card 08; no gba */
+     513, /* Data Card 09; no gba */
+     514, /* Data Card 10; no gba */
+     515, /* Data Card 11; no gba */
+     516, /* Data Card 12; no gba */
+     517, /* Data Card 13; no gba */
+     518, /* Data Card 14; no gba */
+     519, /* Data Card 15; no gba */
+     520, /* Data Card 16; no gba */
+     521, /* Data Card 17; no gba */
+     522, /* Data Card 18; no gba */
+     523, /* Data Card 19; no gba */
+     524, /* Data Card 20; no gba */
+     525, /* Data Card 21; no gba */
+     526, /* Data Card 22; no gba */
+     527, /* Data Card 23; no gba */
+     528, /* Data Card 24; no gba */
+     529, /* Data Card 25; no gba */
+     530, /* Data Card 26; no gba */
+     531, /* Data Card 27; no gba */
+     532, /* Jade Orb; no gba */
+     533, /* Lock Capsule; no gba */
+     534, /* Red Orb; no gba */
+     535, /* Blue Orb; no gba */
+     536, /* Enigma Stone; no gba */
 };
 
-#define MMO_ITEM_SHARED_COUNT 443
+#define MMO_ITEM_SHARED_COUNT 512
 
 /* Three numberings, one Potion. Wire is region-5 + engine id.
  * gba 13 is a Dusk Ball in this engine. */

@@ -8,8 +8,10 @@
 #include <string.h>
 
 #include "hud_channel.h"
+#include "status_channel.h"
 #include "view_ui.h"
 #include "view_ui_game.h"
+#include "view_ui_skin.h"
 #include "view_ui_theme.h"
 
 static int failures;
@@ -405,7 +407,11 @@ static void test_bar_table(void)
 {
     static const char *const order[VIEW_UI_BAR_N] = {
         "Bag", "Trainer", "Community", "PvP", "Pokedex",
-        "Egg Incubators", "Trade", "Mail", "Gift Shop", "Menu"
+        "Egg Incubators", "Trade", "Mail", "Gift Shop", "Poketch",
+#if OPENMMO_PIN_DEV_FEATURES
+        "Pokegear",
+#endif
+        "Menu"
     };
     int i, j, ok_order = 1, ok_keys = 1, ok_act = 1;
 
@@ -424,11 +430,21 @@ static void test_bar_table(void)
         if (it->act == VIEW_UI_ACT_WINDOW && view_ui_win_def(it->arg) == NULL)
             ok_act = 0;
     }
-    CHECK(ok_order, "the bar is the official client's ten buttons in the official client's order");
+    CHECK(ok_order, OPENMMO_PIN_DEV_FEATURES
+          ? "the bar is the official client's ten buttons in the official client's order, then the Poketch and the Pokegear before Menu"
+          : "the bar is the official client's ten buttons in the official client's order, then the Poketch, and no Pokegear in a release");
     CHECK(view_ui_bar_item(-1) == NULL &&
               view_ui_bar_item(VIEW_UI_BAR_N) == NULL,
           "and asking past either end answers nothing");
     CHECK(ok_act, "every button names a screen, a popup or a window it has");
+
+    /* The Poketch is the one button that asks the guest for nothing: the
+     * device is already running on the game's own lower screen and this only
+     * says whether the window draws it. Making it a SCREEN command is how it
+     * would quietly become a second UI over the one the game has. */
+    CHECK(view_ui_bar_item(VIEW_UI_BAR_POKETCH)->act == VIEW_UI_ACT_POKETCH &&
+              view_ui_bar_item(VIEW_UI_BAR_POKETCH)->key == 'k',
+          "the Poketch button toggles the window's second screen, on K");
 
     /* One key, one thing: a letter bound twice would fire both. */
     for (i = 0; i < VIEW_UI_BAR_N; i++) {
@@ -489,6 +505,204 @@ static void test_bar_place(void)
     CHECK(ok_hit, "a click in a button is that button, and nowhere else is");
 }
 
+/* Offline the same bar carries only the buttons that need nobody: Bag,
+ * Trainer, Pokedex, the Poketch, the two notices and the Menu. The four that
+ * would have to ask a server are not drawn, not clickable and have no key,
+ * and every property the strip had still holds over what is left. */
+/* The game menu, which offline is where a player goes looking for the one
+ * thing they cannot do without: saving. */
+static void test_menu_offline(void)
+{
+    const struct view_ui_menu_def *d = view_ui_menu_def(VIEW_UI_MENU_GAME);
+    int i, save = -1, cont = -1, inst = -1, quit = -1, party = -1;
+    int ok_on = 1, shown_off = 0;
+
+    printf("the game menu offline:\n");
+    CHECK(d != NULL && d->n > 0, "the menu has rows");
+    if (d == NULL)
+        return;
+    for (i = 0; i < d->n; i++) {
+        if (strcmp(d->item[i].label, "Save") == 0) save = i;
+        else if (strcmp(d->item[i].label, "Continue Offline") == 0) cont = i;
+        else if (strcmp(d->item[i].label, "Instance Info") == 0) inst = i;
+        else if (strcmp(d->item[i].label, "Exit") == 0) quit = i;
+        else if (strcmp(d->item[i].label, "Party") == 0) party = i;
+    }
+    CHECK(save >= 0 && cont >= 0 && inst >= 0 && quit >= 0 && party >= 0,
+          "Save, Party, Continue Offline, Instance Info and Exit are all on it");
+    if (save < 0 || cont < 0 || inst < 0 || quit < 0 || party < 0)
+        return;
+    CHECK(save < party, "Save is the first row, where a player looks");
+
+    view_ui_offline_set(0);
+    for (i = 0; i < d->n; i++)
+        if (i != save && !view_ui_menu_row_shown(VIEW_UI_MENU_GAME, i))
+            ok_on = 0;
+    CHECK(ok_on && !view_ui_menu_row_shown(VIEW_UI_MENU_GAME, save),
+          "online every row but Save is on it, and Save is not");
+
+    view_ui_offline_set(1);
+    CHECK(view_ui_menu_row_shown(VIEW_UI_MENU_GAME, save),
+          "offline Save is there");
+    CHECK(!view_ui_menu_row_shown(VIEW_UI_MENU_GAME, cont),
+          "and Continue Offline is not, because it is the online half of this");
+    CHECK(!view_ui_menu_row_shown(VIEW_UI_MENU_GAME, inst),
+          "nor Instance Info, which is a shard");
+    CHECK(view_ui_menu_row_shown(VIEW_UI_MENU_GAME, party)
+              && view_ui_menu_row_shown(VIEW_UI_MENU_GAME, quit),
+          "the party and the way out stay");
+    for (i = 0; i < d->n; i++)
+        if (view_ui_menu_row_shown(VIEW_UI_MENU_GAME, i))
+            shown_off++;
+    CHECK(shown_off == 4, "four rows offline: Save, Party, Settings, Exit");
+
+    /* A hidden row keeps its index and takes no floor: the popup is as tall as
+     * what is on it, and nothing can click through to a row that is not. */
+    {
+        struct openmmo_rect canvas = { 0, 0, 1280, 720 };
+        struct openmmo_rect anchor = { 600, 690, 80, 24 };
+        struct view_ui_menu_layout off, on;
+
+        view_ui_menu_place(&canvas, &anchor, VIEW_UI_MENU_GAME,
+                           measure6, NULL, &off);
+        view_ui_offline_set(0);
+        view_ui_menu_place(&canvas, &anchor, VIEW_UI_MENU_GAME,
+                           measure6, NULL, &on);
+        view_ui_offline_set(1);
+        CHECK(off.n == on.n, "the row ids do not move between the two");
+        CHECK(off.box.h < on.box.h,
+              "and the offline popup is the shorter of the two");
+        CHECK(view_ui_menu_hit(&off, anchor.x + 4,
+                               off.row[cont].y + 1) != cont,
+              "a hidden row cannot be hit");
+        CHECK(off.row[save].h > 0 && off.row[cont].h == 0,
+              "it has no height at all, and the row that is there does");
+    }
+    view_ui_offline_set(0);
+}
+
+static void test_bar_offline(void)
+{
+    static const int gone[] = {
+        VIEW_UI_BAR_COMMUNITY, VIEW_UI_BAR_PVP,
+        VIEW_UI_BAR_TRADE, VIEW_UI_BAR_MAIL,
+        /* Both of these are only ever a sentence about an account. */
+        VIEW_UI_BAR_INCUBATOR, VIEW_UI_BAR_SHOP
+    };
+    int i, k, g;
+    int ok_shown = 1, ok_inside = 1, ok_order = 1, ok_hit = 1, ok_narrow = 1;
+
+    for (k = 0; k < VIEW_UI_BAR_N; k++)
+        if (!view_ui_bar_shown(k))
+            ok_shown = 0;
+    CHECK(ok_shown, "with a server behind it every button is on the bar");
+
+    view_ui_offline_set(1);
+    CHECK(view_ui_offline(), "the window can be told there is no server");
+    ok_shown = 1;
+    for (g = 0; g < (int)(sizeof gone / sizeof gone[0]); g++)
+        if (view_ui_bar_shown(gone[g]))
+            ok_shown = 0;
+    CHECK(ok_shown, "Community, PvP, Trade, Mail, Eggs and the Shop come off it");
+    ok_shown = view_ui_bar_shown(VIEW_UI_BAR_BAG)
+        && view_ui_bar_shown(VIEW_UI_BAR_TRAINER)
+        && view_ui_bar_shown(VIEW_UI_BAR_DEX)
+        && view_ui_bar_shown(VIEW_UI_BAR_POKETCH)
+        && view_ui_bar_shown(VIEW_UI_BAR_MENU);
+    CHECK(ok_shown, "and the game's own screens stay: Bag, Trainer, Pokedex,"
+                    " the Poketch and the Menu");
+
+    for (i = 0; i < WIN_N; i++) {
+        struct openmmo_rect c = win_canvas(i);
+        struct view_ui_bar_layout L;
+        int prev = -1;
+
+        view_ui_bar_place(&c, NULL, NULL, &L);
+        if (!rect_inside(&L.bar, &c))
+            ok_inside = 0;
+        for (k = 0; k < VIEW_UI_BAR_N; k++) {
+            if (!rect_inside(&L.btn[k], &L.bar))
+                ok_inside = 0;
+            if (!view_ui_bar_shown(k)) {
+                /* No width is what makes it unhittable, view_ui_hit
+                 * refuses a rect narrower than a pixel, so this is the
+                 * property, not the drawing. */
+                if (L.btn[k].w != 0)
+                    ok_narrow = 0;
+                if (view_ui_bar_hit(&L, L.btn[k].x, L.bar.y + L.bar.h / 2)
+                    == k)
+                    ok_hit = 0;
+                continue;
+            }
+            if (prev >= 0 && L.btn[k].x < L.btn[prev].x + L.btn[prev].w)
+                ok_order = 0;
+            prev = k;
+            if (L.btn[k].w > 0 && L.btn[k].h > 0 &&
+                view_ui_bar_hit(&L, mid_x(&L.btn[k]), mid_y(&L.btn[k])) != k)
+                ok_hit = 0;
+        }
+    }
+    CHECK(ok_inside, "the shorter bar and its buttons stay inside the canvas");
+    CHECK(ok_order, "what is left still runs left to right without overlapping");
+    CHECK(ok_narrow, "a button that is off the bar is placed with no width");
+    CHECK(ok_hit, "so a click where one used to be hits nothing");
+
+    /*
+     * And it gets the whole floor. There is no chat box offline, the element is never built
+     * into the layer, so the bar that was still leaving room for one lost about half the
+     * window and printed short labels on a shape with room for the full ones.
+     */
+    {
+        struct openmmo_rect c = { 0, 0, 856, 480 };
+        struct view_ui_bar_layout L;
+        struct view_ui_chat_layout C;
+
+        view_ui_chat_place(&c, &C);
+        view_ui_bar_place(&c, NULL, NULL, &L);
+        CHECK(L.bar.x < C.box.x + C.box.w,
+              "offline the bar may reach across where the chat box would be");
+        CHECK(!L.shortened,
+              "and prints its full labels where the floor has room for them");
+        view_ui_offline_set(0);
+        view_ui_bar_place(&c, NULL, NULL, &L);
+        CHECK(L.bar.x >= C.box.x + C.box.w,
+              "with a chat box on that floor the bar still stops short of it");
+        view_ui_offline_set(1);
+    }
+    view_ui_offline_set(0);
+}
+
+/* Whether the bar is drawn at all, which is the same question as whether its
+ * keys answer, K among them, the one that hides and restores the touch
+ * screen. Online it is the session's state; offline the state is DISCONNECTED
+ * for the whole run and the field is what says so instead. */
+static void test_bar_live(void)
+{
+    struct openmmo_hud_snap s;
+
+    memset(&s, 0, sizeof s);
+    CHECK(!view_ui_bar_live(NULL), "no snapshot at all is not a live bar");
+
+    s.net.state = OPENMMO_ST_IN_GAME;
+    s.lower = OPENMMO_HUD_LOWER_GUEST;
+    CHECK(view_ui_bar_live(&s), "in the world the bar is up");
+    s.net.state = OPENMMO_ST_JOINING_GAME;
+    CHECK(!view_ui_bar_live(&s), "on the way in it is not");
+    s.net.state = OPENMMO_ST_DISCONNECTED;
+    CHECK(!view_ui_bar_live(&s), "and with no session there is nothing to draw");
+
+    view_ui_offline_set(1);
+    s.lower = OPENMMO_HUD_LOWER_POKETCH;
+    CHECK(view_ui_bar_live(&s),
+          "offline a settled field is what puts it up, not the session");
+    s.lower = OPENMMO_HUD_LOWER_GUEST;
+    CHECK(!view_ui_bar_live(&s),
+          "and the title, a battle and the Underground take it down again");
+    view_ui_offline_set(0);
+    CHECK(!view_ui_bar_live(&s),
+          "with a server behind it the field alone is not enough");
+}
+
 static void test_menu_place(void)
 {
     int i, m, ok_inside = 1, ok_above = 1, ok_hit = 1;
@@ -501,7 +715,7 @@ static void test_menu_place(void)
         for (m = VIEW_UI_MENU_NONE + 1; m < VIEW_UI_MENU_N; m++) {
             const struct view_ui_menu_def *d = view_ui_menu_def(m);
             struct view_ui_menu_layout M;
-            int r;
+            int r, first;
 
             view_ui_menu_place(&c, &L.btn[VIEW_UI_BAR_MENU], m, NULL, NULL,
                                &M);
@@ -521,7 +735,15 @@ static void test_menu_place(void)
             }
             if (M.n != d->n)
                 ok_hit = 0;
+            /* Shown rows only. A row the window is not drawing has an empty
+             * rectangle by design, which is neither inside anything nor
+             * hittable, and that is the whole point of it. */
+            first = -1;
             for (r = 0; r < M.n; r++) {
+                if (!view_ui_menu_row_shown(m, r))
+                    continue;
+                if (first < 0)
+                    first = r;
                 if (!rect_inside(&M.row[r], &M.box))
                     ok_inside = 0;
                 if (view_ui_menu_hit(&M, mid_x(&M.row[r]),
@@ -530,7 +752,7 @@ static void test_menu_place(void)
             }
             /* The official client's menupopup has no title band: the first row starts at
              * the popup's own border and nothing above it answers a click. */
-            if (M.n > 0 && M.row[0].y - M.box.y > M.pad)
+            if (first >= 0 && M.row[first].y - M.box.y > M.pad)
                 ok_hit = 0;
         }
     }
@@ -560,11 +782,15 @@ static void test_menu_defs(void)
      * still ends the game, which is the part that has to stay true.
      */
     d = view_ui_menu_def(VIEW_UI_MENU_GAME);
-    ok = d != NULL && d->n == 7 && strcmp(d->item[0].label, "Party") == 0 &&
-         strcmp(d->item[4].label, "Instance Info") == 0 &&
-         strcmp(d->item[6].label, "Exit") == 0 &&
-         d->item[6].act == VIEW_UI_ACT_QUIT;
-    CHECK(ok, "Menu is the official client's list without Logout, and Exit still ends it");
+    ok = d != NULL && d->n == 9 && strcmp(d->item[0].label, "Save") == 0 &&
+         strcmp(d->item[1].label, "Party") == 0 &&
+         strcmp(d->item[5].label, "Instance Info") == 0 &&
+         strcmp(d->item[7].label, "Continue Offline") == 0 &&
+         d->item[7].act == VIEW_UI_ACT_EXPORT &&
+         strcmp(d->item[8].label, "Exit") == 0 &&
+         d->item[8].act == VIEW_UI_ACT_QUIT;
+    CHECK(ok, "Menu is the official client's list without Logout, plus the offline row, and"
+              " Exit still ends it");
     {
         int i, found = 0;
 
@@ -1012,9 +1238,30 @@ static void test_theme_png(void)
         9,8,7,255, 6,5,4,255,
         3,2,1,255, 250,251,252,255
     };
+    /* A 2x2 8-bit palette with a tRNS on its second entry, one row on none
+     * and one on sub: the launcher's wallpaper is a palette image. */
+    static const unsigned char pal_png[] = {
+        0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a,0x00,0x00,0x00,0x0d,0x49,0x48,
+        0x44,0x52,0x00,0x00,0x00,0x02,0x00,0x00,0x00,0x02,0x08,0x03,0x00,0x00,
+        0x00,0x45,0x68,0xfd,0x16,0x00,0x00,0x00,0x09,0x50,0x4c,0x54,0x45,0xff,
+        0x00,0x00,0x00,0xff,0x00,0x00,0x00,0xff,0x2d,0x4a,0xcd,0x8a,0x00,0x00,
+        0x00,0x02,0x74,0x52,0x4e,0x53,0xff,0x80,0x08,0x0f,0xb3,0x6a,0x00,0x00,
+        0x00,0x0e,0x49,0x44,0x41,0x54,0x78,0x9c,0x63,0x60,0x60,0x64,0x64,0xfa,
+        0x07,0x00,0x01,0x0f,0x01,0x03,0xbd,0xe1,0xd3,0x51,0x00,0x00,0x00,0x00,
+        0x49,0x45,0x4e,0x44,0xae,0x42,0x60,0x82
+    };
+    static const unsigned char pal_px[16] = {
+        255,0,0,255, 0,255,0,128,
+        0,0,255,255, 255,0,0,255
+    };
     unsigned char *px;
     int w = 0, h = 0;
 
+    px = view_ui_png(pal_png, sizeof pal_png, &w, &h);
+    CHECK(px != NULL && w == 2 && h == 2 &&
+              memcmp(px, pal_px, sizeof pal_px) == 0,
+          "a palette PNG expands through PLTE and tRNS, filtered as one byte a texel");
+    free(px);
     px = view_ui_png(rgba_png, sizeof rgba_png, &w, &h);
     CHECK(px != NULL && w == 3 && h == 3 &&
               memcmp(px, rgba_px, sizeof rgba_px) == 0,
@@ -1049,6 +1296,108 @@ static void test_theme_read(void)
           "and no dir at all is the same answer, not a crash");
 }
 
+static void test_theme_source(void)
+{
+    struct view_ui_th_pair cells[VIEW_UI_TH_CELLS];
+    int id, inside = 1, foot = 1, n, w = 0, h = 0;
+
+    for (id = 0; id < VIEW_UI_TH_N; id++) {
+        int i, sheet, sw = 0, sh = 0;
+
+        n = view_ui_theme_source(id, cells, &w, &h);
+        sheet = view_ui_theme_sheet(id);
+        view_ui_sheet_min(sheet, &sw, &sh);
+        if (n < 1 || w < 1 || h < 1) {
+            foot = 0;
+            continue;
+        }
+        for (i = 0; i < n; i++) {
+            const struct openmmo_rect *s = &cells[i].src;
+            const struct openmmo_rect *d = &cells[i].dst;
+
+            if (s->w < 1 || s->h < 1 || s->x < 0 || s->y < 0 ||
+                s->x + s->w > sw || s->y + s->h > sh)
+                inside = 0;
+            if (d->x < 0 || d->y < 0 || d->x + s->w > w || d->y + s->h > h)
+                foot = 0;
+        }
+    }
+    CHECK(inside, "every surface's texels are inside the sheet it is cut from");
+    CHECK(foot, "and every cell sits inside its surface's own footprint");
+    n = view_ui_theme_source(VIEW_UI_TH_PANEL, cells, &w, &h);
+    CHECK(n == 9 && w == 42 && h == 42,
+          "the popup background is the 42x42 nine-patch the table names");
+    n = view_ui_theme_source(VIEW_UI_TH_FRAME, cells, &w, &h);
+    CHECK(n == 12 && w == 23 && h == 40,
+          "and the window chrome is twelve cells over 23x40");
+}
+
+static void test_skin(void)
+{
+    struct view_ui_theme a, b;
+    struct view_ui_th_pair cells[VIEW_UI_TH_CELLS];
+    int i, id, sized = 1, painted = 1, same = 1;
+
+    CHECK(view_ui_skin_make(&a) && a.ready,
+          "the window paints a theme of its own when there is no art to read");
+    for (i = 0; i < VIEW_UI_SHEET_N; i++) {
+        int w = 0, h = 0;
+
+        view_ui_sheet_min(i, &w, &h);
+        if (a.sheet[i].rgba == NULL || a.sheet[i].w != w || a.sheet[i].h != h)
+            sized = 0;
+    }
+    CHECK(sized, "on sheets the size the region table was measured against");
+    /* A cell still at the calloc's zero alpha is a hole, and a hole is a
+     * surface the window would draw as nothing at all. */
+    for (id = 0; id < VIEW_UI_TH_N; id++) {
+        int n = view_ui_theme_source(id, cells, NULL, NULL);
+        int sheet = view_ui_theme_sheet(id), c, hit = 0;
+
+        for (c = 0; c < n; c++) {
+            const struct openmmo_rect *s = &cells[c].src;
+            int x, y;
+
+            for (y = 0; y < s->h; y++)
+                for (x = 0; x < s->w; x++)
+                    if (a.sheet[sheet].rgba[((size_t)(s->y + y)
+                            * (size_t)a.sheet[sheet].w
+                            + (size_t)(s->x + x)) * 4u + 3u] != 0)
+                        hit = 1;
+        }
+        if (!hit)
+            painted = 0;
+    }
+    CHECK(painted, "and every one of them has art in it, not a hole");
+    CHECK(view_ui_skin_make(&b), "painting the same sheets twice");
+    for (i = 0; i < VIEW_UI_SHEET_N; i++) {
+        int w = 0, h = 0;
+
+        view_ui_sheet_min(i, &w, &h);
+        if (a.sheet[i].rgba == NULL || b.sheet[i].rgba == NULL ||
+            memcmp(a.sheet[i].rgba, b.sheet[i].rgba,
+                   (size_t)w * (size_t)h * 4u) != 0)
+            same = 0;
+    }
+    CHECK(same, "gives the same bytes, so the look is a thing a test can pin");
+    view_ui_theme_free(&a);
+    view_ui_theme_free(&b);
+    {
+        struct view_ui_th_pair in[VIEW_UI_TH_CELLS];
+        struct view_ui_th_pair row[VIEW_UI_TH_CELLS];
+        int ni = view_ui_theme_source(VIEW_UI_TH_INPUT, in, NULL, NULL);
+        int nr = view_ui_theme_source(VIEW_UI_TH_ROW, row, NULL, NULL);
+        int c, agree = ni == nr && ni > 0;
+
+        for (c = 0; c < ni && c < nr; c++)
+            if (in[c].src.x != row[c].src.x || in[c].src.y != row[c].src.y ||
+                in[c].src.w != row[c].src.w || in[c].src.h != row[c].src.h)
+                agree = 0;
+        CHECK(agree, "a table row is cut from the input box's own texels,"
+                     " which is why one painter has to answer for both");
+    }
+}
+
 int view_ui_tests_run(void)
 {
     printf("view ui\n");
@@ -1066,6 +1415,9 @@ int view_ui_tests_run(void)
     test_scale();
     test_bar_table();
     test_bar_place();
+    test_bar_offline();
+    test_menu_offline();
+    test_bar_live();
     test_menu_place();
     test_menu_defs();
     test_notice_text();
@@ -1080,5 +1432,7 @@ int view_ui_tests_run(void)
     test_theme_table();
     test_theme_png();
     test_theme_read();
+    test_theme_source();
+    test_skin();
     return failures;
 }

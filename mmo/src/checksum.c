@@ -74,6 +74,15 @@ size_t mmo_checksum_calc(u8 size, const u8 *key, u32 *round,
     return 0; /* unsupported profile: emit no tag rather than a wrong one */
 }
 
+/* Compare two tags without letting the time it takes say how much of the tag was right. */
+static int tags_equal(const u8 *a, const u8 *b, size_t n)
+{
+    u8 diff = 0;
+    for (size_t i = 0; i < n; i++)
+        diff |= (u8)(a[i] ^ b[i]);
+    return diff == 0;
+}
+
 int mmo_checksum_verify(u8 size, const u8 *key, u32 *round,
                         const u8 *data, size_t n,
                         const u8 *tag, size_t taglen)
@@ -93,5 +102,5 @@ int mmo_checksum_verify(u8 size, const u8 *key, u32 *round,
 
     u8 want[MMO_CHECKSUM_MAX];
     mmo_checksum_calc(size, key, round, data, n, want);
-    return memcmp(want, tag, expect) == 0 ? 0 : -1;
+    return tags_equal(want, tag, expect) ? 0 : -1;
 }

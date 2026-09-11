@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="60" viewBox="0 0 900 60">
+<!-- The far cloud band. One horizontally tileable strip: every shape sits well
+     inside the 900px box, so the seam is bare sky and the loop is invisible.
+     style.css slides it sideways; nothing here animates, so the browser
+     rasterises the tile once. Its two companions are clouds-mid.svg and
+     clouds-front.svg.
+
+     The soft edges are load-bearing, not decorative. A drifting band is
+     rasterised once and then slid about by the compositor, so a fractional
+     offset resamples it: a hard edge comes out crisp when the offset lands on
+     a whole pixel and blurred across two when it lands halfway, and every edge
+     in the sky then pulses once per pixel travelled. Measured at 37% to 41% of
+     the edge energy without this filter, 4% to 6% with it. Take it out and the
+     clouds shimmer. -->
+<defs>
+<filter id="soft" color-interpolation-filters="sRGB">
+<feGaussianBlur stdDeviation="0.9"/>
+</filter>
+<g id="c" fill="#fff">
+<rect x="30" y="-24" width="180" height="24"/>
+<circle cx="34" cy="-16" r="16"/>
+<circle cx="52" cy="-34" r="30"/>
+<circle cx="100" cy="-52" r="42"/>
+<circle cx="126" cy="-62" r="26"/>
+<circle cx="150" cy="-40" r="34"/>
+<circle cx="188" cy="-24" r="22"/>
+<circle cx="204" cy="-14" r="14"/>
+</g>
+</defs>
+<g filter="url(#soft)">
+<use href="#c" transform="translate(40 40) scale(0.32)" opacity="0.34"/>
+<use href="#c" transform="translate(230 52) scale(0.26)" opacity="0.28"/>
+<use href="#c" transform="translate(400 34) scale(0.38)" opacity="0.38"/>
+<use href="#c" transform="translate(560 56) scale(0.24)" opacity="0.26"/>
+<use href="#c" transform="translate(690 44) scale(0.30)" opacity="0.32"/>
+<use href="#c" transform="translate(800 38) scale(0.22)" opacity="0.30"/>
+</g>
+</svg>

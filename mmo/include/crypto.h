@@ -1,4 +1,4 @@
-/* The symmetric crypto the MonMMO transport envelope needs. */
+/* The symmetric crypto the OpenMMO transport envelope needs. */
 #ifndef MMO_CRYPTO_H
 #define MMO_CRYPTO_H
 

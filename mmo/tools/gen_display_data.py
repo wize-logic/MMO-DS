@@ -90,6 +90,24 @@ def load_json(path):
         return json.load(fh)
 
 
+def constant_name(text):
+    """A display name as the constant the enum entry carries, the same rule
+    mmo/tools/gen5_tables.py writes codegen/gen5/enums.json with."""
+    out = "".join(c if c.isalnum() else "_" for c in text.upper())
+    return "_".join(part for part in out.split("_") if part)
+
+
+def gen5_ability_text():
+    """(id, {name, description}) for the abilities past the engine's, in id order."""
+    path = os.path.join(REPO, "codegen/gen5/enums.json")
+    if not os.path.isfile(path):
+        die("no %s; run mmo/tools/gen5_tables.py --rom <Black> first" % path)
+    text = load_json(path).get("ability_text")
+    if not text:
+        die("%s has no ability_text block" % path)
+    return [(int(k), text[k]) for k in sorted(text, key=int)]
+
+
 def collect_engine(engine):
     types = read_enum(os.path.join(engine, "generated/pokemon_types.txt"), "TYPE_", "NUM_POKEMON_TYPES")
     type_id = {name: i for i, name in enumerate(types)}
@@ -150,6 +168,21 @@ def collect_engine(engine):
         species_t2.append(type_id[pair[1]])
         last_real = i
 
+    # The 41 abilities Gen 5 added. The engine's own three tables stop at Bad
+    # Dreams, 123, and the ported species carry ids past it, so without this
+    # every Gen 5 ability was an id mmo_display_ability_name refused by name
+    # ("no name in the engine's 124 or the official client overlay"). The text is read out
+    # of a Black cartridge by tools/gen5_tables.py and committed under
+    # codegen/gen5, the same door the server's own Gen 5 tables come through, so
+    # this generator still runs on the engine tree alone.
+    for aid, text in gen5_ability_text():
+        if aid != len(abilities):
+            die("codegen/gen5 names ability %d and this table is %d long; the two "
+                "numberings have to meet exactly" % (aid, len(abilities)))
+        abilities.append("ABILITY_" + constant_name(text["name"]))
+        ability_names.append(text["name"])
+        ability_descs.append(text["description"])
+
     return {
         "abilities": abilities,
         "ability_names": ability_names,
@@ -176,7 +209,9 @@ def emit_data(data, out_path):
     w(" *")
     w(" * The engine's ability, move and species display tables. Ability names")
     w(" * and descriptions come from res/text/ability_{names,descriptions}.json,")
-    w(" * in generated/abilities.txt order. Move names, descriptions and types")
+    w(" * in generated/abilities.txt order, and past the engine's last one from")
+    w(" * codegen/gen5/enums.json, which mmo/tools/gen5_tables.py reads out of a")
+    w(" * Black cartridge. Move names, descriptions and types")
     w(" * come from res/moves/<name>/data.json, in generated/moves.txt order")
     w(" * stopping before MAX_MOVES. Species typings come from")
     w(" * res/pokemon/<name>/data.json, in generated/species.txt order, skipping")

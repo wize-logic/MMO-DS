@@ -2,7 +2,11 @@ package de.fiereu.openmmo.net.game.packets
 
 import de.fiereu.bytecodec.*
 
-/** How many events are reserved up front. The frame is the real bound. */
+/**
+ * How many events are reserved up front. The count is the peer's, and every event costs at least
+ * four bytes, so the frame is the real bound; this only stops a claimed 32,767 from being reserved
+ * for a packet that carries two.
+ */
 private const val MAX_RESERVED_EVENTS = 256
 
 data class InputEventSample(

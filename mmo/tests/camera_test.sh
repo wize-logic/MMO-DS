@@ -38,24 +38,28 @@ says "the page still keeps official as the default" \
 says "the page still names the four-chunk load" "four 32"
 says "the page still files outdoor extra columns as filled" "Outdoor geometry fills them"
 
-# The patch is the distance lever and nothing else: it may scale the
+# The stance is the distance lever and nothing else: it may scale the
 # distance and slide the far plane, and it may not reach the angles,
-# FOVs or near planes the old decision holds in place.
+# FOVs or near planes the old decision holds in place. The lever itself is a
+# mod source; the patch is the two calls into it.
 CAMPATCH="$PATCHDIR/field_camera.c.patch"
-if [ ! -f "$CAMPATCH" ]; then
-    bad "the field-camera patch exists" "no $CAMPATCH"
+CAMSRC="$ROOT/mods/openmmo/src/openmmo_camera.c"
+if [ ! -f "$CAMPATCH" ] || [ ! -f "$CAMSRC" ]; then
+    bad "the field-camera patch and its mod source exist" "no $CAMPATCH or $CAMSRC"
 else
-    ok "the field-camera patch exists"
-    if grep -Fq 'openmmo_camera_distance_percent' "$CAMPATCH"; then
+    ok "the field-camera patch and its mod source exist"
+    if grep -Fq 'openmmo_camera_scale_distance' "$CAMPATCH" \
+       && grep -Fq 'openmmo_camera_distance_percent' "$CAMSRC"; then
         ok "and it is gated on the host's percent"
     else
         bad "and it is gated on the host's percent" \
-            "$CAMPATCH never calls openmmo_camera_distance_percent"
+            "$CAMPATCH never calls openmmo_camera_scale_distance, or" \
+            "$CAMSRC never reads openmmo_camera_distance_percent"
     fi
-    if grep -E '^\+' "$CAMPATCH" \
+    if { grep -E '^\+' "$CAMPATCH"; cat "$CAMSRC"; } \
        | grep -Eq '\.verticalFov =|\.cameraAngle =|\.nearPlaneDist =|FX32_CONST|F32_DEG_TO_IDX|Camera_SetFOV|Camera_SetAngle'; then
         bad "and it touches only distance and far plane" \
-            "$CAMPATCH adds a line that reaches the angle, FOV or near plane"
+            "a line in $CAMPATCH or $CAMSRC reaches the angle, FOV or near plane"
     else
         ok "and it touches only distance and far plane"
     fi

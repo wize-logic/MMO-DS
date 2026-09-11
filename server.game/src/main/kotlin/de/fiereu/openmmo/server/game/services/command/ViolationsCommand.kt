@@ -3,19 +3,17 @@ package de.fiereu.openmmo.server.game.services.command
 import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.server.game.services.ViolationLog
 import de.fiereu.openmmo.server.game.storage.CharacterStore
+import de.fiereu.openmmo.server.game.storage.ViolationRepository
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * What the server has refused lately, and who it refused. [ViolationLog] does not act on its own
- * counters, so this is what makes them worth keeping: an operator asks, reads a tally against a
- * name, and decides.
- */
+/** What the server has refused lately, and who it refused. */
 @Singleton
 class ViolationsCommand
 @Inject
 constructor(
     private val violations: ViolationLog,
+    private val durable: ViolationRepository,
     private val characters: CharacterStore,
 ) : ChatCommand {
   override val name = "violations"
@@ -45,6 +43,15 @@ constructor(
               counts.entries
                   .sortedByDescending { it.value }
                   .joinToString { "${it.key}=${it.value}" })
+    }
+    // And the part the ring cannot answer. Everything above turns over in ten minutes and was
+    // empty at the last restart; this is the same refusals counted since the account first made
+    // one, which is the question anybody asking about a player is actually asking.
+    val heaviest = durable.worst(wanted)
+    if (heaviest.isEmpty()) return
+    ctx.reply("Since the beginning, heaviest first:")
+    for (row in heaviest) {
+      ctx.reply("${nameOf(row.characterId)} ${row.kind} x${row.total}, last: ${row.lastDetail}")
     }
   }
 

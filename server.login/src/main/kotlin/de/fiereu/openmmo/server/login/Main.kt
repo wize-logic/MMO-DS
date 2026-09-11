@@ -17,6 +17,9 @@ fun main(args: Array<String>) {
   val config = ConfigLoader.load()
   val component = DaggerLoginServerComponent.factory().create(config)
   component.databaseBootstrap().migrate()
+  // Before the port opens, for the same reason: an update feed this server was told to hold clients
+  // to and cannot read is a refusal that would otherwise never happen, silently.
+  component.clientRevisionFloor()
   runBlocking {
     // After the migrations, so the dev seed's cleanup still matches the rows it names by their old
     // hash, and before the port opens, so nothing serves a table that is still its own credential.
@@ -83,11 +86,37 @@ private fun createUser(component: LoginServerComponent, username: String, passwo
 }
 
 /**
- * Hand a role out, or take it back. The first account on a server is a developer; every one after
- * it is a plain player until this is used.
- *
- * It takes effect on that account's next join, because the game server learns roles from the join
- * ticket and that is signed at the moment it is asked for.
+ * Sign one account out everywhere. Until the tokens became rows there was no way to do this at all:
+ * a signed one was good until it expired, and the column meant to withdraw them was never written.
+ */
+private fun revokeTokens(component: LoginServerComponent, username: String) {
+  val gone = runBlocking {
+    val id = component.users().getUserId(username)
+    if (id == null) null else component.rememberMeTokens().revokeAll(id)
+  }
+  if (gone == null) {
+    System.err.println("$REVOKE_TOKENS: no account called '$username'")
+    exitProcess(1)
+  }
+  println("revoked $gone remembered login(s) for '$username'")
+}
+
+/**
+ * Empty this server's database and build the schema again, which is the state a fresh install is
+ * in: no accounts, so the next one created is a developer again.
+ */
+private fun resetDatabase(component: LoginServerComponent, confirm: String, dbName: String) {
+  if (confirm != CONFIRM) {
+    System.err.println("$RESET_DB deletes every account in '$dbName'. Add $CONFIRM if you mean it.")
+    exitProcess(2)
+  }
+  component.databaseBootstrap().reset()
+  println("'$dbName' is empty. The next account created will be a developer.")
+}
+
+/**
+ * Hand a role out, or take it back. The first account on a server is a developer so that somebody
+ * can run the commands at all; every account after it is a plain player until this is used.
  */
 private fun changeRole(
     component: LoginServerComponent,
@@ -114,23 +143,6 @@ private fun changeRole(
   println("'$username' is now: $roles")
 }
 
-/**
- * Empty this server's database and build the schema again, which is the state a fresh install is
- * in: no accounts, so the next one created is a developer again.
- *
- * Asks for [CONFIRM] in as many words rather than prompting, because reset-db.sh runs this too and
- * a script that has to answer a prompt answers it wrongly one day. The caller checks nothing is
- * connected.
- */
-private fun resetDatabase(component: LoginServerComponent, confirm: String, dbName: String) {
-  if (confirm != CONFIRM) {
-    System.err.println("$RESET_DB deletes every account in '$dbName'. Add $CONFIRM if you mean it.")
-    exitProcess(2)
-  }
-  component.databaseBootstrap().reset()
-  println("'$dbName' is empty. The next account created will be a developer.")
-}
-
 /** What one account may do. */
 private fun showRoles(component: LoginServerComponent, username: String) {
   val users = component.users()
@@ -140,17 +152,4 @@ private fun showRoles(component: LoginServerComponent, username: String) {
     exitProcess(1)
   }
   println("'$username': $roles")
-}
-
-/** Sign one account out everywhere, which until the tokens became rows could not be done at all. */
-private fun revokeTokens(component: LoginServerComponent, username: String) {
-  val gone = runBlocking {
-    val id = component.users().getUserId(username)
-    if (id == null) null else component.rememberMeTokens().revokeAll(id)
-  }
-  if (gone == null) {
-    System.err.println("$REVOKE_TOKENS: no account called '$username'")
-    exitProcess(1)
-  }
-  println("revoked $gone remembered login(s) for '$username'")
 }

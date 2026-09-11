@@ -15,12 +15,14 @@
 #include "heap.h"
 #include "list_menu.h"
 #include "render_window.h"
+#include "save_player.h"
 #include "sound_playback.h"
 #include "string_gf.h"
 #include "string_list.h"
 #include "text.h"
 
 #include "../../../include/charcode.h"
+#include "../../../include/endpoint.h"
 #include "../../../include/client.h"
 #include "../../../include/game.h"
 #include "../../../include/hud_channel.h"
@@ -63,6 +65,8 @@ typedef struct {
 
 extern int openmmo_hud_windowed(void);
 extern const struct openmmo_hud_gtl_ask *openmmo_hud_gtl_args(void);
+/* The listing a row verb named, out of the ring slot it rode. */
+extern s64 openmmo_hud_cmd_row_id(int32_t arg);
 
 static openmmo_client *s_client;
 static GtlScreen *s_live;
@@ -77,7 +81,7 @@ static int s_want_sort;
 static mmo_gtl_search s_want_filter;
 static int s_open_sent;
 
-static String *latin1(enum HeapID heap, const char *s)
+static String *utf8_string(enum HeapID heap, const char *s)
 {
     mmo_charcode buf[64];
     String *out = String_Init(64, heap);
@@ -140,7 +144,7 @@ static void say(FieldSystem *fs, GtlScreen *g, const char *text)
 
     if (g->msgStr != NULL)
         String_Free(g->msgStr);
-    g->msgStr = latin1(GTL_HEAP, text);
+    g->msgStr = utf8_string(GTL_HEAP, text);
     if (g->msgStr == NULL)
         return;
     if (!g->msgAdded) {
@@ -197,7 +201,7 @@ static int paint_rows(FieldSystem *fs, GtlScreen *g)
             snprintf(line, sizeof line, "Item %u x%d  $%d",
                      r->item_id, r->quantity, (int)r->price);
         }
-        g->rowStr[n] = latin1(GTL_HEAP, line);
+        g->rowStr[n] = utf8_string(GTL_HEAP, line);
         if (g->rowStr[n] == NULL)
             return 0;
         StringList_AddFromString(g->choices, g->rowStr[n], (u32)i);
@@ -205,17 +209,17 @@ static int paint_rows(FieldSystem *fs, GtlScreen *g)
     }
     snprintf(line, sizeof line, "Next page (%d of %d shown)",
              rows, (int)store->total);
-    g->rowStr[n] = latin1(GTL_HEAP, line);
+    g->rowStr[n] = utf8_string(GTL_HEAP, line);
     StringList_AddFromString(g->choices, g->rowStr[n], (u32)(MMO_GTL_PAGE_ROWS + 0));
     n++;
-    g->rowStr[n] = latin1(GTL_HEAP, "Previous page");
+    g->rowStr[n] = utf8_string(GTL_HEAP, "Previous page");
     StringList_AddFromString(g->choices, g->rowStr[n], (u32)(MMO_GTL_PAGE_ROWS + 1));
     n++;
     snprintf(line, sizeof line, "Showing %s; switch", kind_name(g->kind));
-    g->rowStr[n] = latin1(GTL_HEAP, line);
+    g->rowStr[n] = utf8_string(GTL_HEAP, line);
     StringList_AddFromString(g->choices, g->rowStr[n], (u32)(MMO_GTL_PAGE_ROWS + 2));
     n++;
-    g->rowStr[n] = latin1(GTL_HEAP, "Close");
+    g->rowStr[n] = utf8_string(GTL_HEAP, "Close");
     StringList_AddFromString(g->choices, g->rowStr[n], (u32)(MMO_GTL_PAGE_ROWS + 3));
     n++;
     g->rowCount = n;
@@ -386,7 +390,7 @@ static BOOL gtl_task(FieldTask *task)
 
 void openmmo_gtl_attach(openmmo_client *c)
 {
-    const char *env = getenv("OPENMMO_GTL");
+    const char *env = openmmo_dev_env("OPENMMO_GTL");
 
     s_client = c;
     s_live = NULL;
@@ -407,25 +411,22 @@ void openmmo_gtl_mark_pending(void)
  * engine's own name bank: exact case-insensitive first, then the first
  * prefix hit (the official client's autocomplete matches startsWith). Answers the server
  * dex id, or 0 for a name no species carries. */
-static void string_lower_latin1(const String *src, char *dst, size_t cap)
+static void string_lower_utf8(const String *src, char *dst, size_t cap)
 {
-    uint8_t utf16[96];
-    mmo_charcode_result r;
-    size_t i, n = 0;
+    size_t i;
 
     if (dst == NULL || cap == 0)
         return;
     dst[0] = '\0';
     if (src == NULL)
         return;
-    r = mmo_charcode_to_utf16le(String_GetData(src), utf16, sizeof utf16);
-    for (i = 0; i + 1 < r.written * 2 && n + 1 < cap; i += 2) {
-        unsigned cp = (unsigned)utf16[i] | ((unsigned)utf16[i + 1] << 8);
-        char ch = (cp < 256) ? (char)cp : '?';
-
-        dst[n++] = (ch >= 'A' && ch <= 'Z') ? (char)(ch + 32) : ch;
+    mmo_charcode_to_utf8(String_GetData(src), dst, cap);
+    /* Only the ASCII letters fold, which is the whole of every species name;
+     * a byte above 0x7F is part of a sequence and is left exactly as it is. */
+    for (i = 0; dst[i] != '\0'; i++) {
+        if (dst[i] >= 'A' && dst[i] <= 'Z')
+            dst[i] = (char)(dst[i] + 32);
     }
-    dst[n] = '\0';
 }
 
 static u16 species_by_name(const char *text)
@@ -448,7 +449,7 @@ static u16 species_by_name(const char *text)
 
         if (str == NULL)
             continue;
-        string_lower_latin1(str, have, sizeof have);
+        string_lower_utf8(str, have, sizeof have);
         String_Free(str);
         exact = strcmp(have, want) == 0;
         if (exact || (hit == 0 && strncmp(have, want, want_len) == 0)) {
@@ -471,6 +472,7 @@ void openmmo_gtl_window_cmd(unsigned arg)
     const struct openmmo_hud_gtl_ask *wide = openmmo_hud_gtl_args();
     unsigned verb = arg & 0xFFu;
     int row = (int)((arg >> 8) & 0xFFu);
+    s64 id = openmmo_hud_cmd_row_id((int32_t)arg);
     s32 price = wide != NULL && wide->price > 0 ? wide->price : 0;
     int qty = wide != NULL && wide->qty > 0 ? wide->qty : 1;
 
@@ -509,22 +511,20 @@ void openmmo_gtl_window_cmd(unsigned arg)
         return;
     }
     case OPENMMO_HUD_GTL_BUY:
-        if (row < 0 || row >= g->count) {
-            printf("openmmo: gtl row %d is off the page\n", row);
+        if (id == 0) {
+            printf("openmmo: gtl row %d named no listing\n", row);
             return;
         }
-        printf("openmmo: gtl window buys %d of #%lld\n", qty,
-               (long long)g->row[row].listing_id);
-        openmmo_client_gtl_buy(s_client, g->row[row].listing_id, qty);
+        printf("openmmo: gtl window buys %d of #%lld\n", qty, (long long)id);
+        openmmo_client_gtl_buy(s_client, id, qty);
         break;
     case OPENMMO_HUD_GTL_BACK:
-        if (row < 0 || row >= g->count) {
-            printf("openmmo: gtl row %d is off the page\n", row);
+        if (id == 0) {
+            printf("openmmo: gtl row %d named no listing\n", row);
             return;
         }
-        printf("openmmo: gtl window takes back #%lld\n",
-               (long long)g->row[row].listing_id);
-        openmmo_client_gtl_cancel(s_client, g->row[row].listing_id);
+        printf("openmmo: gtl window takes back #%lld\n", (long long)id);
+        openmmo_client_gtl_cancel(s_client, id);
         break;
     case OPENMMO_HUD_GTL_SELL: {
         const openmmo_party *p = openmmo_client_party(s_client);
@@ -563,8 +563,8 @@ void openmmo_gtl_window_cmd(unsigned arg)
             for (i = 0; i < g->count && n < MMO_GTL_PAGE_ROWS; i++)
                 if (g->row[i].own_unclaimed > 0)
                     ids[n++] = g->row[i].listing_id;
-        } else if (row >= 0 && row < g->count)
-            ids[n++] = g->row[row].listing_id;
+        } else if (id != 0)
+            ids[n++] = id;
         if (n < 1) {
             printf("openmmo: gtl claim with nothing unclaimed\n");
             return;
@@ -574,28 +574,41 @@ void openmmo_gtl_window_cmd(unsigned arg)
         break;
     }
     case OPENMMO_HUD_GTL_REPRICE:
-        if (row < 0 || row >= g->count) {
-            printf("openmmo: gtl row %d is off the page\n", row);
+        if (id == 0) {
+            printf("openmmo: gtl row %d named no listing\n", row);
             return;
         }
-        printf("openmmo: gtl window reprices #%lld to $%d\n",
-               (long long)g->row[row].listing_id, (int)price);
-        openmmo_client_gtl_price(s_client, g->row[row].listing_id, price);
+        printf("openmmo: gtl window reprices #%lld to $%d\n", (long long)id,
+               (int)price);
+        openmmo_client_gtl_price(s_client, id, price);
         break;
     case OPENMMO_HUD_GTL_LOG:
         if (openmmo_client_gtl_log(s_client) != 0)
             printf("openmmo: gtl log ask refused\n");
         return;
     case OPENMMO_HUD_GTL_MARKET: {
-        if (row < 0 || row >= g->quote_count) {
-            printf("openmmo: gtl quote %d is off the strip\n", row);
+        /* The quote strip names an item, not a listing: the server picks the
+         * cheapest asks itself. A budget of nothing falls back to the strip's
+         * own quote for that item, wherever it now sits. */
+        u16 item = (u16)id;
+        s32 budget = price;
+
+        if (item == 0) {
+            printf("openmmo: gtl quote %d named no item\n", row);
             return;
         }
+        if (budget <= 0) {
+            int q;
+
+            for (q = 0; q < g->quote_count; q++)
+                if (g->quote[q].item_id == item) {
+                    budget = g->quote[q].price * qty;
+                    break;
+                }
+        }
         printf("openmmo: gtl window market-buys %d of item %u\n", qty,
-               (unsigned)g->quote[row].item_id);
-        openmmo_client_gtl_market(s_client, g->quote[row].item_id, qty,
-                                  price > 0 ? price
-                                            : g->quote[row].price * qty);
+               (unsigned)item);
+        openmmo_client_gtl_market(s_client, item, qty, budget);
         break;
     }
     default:

@@ -1,4 +1,4 @@
-/* A hermetic, pinned-key stand-in for a MonMMO server. */
+/* A hermetic, pinned-key stand-in for a OpenMMO server. */
 #ifndef MMO_MOCKSERVER_H
 #define MMO_MOCKSERVER_H
 
@@ -36,15 +36,21 @@ typedef struct {
     size_t             nreplies;
 } mmo_mock_server;
 
-/* Initialise the mock for a session using the given checksum profile (16 for the
- * login HMAC-16 profile, 2 for the game CRC-16 profile, the two the client
- * negotiates). Clears any scripted replies. */
+/* The one ClientHello timestamp the mock can answer, and the profiles it can offer. */
+#define MMO_MOCK_HELLO_TS  ((s64)1700000000000LL)
+
+/*
+ * Initialise the mock for a session using the given checksum profile (2, 4, 8, 16 or 32; 16 is
+ * the login profile the servers deploy).
+ */
 void mmo_mock_server_init(mmo_mock_server *m, u8 checksum_size);
 
-/* Append the framed (plaintext) ServerHello to `out`. Constant for a given
- * checksum profile: the mock's fixed ephemeral point, the frozen signature over
- * it, and the profile byte. Call after init, before the client's ClientReady. */
-void mmo_mock_server_hello(mmo_mock_server *m, mmo_wbuf *out);
+/*
+ * Append the framed (plaintext) ServerHello to `out`, answering a ClientHello that carried
+ * `client_timestamp`. Constant for a given checksum profile: the mock's fixed ephemeral point,
+ * the pinned signature over (point, size, timestamp), and the profile byte.
+ */
+int mmo_mock_server_hello(mmo_mock_server *m, mmo_wbuf *out, s64 client_timestamp);
 
 /*
  * Consume the client's ClientReady frame body (opcode included, as mmo_frame_get yields it):

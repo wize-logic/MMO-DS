@@ -16,6 +16,7 @@ import de.fiereu.openmmo.server.game.session.PartnerFollow
 import de.fiereu.openmmo.server.game.session.PlayerState
 import de.fiereu.openmmo.server.game.storage.CharacterStore
 import io.github.oshai.kotlinlogging.KotlinLogging
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -31,7 +32,10 @@ constructor(
 ) {
 
   private val npcEntityIdCounter = AtomicLong(0x1A69000000000000L)
-  private val npcEntityIds = mutableMapOf<String, Long>()
+  // Allocated from whichever session first walks onto the map, so both the map and the allocation
+  // have to be atomic: two players arriving at once must be told the same id for the same npc, and
+  // getOrPut over a plain map is a read and a write with a gap between them.
+  private val npcEntityIds = ConcurrentHashMap<String, Long>()
 
   fun getNpcEntityId(regionId: Int, bankId: Int, mapId: Int, entityIdx: Int): Long? {
     return npcEntityIds[key(regionId, bankId, mapId, entityIdx)]
@@ -128,7 +132,7 @@ constructor(
 
   /** Allocate (or return) the stable entity id for a map npc by its decomp local id. */
   fun entityIdFor(regionId: Int, bankId: Int, mapId: Int, entityIdx: Int): Long =
-      npcEntityIds.getOrPut(key(regionId, bankId, mapId, entityIdx)) {
+      npcEntityIds.computeIfAbsent(key(regionId, bankId, mapId, entityIdx)) {
         npcEntityIdCounter.incrementAndGet()
       }
 

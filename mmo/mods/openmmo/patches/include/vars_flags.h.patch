@@ -1,0 +1,84 @@
+--- a/include/vars_flags.h	2026-09-03 08:46:02.523241950 -0400
++++ b/include/vars_flags.h	2026-09-03 08:46:02.563195585 -0400
+@@ -5,7 +5,80 @@
+ 
+ #include "savedata.h"
+ 
+-#define NUM_FLAGS 2912
++/* Two bands of flag id this client adds above the engine's own 2912.
++ *
++ * SYNTHETIC first, because it was here first and its ids are already in the
++ * server's record: engine state that lives OUTSIDE VarsFlags, the running
++ * shoes are a PlayerData boolean, still needs a row in the story record or a
++ * rejoin loses it, and client.h hands those numbers out from just past the
++ * engine's last flag. They are diverted by id on the way in and nothing ever
++ * writes the array here, so the band is inert; it is declared rather than
++ * assumed so that the block below cannot be laid on top of it. Which is
++ * exactly what happened while this was being written: the ported block started
++ * at 2912, swallowed MMO_SCRIPT_FLAG_RUNNING_SHOES at 3000, and beating one
++ * particular ported trainer would have granted the running shoes instead of
++ * remembering the fight.
++ *
++ * PORTED TRAINERS second. `Script_SetTrainerDefeated` is
++ * `TRAINER_DEFEATED_FLAGS_START + trainerID` and that block is 1360..2287,
++ * exactly 928 flags for exactly 928 trainers, with this game's own
++ * FLAG_BAG_ACQUIRED at 2400 and its daily flags behind that. A ported
++ * trainer's number starts at 928, so the engine's arithmetic would walk
++ * straight out of the block and set somebody else's flag: the 130th ported
++ * trainer beaten would hand the player their bag.
++ *
++ * So the array grows at its TOP, where it renumbers nothing, and the three
++ * Script_*TrainerDefeated functions send a ported number here instead
++ * (mods/openmmo/patches/src/script_manager.c.patch). 768 is all 738 trainers
++ * HeartGold has, so a run that carries more than the 390 Johto and Kanto stand
++ * on the ground never needs this number moved.
++ *
++ * It costs 116 bytes of VarsFlags. That block is not in the save table this
++ * client writes to a file, it crosses to the server as a sparse list of the
++ * flags a session changed (openmmo_script.c, wire op 0xCB), so a wider array
++ * is not a wider packet. mmo/include/game.h holds MMO_SCRIPT_FLAG_MAX equal to
++ * NUM_FLAGS and openmmo_script.c fails to compile if the two drift, or if a
++ * synthetic id ever lands in the ported band. */
++#define OPENMMO_SYNTHETIC_FLAGS_START        2912
++#define OPENMMO_SYNTHETIC_FLAGS_MAX          160
++
++#define PORTED_TRAINER_DEFEATED_FLAGS_START  (OPENMMO_SYNTHETIC_FLAGS_START \
++                                              + OPENMMO_SYNTHETIC_FLAGS_MAX)
++#define OPENMMO_PORTED_TRAINERS_MAX          768
++
++/* PORTED ITEMS third. A HeartGold item ball hides behind a flag of its own
++ * table (0x420 up) and a hidden item behind 800 plus its index, and every one
++ * of those numbers is a Sinnoh flag here, a hidden item's, a trainer's, a
++ * story's. So the porter carries that game's whole item band, 0x320 to 0x520,
++ * at the same offsets above the trainers (tools/portmap.py, ported_item_flag),
++ * and this game's own pickup routines set and read them through the ordinary
++ * VarsFlags calls: `RemoveObject` deletes a taken ball by setting its flag,
++ * `Script_GetHiddenItemFlag` is script minus 8000 plus HIDDEN_ITEM_FLAGS_START
++ * and the porter numbers the hidden bank so that sum lands here. 512 is the
++ * width of the band. Sixty-four more bytes of VarsFlags; the same sparse
++ * report carries them (openmmo_script.c). mapformat_test.sh holds the porter's
++ * constant and this one together. */
++#define OPENMMO_PORTED_ITEM_FLAGS_START      (PORTED_TRAINER_DEFEATED_FLAGS_START \
++                                              + OPENMMO_PORTED_TRAINERS_MAX)
++#define OPENMMO_PORTED_ITEM_FLAGS_MAX        512
++
++/* STATIC SITES fourth. A HeartGold person whose script stages a wild fight,
++ * Sudowoodo on Route 36, the Snorlax, the birds, Mewtwo, twenty-one in all,
++ * is created while their flag is clear, and the cartridge sets it in the
++ * script after the fight is won. Here the fight is the server's and the
++ * script ends where it starts, so the porter gives every such person the
++ * next flag of this band (tools/portmap.py, static_sites.txt) and the mod
++ * sets it and takes the person off the map when the fight the server dealt
++ * is won or the Pokemon caught (openmmo_static.c). Four more bytes of
++ * VarsFlags; the same sparse report carries them, so the site stays gone
++ * across sessions. mapformat_test.sh holds the porter's constant and this
++ * one together. */
++#define OPENMMO_PORTED_STATIC_FLAGS_START    (OPENMMO_PORTED_ITEM_FLAGS_START \
++                                              + OPENMMO_PORTED_ITEM_FLAGS_MAX)
++#define OPENMMO_PORTED_STATIC_FLAGS_MAX      32
++
++#define NUM_FLAGS (OPENMMO_PORTED_STATIC_FLAGS_START \
++                   + OPENMMO_PORTED_STATIC_FLAGS_MAX)
+ 
+ #define NUM_UNKNOWN_FLAGS 64
+ 

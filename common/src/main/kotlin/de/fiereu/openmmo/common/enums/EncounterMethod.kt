@@ -11,4 +11,10 @@ enum class EncounterMethod {
   OLD_ROD,
   GOOD_ROD,
   SUPER_ROD,
+  // A headbutted tree on a ported map. HeartGold keeps three six-slot tables per map and picks
+  // one by which tree it is (`src/field/headbutt.c`): most trees are common, some are rare for
+  // a given trainer id, and a few are secret to every trainer.
+  HEADBUTT_COMMON,
+  HEADBUTT_RARE,
+  HEADBUTT_SECRET,
 }

@@ -1,0 +1,83 @@
+--- a/src/battle/battle_lib.c
++++ b/src/battle/battle_lib.c
+@@ -1226,13 +1226,19 @@
+     battler2Speed = battleCtx->battleMons[battler2].speed * sStatStageBoosts[battler2SpeedStage].numerator / sStatStageBoosts[battler2SpeedStage].denominator;
+ 
+     if (NO_CLOUD_NINE) {
++        // openmmo: Sand Rush is the third of these and the engine has no name for
++        // it (mods/openmmo/src/openmmo_ability.c).
+         if ((battler1Ability == ABILITY_SWIFT_SWIM && WEATHER_IS_RAIN)
+-            || (battler1Ability == ABILITY_CHLOROPHYLL && WEATHER_IS_SUN)) {
++            || (battler1Ability == ABILITY_CHLOROPHYLL && WEATHER_IS_SUN)
++            || (WEATHER_IS_SAND && openmmo_ability_speed_doubled_in_sand(battler1Ability))) {
+             battler1Speed *= 2;
+         }
+ 
++        // openmmo: Sand Rush is the third of these and the engine has no name for
++        // it (mods/openmmo/src/openmmo_ability.c).
+         if ((battler2Ability == ABILITY_SWIFT_SWIM && WEATHER_IS_RAIN)
+-            || (battler2Ability == ABILITY_CHLOROPHYLL && WEATHER_IS_SUN)) {
++            || (battler2Ability == ABILITY_CHLOROPHYLL && WEATHER_IS_SUN)
++            || (WEATHER_IS_SAND && openmmo_ability_speed_doubled_in_sand(battler2Ability))) {
+             battler2Speed *= 2;
+         }
+     }
+@@ -1394,8 +1400,13 @@
+             }
+         }
+ 
+-        battler1Priority = MOVE_DATA(battler1Move).priority;
+-        battler2Priority = MOVE_DATA(battler2Move).priority;
++        // openmmo: Prankster puts a status move a band earlier, which is a thing
++        // this game has no ability for (mods/openmmo/src/openmmo_ability.c). A move
++        // with power is untouched, so its class is the whole of the question.
++        battler1Priority = MOVE_DATA(battler1Move).priority
++            + openmmo_ability_priority_bonus(battler1Ability, MOVE_DATA(battler1Move).power == 0);
++        battler2Priority = MOVE_DATA(battler2Move).priority
++            + openmmo_ability_priority_bonus(battler2Ability, MOVE_DATA(battler2Move).power == 0);
+     }
+ 
+     if (battler1Priority == battler2Priority) {
+@@ -3109,7 +3120,9 @@
+ {
+     BOOL result = FALSE;
+ 
+-    if (Battler_Ability(battleCtx, attacker) != ABILITY_MOLD_BREAKER) {
++    // openmmo: two more abilities break moulds, and this is the one place that is
++    // asked (mods/openmmo/src/openmmo_ability.c).
++    if (openmmo_ability_breaks_mould(Battler_Ability(battleCtx, attacker)) == 0) {
+         if (Battler_Ability(battleCtx, defender) == ability) {
+             result = TRUE;
+         }
+@@ -4210,7 +4223,11 @@
+         return result;
+     }
+ 
+-    switch (Battler_Ability(battleCtx, battleCtx->defender)) {
++    // openmmo: an ability Gen 5 gave the same rule as one of this game's own is
++    // answered here as that one, so it shares the case, the message and the
++    // subscript instead of a copy (mods/openmmo/src/openmmo_ability.c). Iron Barbs
++    // is Rough Skin.
++    switch (openmmo_ability_on_hit_as(Battler_Ability(battleCtx, battleCtx->defender))) {
+     case ABILITY_STATIC:
+         if (ATTACKING_MON.curHP
+             && ATTACKING_MON.status == MON_CONDITION_NONE
+@@ -6790,6 +6807,18 @@
+     if (attackerParams.ability == ABILITY_HUSTLE) {
+         attackStat = attackStat * 150 / 100;
+     }
++    // openmmo: three abilities this game has no name for read the same two numbers
++    // (mods/openmmo/src/openmmo_ability.c). Defeatist halves both attack stats at
++    // half health; Sheer Force and Sand Force each add 30% to the power, one for a
++    // move with a rider and one for three types while sand is falling.
++    attackStat = attackStat
++        * openmmo_ability_attack_percent(attackerParams.ability,
++              battleCtx->battleMons[attacker].curHP, battleCtx->battleMons[attacker].maxHP)
++        / 100;
++    movePower = movePower
++        * openmmo_ability_power_percent(attackerParams.ability, moveType,
++              MOVE_DATA(move).effectChance != 0, NO_CLOUD_NINE && WEATHER_IS_SAND)
++        / 100;
+     if (attackerParams.ability == ABILITY_GUTS && attackerParams.statusMask) {
+         attackStat = attackStat * 150 / 100;
+     }

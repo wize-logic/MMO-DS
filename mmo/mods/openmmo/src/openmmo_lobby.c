@@ -159,7 +159,7 @@ static void Lobby_SetBanks(void)
     GXLayers_SetBanks(&banks);
 }
 
-static String *Lobby_Latin1(enum HeapID heap, const char *s)
+static String *Lobby_Utf8(enum HeapID heap, const char *s)
 {
     mmo_charcode buf[64];
     String *out = String_Init(64, heap);
@@ -172,7 +172,7 @@ static String *Lobby_Latin1(enum HeapID heap, const char *s)
 static void Lobby_PrintColor(Window *window, enum HeapID heap, const char *s,
                              u32 x, u32 y, TextColor color)
 {
-    String *str = Lobby_Latin1(heap, s);
+    String *str = Lobby_Utf8(heap, s);
 
     Text_AddPrinterWithParamsAndColor(window, FONT_SYSTEM, str, x, y,
                                       TEXT_SPEED_NO_TRANSFER, color, NULL);
@@ -184,24 +184,14 @@ static void Lobby_Print(Window *window, enum HeapID heap, const char *s, u32 x, 
     Lobby_PrintColor(window, heap, s, x, y, TEXT_COLOR(1, 2, 15));
 }
 
-static void Lobby_Latin1FromString(const String *src, char *dst, size_t cap)
+static void Lobby_Utf8FromString(const String *src, char *dst, size_t cap)
 {
-    uint8_t utf16[96];
-    mmo_charcode_result r;
-    size_t i, n = 0;
-
-    if (cap == 0)
+    if (dst == NULL || cap == 0)
         return;
     dst[0] = '\0';
     if (src == NULL)
         return;
-    r = mmo_charcode_to_utf16le(String_GetData(src), utf16, sizeof utf16);
-    for (i = 0; i + 1 < r.written * 2 && n + 1 < cap; i += 2) {
-        unsigned cp = (unsigned)utf16[i] | ((unsigned)utf16[i + 1] << 8);
-
-        dst[n++] = (cp < 256) ? (char)cp : '?';
-    }
-    dst[n] = '\0';
+    mmo_charcode_to_utf8(String_GetData(src), dst, cap);
 }
 
 static void Lobby_CycleFocus(Lobby *lobby)
@@ -213,110 +203,34 @@ static void Lobby_CycleFocus(Lobby *lobby)
     *slot = sFocusBorder[lobby->cycleIndex++];
 }
 
-static const struct {
-    int gfx;
-    enum TrainerClass cls;
-} sGfxClass[] = {
-    { 0, TRAINER_CLASS_PLAYER_MALE },
-    { 97, TRAINER_CLASS_PLAYER_FEMALE },
-    { 1, TRAINER_CLASS_NINJA_BOY },
-    { 2, TRAINER_CLASS_TWINS },
-    { 3, TRAINER_CLASS_SCHOOL_KID_MALE },
-    { 4, TRAINER_CLASS_YOUNGSTER },
-    { 5, TRAINER_CLASS_BUG_CATCHER },
-    { 6, TRAINER_CLASS_LASS },
-    { 7, TRAINER_CLASS_BATTLE_GIRL },
-    { 8, TRAINER_CLASS_SCHOOL_KID_FEMALE },
-    { 9, TRAINER_CLASS_BREEDER_MALE },
-    { 10, TRAINER_CLASS_GUITARIST },
-    { 11, TRAINER_CLASS_ACE_TRAINER_MALE },
-    { 12, TRAINER_CLASS_BREEDER_FEMALE },
-    { 13, TRAINER_CLASS_BEAUTY },
-    { 14, TRAINER_CLASS_ACE_TRAINER_FEMALE },
-    { 15, TRAINER_CLASS_POKEFAN_MALE },
-    { 16, TRAINER_CLASS_POKEFAN_FEMALE },
-    { 17, TRAINER_CLASS_VETERAN },
-    { 18, TRAINER_CLASS_VETERAN },
-    { 19, TRAINER_CLASS_COLLECTOR },
-    { 20, TRAINER_CLASS_HIKER },
-    { 22, TRAINER_CLASS_REPORTER },
-    { 23, TRAINER_CLASS_CAMERAMAN },
-    { 29, TRAINER_CLASS_SCIENTIST },
-    { 30, TRAINER_CLASS_SCIENTIST },
-    { 31, TRAINER_CLASS_ROUGHNECK },
-    { 32, TRAINER_CLASS_SKIER_MALE },
-    { 33, TRAINER_CLASS_SKIER_FEMALE },
-    { 34, TRAINER_CLASS_POLICEMAN },
-    { 35, TRAINER_CLASS_IDOL },
-    { 36, TRAINER_CLASS_GENTLEMAN },
-    { 37, TRAINER_CLASS_SOCIALITE },
-    { 38, TRAINER_CLASS_CYCLIST_MALE },
-    { 39, TRAINER_CLASS_CYCLIST_FEMALE },
-    { 40, TRAINER_CLASS_WORKER },
-    { 41, TRAINER_CLASS_RANCHER },
-    { 42, TRAINER_CLASS_COWGIRL },
-    { 43, TRAINER_CLASS_CLOWN },
-    { 44, TRAINER_CLASS_ARTIST },
-    { 45, TRAINER_CLASS_JOGGER },
-    { 46, TRAINER_CLASS_SWIMMER_MALE },
-    { 47, TRAINER_CLASS_SWIMMER_FEMALE },
-    { 48, TRAINER_CLASS_TUBER_FEMALE },
-    { 49, TRAINER_CLASS_TUBER_MALE },
-    { 50, TRAINER_CLASS_RUIN_MANIAC },
-    { 51, TRAINER_CLASS_BLACK_BELT },
-    { 52, TRAINER_CLASS_CAMPER },
-    { 53, TRAINER_CLASS_PICNICKER },
-    { 54, TRAINER_CLASS_FISHERMAN },
-    { 55, TRAINER_CLASS_PARASOL_LADY },
-    { 56, TRAINER_CLASS_SAILOR },
-    { 59, TRAINER_CLASS_WAITER },
-    { 60, TRAINER_CLASS_WAITRESS },
-    { 62, TRAINER_CLASS_RICH_BOY },
-    { 63, TRAINER_CLASS_LADY },
-    { 68, TRAINER_CLASS_ACE_TRAINER_SNOW_MALE },
-    { 69, TRAINER_CLASS_ACE_TRAINER_SNOW_FEMALE },
-    { 70, TRAINER_CLASS_PSYCHIC_MALE },
-    { 124, TRAINER_CLASS_GALACTIC_GRUNT_MALE },
-    { 125, TRAINER_CLASS_GALACTIC_GRUNT_FEMALE },
-    { 175, TRAINER_CLASS_MAID },
-    { 120, TRAINER_CLASS_GALACTIC_BOSS },
-    { 121, TRAINER_CLASS_COMMANDER_MARS },
-    { 122, TRAINER_CLASS_COMMANDER_SATURN },
-    { 123, TRAINER_CLASS_COMMANDER_JUPITER },
-    { 134, TRAINER_CLASS_ELITE_FOUR_AARON },
-    { 135, TRAINER_CLASS_ELITE_FOUR_BERTHA },
-    { 136, TRAINER_CLASS_ELITE_FOUR_FLINT },
-    { 137, TRAINER_CLASS_ELITE_FOUR_LUCIAN },
-    { 126, TRAINER_CLASS_LEADER_ROARK },
-    { 127, TRAINER_CLASS_LEADER_GARDENIA },
-    { 128, TRAINER_CLASS_LEADER_WAKE },
-    { 129, TRAINER_CLASS_LEADER_MAYLENE },
-    { 130, TRAINER_CLASS_LEADER_FANTINA },
-    { 131, TRAINER_CLASS_LEADER_CANDICE },
-    { 132, TRAINER_CLASS_LEADER_BYRON },
-    { 133, TRAINER_CLASS_LEADER_VOLKNER },
-    { 138, TRAINER_CLASS_CHAMPION_CYNTHIA },
-    { 141, TRAINER_CLASS_TRAINER_CHERYL },
-    { 142, TRAINER_CLASS_TRAINER_RILEY },
-    { 143, TRAINER_CLASS_TRAINER_MARLEY },
-    { 144, TRAINER_CLASS_TRAINER_BUCK },
-    { 145, TRAINER_CLASS_TRAINER_MIRA },
-    { 148, TRAINER_CLASS_RIVAL },
-    { 169, TRAINER_CLASS_TOWER_TYCOON },
-    { 215, TRAINER_CLASS_FACTORY_HEAD },
-    { 216, TRAINER_CLASS_HALL_MATRON },
-    { 217, TRAINER_CLASS_CASTLE_VALET },
-    { 218, TRAINER_CLASS_ARCADE_STAR },
-};
-
-static enum TrainerClass Lobby_ClassForGfx(int gfx, int gender)
+/*
+ * Which trainer class draws the body a player picked. One answer, read by three pictures that
+ * have to agree: the preview beside this list, the portrait on the trainer card
+ * (openmmo_card.c) and the front the other player sees across a duel (openmmo_link.c).
+ */
+int openmmo_body_trainer_class(int gfx)
 {
-    unsigned i;
+    extern int openmmo_look_front_class(int look);
+    int look;
 
-    for (i = 0; i < NELEMS(sGfxClass); i++) {
-        if (sGfxClass[i].gfx == gfx)
-            return sGfxClass[i].cls;
-    }
+    if (gfx == MMO_APPEAR_GFX_PLAYER_M)
+        return TRAINER_CLASS_PLAYER_MALE;
+    if (gfx == MMO_APPEAR_GFX_PLAYER_F)
+        return TRAINER_CLASS_PLAYER_FEMALE;
+    look = mmo_appearance_look_of_gfx(gfx);
+    if (look < 0)
+        return -1;
+    return openmmo_look_front_class(look);
+}
+
+/* The same answer with the gender's own trainer standing in, for the two
+ * callers that must draw somebody. */
+int openmmo_body_trainer_class_or_player(int gfx, int gender)
+{
+    int cls = openmmo_body_trainer_class(gfx);
+
+    if (cls >= 0)
+        return cls;
     return gender ? TRAINER_CLASS_PLAYER_FEMALE : TRAINER_CLASS_PLAYER_MALE;
 }
 
@@ -348,7 +262,7 @@ static void Lobby_ShowSprite(Lobby *lobby, int gfx, int gender)
     if (gfx == lobby->previewGfx && lobby->trainerSprite != NULL)
         return;
     Lobby_HideSprite(lobby);
-    cls = Lobby_ClassForGfx(gfx, gender);
+    cls = (enum TrainerClass)openmmo_body_trainer_class_or_player(gfx, gender);
     lobby->trainerSprite = SpriteSystem_NewManagedSpriteTrainer(
         lobby->spriteSys, lobby->spriteMan, lobby->pltt,
         TRAINER_SPRITE_X, TRAINER_SPRITE_Y, cls, FACE_FRONT, 0, lobby->heapID);
@@ -363,28 +277,12 @@ static void Lobby_PrintPair(Window *window, enum HeapID heap,
     u32 x;
 
     Lobby_PrintColor(window, heap, label, 8, y, color);
-    vs = Lobby_Latin1(heap, value != NULL ? value : "");
+    vs = Lobby_Utf8(heap, value != NULL ? value : "");
     x = (u32)Window_GetWidth(window) * 8
         - Font_CalcStringWidth(FONT_SYSTEM, vs, 0) - 8;
     Text_AddPrinterWithParamsAndColor(window, FONT_SYSTEM, vs, x, y,
                                       TEXT_SPEED_NO_TRANSFER, color, NULL);
     String_Free(vs);
-}
-
-static int Lobby_GfxAtAppearCursor(const mmo_creator *c)
-{
-    int seen = 0, i, total = mmo_appearance_count();
-
-    for (i = 0; i < total; i++) {
-        const mmo_appearance *a = mmo_appearance_at(i);
-
-        if (a == NULL || !a->offered)
-            continue;
-        if (seen == c->cursor)
-            return a->gfx;
-        seen++;
-    }
-    return -1;
 }
 
 static void Lobby_SyncPreview(Lobby *lobby)
@@ -393,7 +291,7 @@ static void Lobby_SyncPreview(Lobby *lobby)
     int gfx = -1;
 
     if (c->step == MMO_CREATOR_APPEAR)
-        gfx = Lobby_GfxAtAppearCursor(c);
+        gfx = mmo_creator_appear_gfx_at(c, c->cursor);
     lobby->pendingGfx = gfx;
     lobby->pendingGender = c->gender;
 }
@@ -641,13 +539,15 @@ static TextColor Lobby_GenderColor(int gender)
 }
 
 /* Person cards that fit if NEW CHARACTER is reserved at the end. A third
- * person card is 8 rows and would eat the leftover 2-row slot. */
+ * person card is 8 rows and would eat the leftover 2-row slot. A fixed list
+ * (the offline front door) has no such row, so nothing is held back for it. */
 static int Lobby_CharFit(void)
 {
+    int fixed = openmmo_lobby_creator()->fixed;
     int y = 1, n = 0;
-    int reserved = NEW_CARD_HEIGHT + 2;
+    int reserved = fixed ? 0 : NEW_CARD_HEIGHT + 2;
 
-    while (n < LOBBY_MAX_CARDS - 1) {
+    while (n < LOBBY_MAX_CARDS - (fixed ? 0 : 1)) {
         if (y + CHAR_CARD_HEIGHT + 2 + reserved > 24)
             break;
         y += CHAR_CARD_HEIGHT + 2;
@@ -736,7 +636,7 @@ static void Lobby_PaintSelect(Lobby *lobby)
         n++;
     }
     h = NEW_CARD_HEIGHT;
-    if (n < LOBBY_MAX_CARDS && y + h + 2 <= 24) {
+    if (!c->fixed && n < LOBBY_MAX_CARDS && y + h + 2 <= 24) {
         Window_Add(lobby->bgConfig, &lobby->cards[n], BG_LAYER_MAIN_0,
                    3, (u8)y, OPTION_WINDOW_WIDTH, (u8)h, 1, (u16)tile);
         Window_FillTilemap(&lobby->cards[n], 15);
@@ -802,7 +702,7 @@ static void Lobby_BuildMenu(Lobby *lobby)
 
         if (!mmo_creator_row_at(c, i, &row))
             continue;
-        s = Lobby_Latin1(lobby->heapID, row.text);
+        s = Lobby_Utf8(lobby->heapID, row.text);
         StringList_AddFromString(lobby->choices, s, (u32)i);
         String_Free(s);
     }
@@ -846,7 +746,6 @@ static void Lobby_PaintCreate(Lobby *lobby)
 {
     mmo_creator *c = openmmo_lobby_creator();
 
-    Lobby_PaintTitle(lobby, mmo_creator_title(c), 1);
     if (c->step == MMO_CREATOR_WAIT) {
         Lobby_FreeMenu(lobby);
         Lobby_FreeCards(lobby);
@@ -860,6 +759,11 @@ static void Lobby_PaintCreate(Lobby *lobby)
     } else {
         Lobby_BuildMenu(lobby);
     }
+    /*
+     * Last, because both branches reach Lobby_FreeCards and that clears the whole of
+     * BG_LAYER_MAIN_0's tilemap, the heading's own entries with it.
+     */
+    Lobby_PaintTitle(lobby, mmo_creator_title(c), 1);
     lobby->drawnStep = c->step;
     lobby->drawnHeld = c->list.held;
     lobby->drawnCursor = c->cursor;
@@ -953,7 +857,7 @@ static void Lobby_InputSelect(Lobby *lobby)
         Sound_PlayEffect(SE_CONFIRM_sseq_3);
         mmo_creator_confirm(c);
         if (mmo_creator_has_pick(c) || mmo_creator_ready(c)
-            || mmo_creator_has_delete(c))
+            || mmo_creator_has_delete(c) || mmo_creator_wants_new(c))
             openmmo_lobby_commit();
     }
     (void)lobby;
@@ -979,7 +883,7 @@ static void Lobby_InputCreate(Lobby *lobby)
         Lobby_SyncMenuCursor(lobby, c);
         mmo_creator_confirm(c);
         if (mmo_creator_has_pick(c) || mmo_creator_ready(c)
-            || mmo_creator_has_delete(c))
+            || mmo_creator_has_delete(c) || mmo_creator_wants_new(c))
             openmmo_lobby_commit();
         return;
     }
@@ -998,7 +902,7 @@ static void Lobby_InputCreate(Lobby *lobby)
     c->cursor = (int)choice;
     mmo_creator_confirm(c);
     if (mmo_creator_has_pick(c) || mmo_creator_ready(c)
-        || mmo_creator_has_delete(c))
+        || mmo_creator_has_delete(c) || mmo_creator_wants_new(c))
         openmmo_lobby_commit();
 }
 
@@ -1032,11 +936,11 @@ static void Lobby_LaunchName(Lobby *lobby)
 static void Lobby_FinishName(Lobby *lobby)
 {
     mmo_creator *c = openmmo_lobby_creator();
-    char name[MMO_CHAR_NAME_MAX + 1];
+    char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
 
     if (lobby->namingArgs != NULL
         && lobby->namingArgs->returnCode == NAMING_SCREEN_CODE_OK) {
-        Lobby_Latin1FromString(lobby->namingArgs->textInputStr, name, sizeof name);
+        Lobby_Utf8FromString(lobby->namingArgs->textInputStr, name, sizeof name);
         if (!mmo_creator_set_name(c, name))
             mmo_creator_back(c);
     } else {

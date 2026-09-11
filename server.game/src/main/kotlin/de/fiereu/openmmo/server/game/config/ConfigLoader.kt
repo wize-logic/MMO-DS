@@ -7,19 +7,12 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 private val log = KotlinLogging.logger {}
 
 /**
- * The secret both servers ship with. The login server signs a join ticket with it and the game
- * server verifies with it, so anyone who knows it can mint a ticket for any account. It is a
- * default so a checkout runs, and it sits in a file anyone can read.
+ * The secret both servers ship with, which is the one value here that is a key rather than a
+ * setting.
  */
 private const val DEV_SESSION_SECRET = "dev-only-secret-do-not-use-in-production"
 
-/**
- * The one way to run with the shipped secret, for a checkout on a desk.
- *
- * Warning about it was not enough: a warning is a line that scrolls past at start, and the failure
- * it warns about is silent. So the default is a refusal, and development says so out loud instead.
- * start-server.sh sets this when no real secret is in the environment.
- */
+/** The one way to run with the shipped secret, for a checkout on a desk. */
 private const val ALLOW_DEV_SECRET_ENV = "OPENMMO_ALLOW_DEV_SECRET"
 
 private fun devSecretAllowed(): Boolean =
@@ -31,7 +24,7 @@ private fun Config.stringOrNull(path: String): String? =
 object ConfigLoader {
   /**
    * [allowDevSecret] is the seam the environment variable feeds, and the one a test names directly:
-   * a test that reads the shipped config is not a deployment facing a network.
+   * a test that wants to read the shipped config is not a deployment facing a network.
    */
   fun load(allowDevSecret: Boolean = devSecretAllowed()): GameServerConfig {
     val config = ConfigFactory.load()
@@ -39,9 +32,9 @@ object ConfigLoader {
     require(secret.isNotEmpty()) { "server.sessionSecret must not be empty" }
     if (secret == DEV_SESSION_SECRET) {
       require(allowDevSecret) {
-        "server.sessionSecret is the one this repository ships with, so anyone holding it can" +
-            " join as any account, with any role. Set OPENMMO_SESSION_SECRET, or" +
-            " $ALLOW_DEV_SECRET_ENV=1 to run anyway."
+        "server.sessionSecret is the one this repository ships with, so any join ticket signed" +
+            " with it is valid here and anyone holding it can join as any account, with any role." +
+            " Set OPENMMO_SESSION_SECRET, or $ALLOW_DEV_SECRET_ENV=1 to run anyway."
       }
       log.warn {
         "Running with the session secret this repository ships with, because" +

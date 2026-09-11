@@ -21,6 +21,7 @@
 #include "../../../include/client.h"
 #include "../../../include/game.h"
 #include "../../../include/idmap.h"
+#include "../../../include/species_port.h"
 #include "../../../include/hud_channel.h"
 #include "../../../include/platform.h"
 #include "../../../include/region.h"
@@ -42,6 +43,8 @@ static struct openmmo_hud_shm *g_hud;
 static uint32_t g_cmd_tail;
 static int g_font_sent;
 
+/* Copy as much of a UTF-8 string as fits, cutting between characters: a page
+ * field that ends halfway through a sequence is one the window cannot draw. */
 static void put_str(char *dst, size_t cap, const char *src)
 {
     size_t n = 0;
@@ -51,9 +54,12 @@ static void put_str(char *dst, size_t cap, const char *src)
     if (src == NULL)
         src = "";
     while (src[n] != '\0' && n + 1 < cap) {
-        dst[n] = src[n];
         n++;
     }
+    while (n > 0 && ((unsigned char)src[n] & 0xC0u) == 0x80u) {
+        n--;
+    }
+    memcpy(dst, src, n);
     dst[n] = '\0';
 }
 
@@ -171,24 +177,14 @@ static void fill_chat(struct openmmo_hud_snap *s, const openmmo_client *c)
     }
 }
 
-static void latin1_from_string(const String *src, char *dst, size_t cap)
+static void utf8_from_string(const String *src, char *dst, size_t cap)
 {
-    uint8_t utf16[96];
-    mmo_charcode_result r;
-    size_t i, n = 0;
-
     if (dst == NULL || cap == 0)
         return;
     dst[0] = '\0';
     if (src == NULL)
         return;
-    r = mmo_charcode_to_utf16le(String_GetData(src), utf16, sizeof utf16);
-    for (i = 0; i + 1 < r.written * 2 && n + 1 < cap; i += 2) {
-        unsigned cp = (unsigned)utf16[i] | ((unsigned)utf16[i + 1] << 8);
-
-        dst[n++] = (cp < 256) ? (char)cp : '?';
-    }
-    dst[n] = '\0';
+    mmo_charcode_to_utf8(String_GetData(src), dst, cap);
 }
 
 static void party_name(const openmmo_party_mon *mon, char *dst, size_t cap)
@@ -211,7 +207,7 @@ static void party_name(const openmmo_party_mon *mon, char *dst, size_t cap)
     if (mon->species != 0) {
         s = MessageUtil_SpeciesName(mon->species, HEAP_ID_SYSTEM);
         if (s != NULL) {
-            latin1_from_string(s, dst, cap);
+            utf8_from_string(s, dst, cap);
             String_Free(s);
             if (dst[0] != '\0')
                 return;
@@ -321,7 +317,7 @@ static void item_label(u16 server_item, char *dst, size_t cap)
 
         if (str != NULL) {
             Item_LoadName(str, engine_item, HEAP_ID_SYSTEM);
-            latin1_from_string(str, dst, cap);
+            utf8_from_string(str, dst, cap);
             String_Free(str);
         }
     }
@@ -338,11 +334,13 @@ static void species_label(u16 dex, char *dst, size_t cap)
     if (dst == NULL || cap == 0)
         return;
     dst[0] = '\0';
-    if (engine_species != 0) {
+    /* The name bank read is a table read too: a species this build does not
+     * hold falls to the number fallback below rather than reading past it. */
+    if (engine_species != 0 && mmo_species_port_live((int)engine_species)) {
         String *str = MessageUtil_SpeciesName(engine_species, HEAP_ID_SYSTEM);
 
         if (str != NULL) {
-            latin1_from_string(str, dst, cap);
+            utf8_from_string(str, dst, cap);
             String_Free(str);
         }
     }
@@ -372,6 +370,9 @@ static void fill_gtl(struct openmmo_hud_snap *s, const openmmo_client *c)
         const openmmo_gtl_row *r = &g->row[i];
         struct openmmo_hud_gtl_row *d = &s->gtl.row[i];
 
+        /* The window clicks listings by id, so every drawn row carries one. */
+        d->id_lo = (uint32_t)((u64)r->listing_id & 0xFFFFFFFFu);
+        d->id_hi = (uint32_t)(((u64)r->listing_id >> 32) & 0xFFFFFFFFu);
         d->kind = r->kind == MMO_GTL_KIND_ITEM ? 1u : 0u;
         d->price = r->price > 0 ? (uint32_t)r->price : 0u;
         d->quantity = r->quantity > 0 ? (uint32_t)r->quantity : 0u;
@@ -653,7 +654,10 @@ void openmmo_hud_publish_now(openmmo_client *c, uint32_t flags,
                              uint32_t send_type)
 {
     FieldSystem *fs = pc_lab_field_system();
-    struct openmmo_hud_snap snap;
+    /* Static, not automatic: the snapshot is seventy kilobytes of text rows and
+     * this runs on a field task's stack. It is cleared before every use and
+     * nothing here reenters. */
+    static struct openmmo_hud_snap snap;
 
     if (g_hud == NULL)
         return;
@@ -728,4 +732,18 @@ const char *openmmo_hud_cmd_name(int32_t arg)
     if (g_hud == NULL)
         return "";
     return openmmo_hud_player_name(g_hud, arg);
+}
+
+/* The listing, letter or item a consumed row verb named. Zero with no page,
+ * and zero from a command that named nothing: the caller refuses on it rather
+ * than falling back to the row index, which is the position on a page the
+ * window drew and this guest may no longer hold. */
+s64 openmmo_hud_cmd_row_id(int32_t arg)
+{
+    uint32_t lo = 0, hi = 0;
+
+    if (g_hud == NULL)
+        return 0;
+    openmmo_hud_cmd_id(g_hud, arg, &lo, &hi);
+    return (s64)(((u64)hi << 32) | (u64)lo);
 }

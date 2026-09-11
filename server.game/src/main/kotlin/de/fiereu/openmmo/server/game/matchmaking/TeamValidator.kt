@@ -69,6 +69,12 @@ constructor(
     if (fighters.any { !tiers.permits(rules.checkGroup, it.dexId, it.form) }) {
       return TeamVerdict.Refused(SignupOutcome.TIERING_OR_BAN)
     }
+    // A monster brought in from an offline save is legal: it was checked against everything
+    // the cartridge can produce before it landed. But it was rolled on dice this server never
+    // saw, and a ranked result is a claim about every other player on the board.
+    if (rules.noOfflineOrigin && fighters.any { it.offlineOrigin }) {
+      return TeamVerdict.Refused(SignupOutcome.MONSTER_BANNED)
+    }
 
     settingFor(rules, Clause.UNIQUE_SPECIES)?.let {
       if (fighters.distinctBy { m -> m.dexId }.size != fighters.size) {
@@ -77,6 +83,14 @@ constructor(
     }
     settingFor(rules, Clause.UNIQUE_EVOLUTION_TREE)?.let {
       if (fighters.distinctBy { m -> lineRoot(m.dexId) }.size != fighters.size) {
+        return TeamVerdict.Refused(SignupOutcome.CLAUSE_VIOLATED, it.clause)
+      }
+    }
+    settingFor(rules, Clause.UNIQUE_ITEM)?.let {
+      // Two monsters carrying nothing are not two monsters carrying the same thing, so only the
+      // ones actually holding something are compared.
+      val holders = fighters.map { m -> m.heldItemId }.filter { id -> id != 0 }
+      if (holders.distinct().size != holders.size) {
         return TeamVerdict.Refused(SignupOutcome.CLAUSE_VIOLATED, it.clause)
       }
     }
@@ -103,9 +117,8 @@ constructor(
       rules.teamClauses.firstOrNull { it.clause == clause }
 
   private companion object {
-    /** No monster record carries a held item or a rental mark, so these have nothing to read. */
-    val UNANSWERABLE =
-        setOf(Clause.UNIQUE_ITEM, Clause.NO_RENTALS, Clause.ONE_RENTAL_ACROSS_PARTIES)
+    /** No monster record carries a rental mark, so these have nothing to read. */
+    val UNANSWERABLE = setOf(Clause.NO_RENTALS, Clause.ONE_RENTAL_ACROSS_PARTIES)
 
     /** Longer than any line in the data; a bound rather than a trust. */
     const val MAX_EVOLUTION_DEPTH = 8

@@ -1,0 +1,21 @@
+--- a/src/overlay005/ov5_021ECC20.c
++++ b/src/overlay005/ov5_021ECC20.c
+@@ -99,6 +99,18 @@
+         v0++;
+     } while (v0->unk_00 != 0xffff);
+ 
++    /* openmmo: a cooked id that wears an engine id's rows, a composed
++     * player look, has that id's per-body info, not the youngster's
++     * (mods/openmmo/src/openmmo_billboard.c). */
++    {
++        extern int openmmo_billboard_like(int gfx_id);
++        int like = openmmo_billboard_like(param0);
++
++        if (like >= 0) {
++            return ov5_021ECD10(like);
++        }
++    }
++
+     if (pc_modfs_billboard_nsbtx(param0) >= 0) {
+         return ov5_021ECD10(OBJ_EVENT_GFX_YOUNGSTER);
+     }

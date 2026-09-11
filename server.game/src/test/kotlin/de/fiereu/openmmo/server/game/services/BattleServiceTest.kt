@@ -40,11 +40,14 @@ import de.fiereu.openmmo.pokemon.LearnsetRegistry
 import de.fiereu.openmmo.pokemon.SpeciesRegistry
 import de.fiereu.openmmo.server.game.battle.BattlePacketEmitter
 import de.fiereu.openmmo.server.game.battle.BattleRegistry
+import de.fiereu.openmmo.server.game.battle.BattleResult
 import de.fiereu.openmmo.server.game.battle.BattleRewards
 import de.fiereu.openmmo.server.game.battle.ExpCurves
 import de.fiereu.openmmo.server.game.battle.MoveLearner
 import de.fiereu.openmmo.server.game.battle.TurnEngine
 import de.fiereu.openmmo.server.game.battle.WildMonFactory
+import de.fiereu.openmmo.server.game.script.Script
+import de.fiereu.openmmo.server.game.script.ScriptRunner
 import de.fiereu.openmmo.server.game.session.SCRIPT_SCOPE
 import de.fiereu.openmmo.server.game.storage.CharacterStore
 import de.fiereu.openmmo.server.game.storage.EntityIdService
@@ -52,6 +55,7 @@ import de.fiereu.openmmo.server.game.storage.PC_STORAGE_SIZE
 import de.fiereu.openmmo.server.game.testsupport.FakeCharacterRepository
 import de.fiereu.openmmo.server.game.testsupport.FakeSession
 import de.fiereu.openmmo.server.game.testsupport.blackoutService
+import de.fiereu.openmmo.server.game.testsupport.safariService
 import de.fiereu.openmmo.server.game.testsupport.scriptRunner
 import de.fiereu.openmmo.server.game.world.interest.InterestManager
 import de.fiereu.openmmo.trainer.TrainerDef
@@ -118,8 +122,7 @@ private class Fixture(scope: CoroutineScope) {
   val interestManager = InterestManager()
   val registry = BattleRegistry()
   val mapManager = MapManager()
-  val blackout =
-      blackoutService(store) { scriptRunner(store, mapManager, interestManager, service) }
+  val blackout = blackoutService(store) { runner }
   val service: BattleService =
       BattleService(
           characterStore = store,
@@ -139,7 +142,14 @@ private class Fixture(scope: CoroutineScope) {
           blackout = blackout,
           budget = GrantBudget(),
           violations = ViolationLog(),
+          safariService = safariService(store, mapManager),
+          chatLimits = ChatLimits(ViolationLog()),
       )
+
+  /** The runner a deferred white out is handed to, holding the same [blackout] as the service. */
+  val runner: ScriptRunner by lazy {
+    scriptRunner(store, mapManager, interestManager, service) { blackout }
+  }
 
   suspend fun playerWithParty(
       level: Byte = 50,
@@ -152,7 +162,7 @@ private class Fixture(scope: CoroutineScope) {
     val created = store.createCharacter(userId, name, CharacterGender.MALE, Region.HOENN)
     store.addPokemon(created.info.id, bulbasaur(created.info.id, level, hp, xp, moveIds))
     // Balls to throw. A throw needs one in the bag and spends it, so a fixture with an empty bag
-    // catches nothing; these tests passed because neither was asked.
+    // catches nothing; these tests used to pass because neither was asked.
     store.addItem(created.info.id, POKE_BALL_ITEM_ID, 10)
     store.addItem(created.info.id, MASTER_BALL_ITEM_ID.toInt(), 10)
     return FakeSession(created.info.id) to created.info.id
@@ -162,7 +172,7 @@ private class Fixture(scope: CoroutineScope) {
 /** The Poke Ball's id in this build, which is what the catch tests throw. */
 private const val POKE_BALL_ITEM_ID = 5004
 
-/** The one ball that always holds, for the tests about the catch and not the roll. */
+/** The one ball that always holds, for the tests that are about the catch and not the roll. */
 private const val MASTER_BALL_ITEM_ID: Short = 5001
 
 private fun FakeSession.startBattle(service: BattleService, dexId: Int = 19, level: Int = 2) {
@@ -575,18 +585,20 @@ class BattleServiceTest :
       }
 
       /**
-       * The engine looks a move up in the whole move table, so the id on the wire was the choice.
+       * The turn engine looks a move up in the whole move table, so without this the id on the wire
+       * was the whole of the choice: a level 2 starter could fire Explosion every turn.
        */
       test("a monster cannot use a move it does not know") {
         runTest {
           val fx = Fixture(this)
-          val (session, _) = fx.playerWithParty(moveIds = listOf(TACKLE, 0, 0, 0))
+          val (session, charId) = fx.playerWithParty(moveIds = listOf(TACKLE, 0, 0, 0))
           session.startBattle(fx.service)
           session.sent.clear()
 
           // 153 is Explosion, which nothing in this party knows.
           session.act(fx.service, BattleAction.MOVE, 153)
 
+          // Refused before the engine sees it, so no move was used and nothing was damaged.
           session.sent.filterIsInstance<BattleListEventPacket>() shouldBe emptyList()
           session.sent
               .filterIsInstance<ChatMessagePacket>()
@@ -672,6 +684,79 @@ class BattleServiceTest :
           after.info.positionX shouldBe 4.toShort()
           after.info.positionY shouldBe 2.toShort()
           after.info.money shouldBe moneyBefore / 2
+        }
+      }
+
+      /**
+       * A battle that has already been decided is only waiting for the client to be shown out of
+       * it.
+       */
+      test("a defeat taken before the connection went is still a defeat") {
+        runTest {
+          val fx = Fixture(backgroundScope)
+          val (session, charId) = fx.playerWithParty(level = 2, hp = 1)
+          fx.store.updatePosition(charId, 9, 9, ELSEWHERE_BANK, ELSEWHERE_MAP)
+          val moneyBefore = fx.store.getCharacter(charId).shouldNotBeNull().info.money
+
+          session.startBattle(fx.service, dexId = RATTATA, level = 50)
+          var rounds = 0
+          while (fx.registry.byChar(charId)?.pendingResult == null && rounds < 10) {
+            session.act(fx.service, BattleAction.MOVE, TACKLE)
+            rounds += 1
+          }
+          fx.registry.byChar(charId)?.pendingResult shouldBe BattleResult.DEFEAT
+
+          // The socket goes before the client ever acknowledges the map it is being sent back to.
+          session.dropChannel()
+          fx.service.onDisconnect(session)
+          advanceUntilIdle()
+
+          val after = fx.store.getCharacter(charId).shouldNotBeNull()
+          after.pokemon.single().hp shouldBe 13.toShort()
+          after.info.positionBankId shouldBe RESPAWN_BANK
+          after.info.positionMapId shouldBe RESPAWN_MAP
+          after.info.money shouldBe moneyBefore / 2
+        }
+      }
+
+      /**
+       * The cartridge runs its white out inside the script task that staged the battle
+       * (`ScrCmd_BlackOutFromBattle`). A second script here would interleave its writes with the
+       * one still running, so it waits for that script to end and runs on its coroutine.
+       */
+      test("a white out owed to a running script waits for the script to end") {
+        runTest {
+          val fx = Fixture(backgroundScope)
+          val (session, charId) = fx.playerWithParty(level = 2, hp = 1)
+          session.attributes[SCRIPT_SCOPE] = backgroundScope
+          fx.store.updatePosition(charId, 9, 9, ELSEWHERE_BANK, ELSEWHERE_MAP)
+          // A scene is running and owns the connection, the way a trainer's does.
+          session.state().inDialog = true
+
+          session.startBattle(fx.service, dexId = RATTATA, level = 50)
+          var rounds = 0
+          while (fx.registry.byChar(charId)?.pendingResult == null && rounds < 10) {
+            session.act(fx.service, BattleAction.MOVE, TACKLE)
+            rounds += 1
+          }
+          session.finishBattleTransition(fx.service)
+          runCurrent()
+          advanceUntilIdle()
+
+          // Still where it fell, and marked.
+          fx.store.getCharacter(charId).shouldNotBeNull().info.positionBankId shouldBe
+              ELSEWHERE_BANK
+          session.state().pendingBlackOut shouldBe true
+
+          // The scene ends.
+          fx.runner.run(session, session.state(), Script {}, entityId = -1)
+          runCurrent()
+          advanceUntilIdle()
+
+          val after = fx.store.getCharacter(charId).shouldNotBeNull()
+          after.pokemon.single().hp shouldBe 13.toShort()
+          after.info.positionBankId shouldBe RESPAWN_BANK
+          after.info.positionMapId shouldBe RESPAWN_MAP
         }
       }
 

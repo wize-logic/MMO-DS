@@ -3,6 +3,15 @@
  * host UI. */
 
 #include "view_ui_draw.h"
+#include "view_ui_skin.h"
+
+/*
+ * The window's own face, frozen into the binary from res/fonts by mmo/tools/bin2c.py. FreeType
+ * keeps the pointer for the life of the face, which is exactly why this is a static array and
+ * not something read into a buffer somebody has to remember to keep.
+ */
+extern const unsigned char view_ui_noto[];
+extern const size_t view_ui_noto_len;
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -166,12 +175,14 @@ int view_ui_font_ready(struct view_ui_gpu *g, SDL_Renderer *ren, int px)
         if (FT_Init_FreeType(&lib) != 0)
             return 0;
         g->ft_lib = lib;
-        /* The theme's face first, the official client draws every one of these surfaces
-         * with it, and the platform's DejaVu when there is none or it will
-         * not open. */
+        /* The face, in the order a window should want them. */
         face = NULL;
         if (g->theme_font[0] != '\0' &&
             FT_New_Face(lib, g->theme_font, 0, &face) != 0)
+            face = NULL;
+        if (face == NULL &&
+            FT_New_Memory_Face(lib, view_ui_noto, (FT_Long)view_ui_noto_len,
+                               0, &face) != 0)
             face = NULL;
         if (face == NULL) {
             if (mmo_plat_ui_font(0, path, sizeof path) != 0)
@@ -236,7 +247,12 @@ int view_ui_theme_up(struct view_ui_gpu *g, SDL_Renderer *ren,
 
     if (g == NULL || ren == NULL)
         return 0;
-    if (!view_ui_theme_read(&t, dir))
+    /*
+     * The official client's art where the player pointed at one, ours otherwise, and ours is not a fallback
+     * the way the flat primitives were: view_ui_skin_make fills the same four sheets at the
+     * same sizes, so nothing below this line can tell the two apart.
+     */
+    if (!view_ui_theme_read(&t, dir) && !view_ui_skin_make(&t))
         return 0;
     for (i = 0; i < VIEW_UI_SHEET_N; i++) {
         SDL_Texture *tex =

@@ -1,0 +1,45 @@
+--- a/src/overlay005/ov5_021DFB54.c
++++ b/src/overlay005/ov5_021DFB54.c
+@@ -261,6 +261,14 @@
+ 
+     v0 = Player_GetSpriteFromStateAndGender(v1, PlayerAvatar_GetGender(playerAvatar));
+ 
++    /* openmmo: stepping off the water or the rock puts the follower back
++     * under the player (HeartGold's ride end, ov01_021F2A5C). */
++    if (PlayerAvatar_GetPlayerState(playerAvatar) == 0x2) {
++        extern void openmmo_follow_ride_ending(FieldSystem *fs, int dir);
++        MapObject *rideObj = PlayerAvatar_GetMapObject(playerAvatar);
++        openmmo_follow_ride_ending(MapObject_FieldSystem(rideObj), PlayerAvatar_GetFacingDir(playerAvatar));
++    }
++
+     PlayerAvatar_Redraw(playerAvatar, v0);
+     PlayerAvatar_SetPlayerState(playerAvatar, 0x0);
+     PlayerAvatar_ClearSpeed(playerAvatar);
+@@ -679,6 +687,14 @@
+         }
+         break;
+     case 2: {
++        /* openmmo: the follower hops into the ball or the water first
++         * (HeartGold's surf task, ov01_021F1AFC.s). */
++        {
++            extern int openmmo_follow_ride_prepare(FieldSystem *fs, void *task);
++            if (openmmo_follow_ride_prepare(taskEnv->fieldSystem, task)) {
++                break;
++            }
++        }
+         if (PlayerAvatar_MapDistortionState(taskEnv->playerAvatar) == AVATAR_DISTORTION_STATE_NONE) {
+             int playerXPos = PlayerAvatar_GetXPos(taskEnv->playerAvatar) + MapObject_GetDxFromDir(taskEnv->direction);
+             int playerZPos = PlayerAvatar_GetZPos(taskEnv->playerAvatar) + MapObject_GetDzFromDir(taskEnv->direction);
+@@ -695,6 +711,12 @@
+ 
+         PlayerAvatar_SetSurfMountAnimManager(taskEnv->playerAvatar, taskEnv->unk_28);
+         PlayerAvatar_SetPlayerState(taskEnv->playerAvatar, 0x2);
++
++        /* openmmo: mounted, the follower rides hidden under the player. */
++        {
++            extern void openmmo_follow_ride_mounted(FieldSystem *fs, int dir);
++            openmmo_follow_ride_mounted(taskEnv->fieldSystem, taskEnv->direction);
++        }
+     }
+ 
+         taskEnv->state++;

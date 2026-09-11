@@ -24,6 +24,13 @@ data class LoadEntityPacket(
     val status: EntityStatus = EntityStatus.NONE,
     val hasFollower: Boolean,
     val followerDexId: Short,
+    /**
+     * What the follower looks like, which the official client's own packet cannot say: its dex id
+     * is the whole of the field.
+     */
+    val followerForm: Int = 0,
+    val followerFemale: Boolean = false,
+    val followerShiny: Boolean = false,
 )
 
 object LoadEntityPacketCodec : PacketCodec<LoadEntityPacket>() {
@@ -45,7 +52,10 @@ object LoadEntityPacketCodec : PacketCodec<LoadEntityPacket>() {
     // neither meaning is established, so both stay 0 until one is.
     val transportation = field(U8, LoadEntityPacket::transportation)
     val entityNameplateType = field(U8, LoadEntityPacket::entityNameplateType)
-    val flags = field(U8) { if (it.hasFollower) 0x04 else 0 }
+    // 0x20 is ours and rides behind every one of the official client's; it says nothing at all
+    // unless there is
+    // a follower for it to describe.
+    val flags = field(U8) { if (it.hasFollower) 0x04 or 0x20 else 0 }
     if (flags and 0x01 != 0) field(S8) { 0 }
     if (flags and 0x02 != 0) {
       field(S8) { 0 }
@@ -57,6 +67,17 @@ object LoadEntityPacketCodec : PacketCodec<LoadEntityPacket>() {
     // A prefix the client draws in brackets before the name. It is a bare string:
     // there is no length or id in front of it.
     if (flags and 0x10 != 0) field(Utf16LeNullTerminated) { "" }
+    // Three bytes of our own behind every one of the official client's; a packet without the bit
+    // asks for the
+    // ordinary male non-shiny coat, which is the picture the official client draws.
+    var followerForm = 0
+    var followerFemale = false
+    var followerShiny = false
+    if (flags and 0x20 != 0) {
+      followerForm = field(U8, LoadEntityPacket::followerForm)
+      followerFemale = field(U8) { if (it.followerFemale) 1 else 0 } != 0
+      followerShiny = field(U8) { if (it.followerShiny) 1 else 0 } != 0
+    }
     return LoadEntityPacket(
         entityId = entityId,
         gender = gender,
@@ -74,6 +95,9 @@ object LoadEntityPacketCodec : PacketCodec<LoadEntityPacket>() {
         status = EntityStatus.NONE,
         hasFollower = hasFollower,
         followerDexId = followerDexId,
+        followerForm = followerForm,
+        followerFemale = followerFemale,
+        followerShiny = followerShiny,
     )
   }
 }

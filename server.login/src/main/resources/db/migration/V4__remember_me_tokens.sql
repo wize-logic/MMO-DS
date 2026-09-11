@@ -1,9 +1,5 @@
--- Remember me used to be a stateless HMAC signed with the same secret and shape as the short lived
--- ticket the game server verifies, so one verified as the other, the game server's key could mint
--- thirty day credentials, and nothing could withdraw one.
---
--- A row instead of a signature. The token is random, the server keeps only its hash, and revoking
--- one is deleting it.
+-- Remember me used to be a stateless HMAC signed with the same secret, and the same algorithm and
+-- shape, as the short lived ticket the game server verifies. Two consequences.
 CREATE TABLE remember_me_tokens (
   id         INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   user_id    INT       NOT NULL REFERENCES users (id) ON DELETE CASCADE,

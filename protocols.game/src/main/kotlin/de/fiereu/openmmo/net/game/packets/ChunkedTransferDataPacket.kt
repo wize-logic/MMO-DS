@@ -24,8 +24,9 @@ data class ChunkedTransferDataPacket(
 private val ChunkBytes: Codec<ByteArray> =
     object : Codec<ByteArray> {
       override fun read(buf: ReadBuffer): ByteArray {
-        // Signed on the wire, so a peer can name a negative one. Allocating on it threw a
-        // runtime fault rather than refusing the packet.
+        // Signed on the wire, so a peer can name a negative one. Allocating on it threw
+        // NegativeArraySizeException, which is a runtime fault rather than a refusal: the pipeline
+        // caught it and closed the session, but by way of a bug report about the server.
         val length = S16LE.read(buf).toInt()
         if (length < 0) throw MalformedPacketException("negative chunk length: $length")
         val data = ByteArray(length)

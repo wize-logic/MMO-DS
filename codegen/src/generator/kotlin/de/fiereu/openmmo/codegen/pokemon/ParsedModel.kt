@@ -29,6 +29,7 @@ data class ParsedSpecies(
     val eggGroup2: String,
     val ability1: String,
     val ability2: String,
+    val abilityHidden: String,
     val safariZoneFleeRate: Int,
     val bodyColor: String,
     val flipSprite: Boolean,

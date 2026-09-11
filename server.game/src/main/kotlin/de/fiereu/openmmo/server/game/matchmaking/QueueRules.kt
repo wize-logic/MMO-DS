@@ -17,6 +17,8 @@ data class QueueRules(
     val queue: MatchmakingQueue,
     val checkGroup: TierGroup,
     val clauses: List<ClauseSetting>,
+    /** Whether a party holding a monster brought in from an offline save may enter. */
+    val noOfflineOrigin: Boolean = queue.ranked,
 ) {
   /** The clauses this queue expects the team check to answer for. */
   val teamClauses: List<ClauseSetting>

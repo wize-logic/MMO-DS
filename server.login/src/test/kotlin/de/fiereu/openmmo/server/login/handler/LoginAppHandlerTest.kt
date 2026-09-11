@@ -26,6 +26,8 @@ import de.fiereu.openmmo.server.login.config.GameServerEndpointConfig
 import de.fiereu.openmmo.server.login.config.LoginServerConfig
 import de.fiereu.openmmo.server.login.di.DaggerLoginServerComponent
 import de.fiereu.openmmo.server.login.session.AUTHED_USER_ID
+import de.fiereu.openmmo.server.login.update.ClientRevisionFloor
+import de.fiereu.openmmo.server.login.update.feedgenDocument
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.netty.channel.ChannelFuture
@@ -86,7 +88,8 @@ private class RecordingSession : SessionContext {
 
 private fun loginRequest(
     username: String,
-    method: de.fiereu.openmmo.net.login.packets.LoginMethod
+    method: de.fiereu.openmmo.net.login.packets.LoginMethod,
+    installationRevision: Int = 0,
 ) =
     LoginRequestPacket(
         username = username,
@@ -95,7 +98,7 @@ private fun loginRequest(
         method = method,
         language = Language.EN,
         clientRevision = 0,
-        installationRevision = 0,
+        installationRevision = installationRevision,
         os = 0u,
         hardwareInfoCache = ByteArray(0),
     )
@@ -110,6 +113,7 @@ class LoginAppHandlerTest :
           users: InMemoryUserStore,
           clock: Clock = Clock.systemUTC(),
           rememberMe: RememberMeTokens = InMemoryRememberMeTokens(maxAge),
+          updates: ClientRevisionFloor = ClientRevisionFloor(null),
       ): LoginAppHandler =
           LoginAppHandler(
               users = users,
@@ -117,6 +121,7 @@ class LoginAppHandlerTest :
               tokenIssuer = SessionTokenIssuer(secret, clock),
               rememberMe = rememberMe,
               attempts = LoginAttemptLimiter(),
+              updates = updates,
               scope = CoroutineScope(Job()),
           )
 
@@ -147,6 +152,42 @@ class LoginAppHandlerTest :
         }
         session.sent.map { it::class } shouldBe listOf(LoginResponsePacket::class)
         (session.sent.single() as LoginResponsePacket).state shouldBe LoginState.AUTHED
+      }
+
+      test("a client below the feed's floor is told to update, and never checked") {
+        val dir = kotlin.io.path.createTempDirectory("openmmo-feed")
+        val users = InMemoryUserStore()
+        users.addUser("old", "secret")
+        val handler = newHandler(users, updates = ClientRevisionFloor(feedgenDocument(dir, 1500)))
+        val session = RecordingSession()
+        runBlocking {
+          handler.onLoginRequest(
+              PacketEvent(
+                  loginRequest("old", PasswordLogin(sha1Hex("secret"), true), 1420), session))
+        }
+        // One packet, and not the credentials one: an out-of-date client is refused before the
+        // password is looked at, so it earns no remember-me token on the way out either.
+        session.sent.map { it::class } shouldBe listOf(LoginResponsePacket::class)
+        (session.sent.single() as LoginResponsePacket).state shouldBe LoginState.CLIENT_OUT_OF_DATE
+        session.attributes[AUTHED_USER_ID] shouldBe null
+      }
+
+      test("a client at the floor, and one that claims no revision, both get in") {
+        val dir = kotlin.io.path.createTempDirectory("openmmo-feed")
+        val users = InMemoryUserStore()
+        users.addUser("current", "secret")
+        val updates = ClientRevisionFloor(feedgenDocument(dir, 1500))
+        for (revision in listOf(1500, 1501, 0)) {
+          val session = RecordingSession()
+          runBlocking {
+            newHandler(users, updates = updates)
+                .onLoginRequest(
+                    PacketEvent(
+                        loginRequest("current", PasswordLogin(sha1Hex("secret"), false), revision),
+                        session))
+          }
+          (session.sent.single() as LoginResponsePacket).state shouldBe LoginState.AUTHED
+        }
       }
 
       test("password login with stay-logged-in sends a token that verifies to the user id") {

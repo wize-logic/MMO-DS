@@ -81,6 +81,14 @@ void view_hud_push(struct view_hud *h, uint32_t kind, int32_t arg)
     openmmo_hud_push(h->page, kind, arg);
 }
 
+void view_hud_push_id(struct view_hud *h, uint32_t kind, int32_t arg,
+                      uint32_t id_lo, uint32_t id_hi)
+{
+    if (h == NULL || h->page == NULL)
+        return;
+    openmmo_hud_push_id(h->page, kind, arg, id_lo, id_hi);
+}
+
 void view_hud_push_player(struct view_hud *h, int32_t verb, const char *name)
 {
     if (h == NULL || h->page == NULL || name == NULL || name[0] == '\0')

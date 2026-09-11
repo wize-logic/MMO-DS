@@ -1,4 +1,4 @@
-/* The two frame-checksum profiles the MonMMO transport negotiates. */
+/* The two frame-checksum profiles the OpenMMO transport negotiates. */
 #ifndef MMO_CHECKSUM_H
 #define MMO_CHECKSUM_H
 

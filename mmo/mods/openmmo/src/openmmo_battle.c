@@ -9,6 +9,8 @@
 #include "battle/battle_lib.h"
 #include "battle/battle_system.h"
 
+#include "../../../include/endpoint.h"
+
 void BattleController_SendMessage(BattleSystem *battleSys, int recipient,
     int battler, void *message, u8 size);
 
@@ -86,7 +88,7 @@ static void openmmo_battle_init(void)
         fprintf(sTrace, "openmmo-battle 1\n");
     }
 
-    path = getenv("OPENMMO_BATTLE_SOURCE");
+    path = openmmo_dev_env("OPENMMO_BATTLE_SOURCE");
     if (path != NULL && path[0] != '\0') {
         char head[32];
 
@@ -103,7 +105,7 @@ static void openmmo_battle_init(void)
     }
 
     if (!sHalt) {
-        path = getenv("OPENMMO_BATTLE_HALT");
+        path = openmmo_dev_env("OPENMMO_BATTLE_HALT");
         if (path != NULL && path[0] != '\0' && path[0] != '0') {
             sHalt = 1;
         }

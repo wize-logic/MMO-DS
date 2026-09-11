@@ -24,6 +24,16 @@ enum class ContestRank {
 fun superContestRibbonBit(type: ContestType, rank: ContestRank): Long =
     1L shl (type.ordinal * ContestRank.entries.size + rank.ordinal)
 
+/**
+ * Every bit a ribbon can stand on: four ranks of each of five types, twenty of the sixty-four. The
+ * game leaves the other forty-four alone, so a mask arriving with one of them set is carrying
+ * something that is not a ribbon.
+ */
+val ALL_SUPER_CONTEST_RIBBONS: Long =
+    ContestType.entries.fold(0L) { mask, type ->
+      ContestRank.entries.fold(mask) { bits, rank -> bits or superContestRibbonBit(type, rank) }
+    }
+
 /** How many of [type]'s four ribbons this mask holds. This is the contest rank gate. */
 fun superContestRibbonCount(mask: Long, type: ContestType): Int =
     ContestRank.entries.count { (mask and superContestRibbonBit(type, it)) != 0L }

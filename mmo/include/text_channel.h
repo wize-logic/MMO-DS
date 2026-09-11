@@ -156,6 +156,63 @@ static inline unsigned openmmo_text_utf8_to_utf16(const unsigned char *s,
     return 2;
 }
 
+/*
+ * One code point to UTF-8, the client's own string encoding: what the viewer measures and
+ * draws, what the charcode bridge takes, and what the wire codec transcodes to and from.
+ * Writes 1..4 bytes, no terminator, and returns how many.
+ */
+static inline unsigned openmmo_text_cp_to_utf8(uint32_t cp, char out[4])
+{
+    if (cp > 0x10FFFFu || (cp >= 0xD800u && cp <= 0xDFFFu)) cp = 0xFFFDu;
+
+    if (cp < 0x80u) {
+        out[0] = (char)cp;
+        return 1;
+    }
+    if (cp < 0x800u) {
+        out[0] = (char)(0xC0u | (cp >> 6));
+        out[1] = (char)(0x80u | (cp & 0x3Fu));
+        return 2;
+    }
+    if (cp < 0x10000u) {
+        out[0] = (char)(0xE0u | (cp >> 12));
+        out[1] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
+        out[2] = (char)(0x80u | (cp & 0x3Fu));
+        return 3;
+    }
+    out[0] = (char)(0xF0u | (cp >> 18));
+    out[1] = (char)(0x80u | ((cp >> 12) & 0x3Fu));
+    out[2] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
+    out[3] = (char)(0x80u | (cp & 0x3Fu));
+    return 4;
+}
+
+/*
+ * One UTF-16 sequence to UTF-8, which is the conversion between what this page carries and
+ * what the rest of the client holds.
+ */
+static inline unsigned openmmo_text_utf16_to_utf8(const uint16_t *u, unsigned len,
+                                                  char out[4], unsigned *used)
+{
+    uint32_t cp;
+
+    if (used) *used = 1;
+    if (u == 0 || len == 0 || out == 0) return 0;
+
+    cp = u[0];
+    if (cp >= 0xD800u && cp <= 0xDBFFu) {
+        if (len >= 2 && u[1] >= 0xDC00u && u[1] <= 0xDFFFu) {
+            cp = 0x10000u + ((cp - 0xD800u) << 10) + (u[1] - 0xDC00u);
+            if (used) *used = 2;
+        } else {
+            cp = 0xFFFDu;
+        }
+    } else if (cp >= 0xDC00u && cp <= 0xDFFFu) {
+        cp = 0xFFFDu;
+    }
+    return openmmo_text_cp_to_utf8(cp, out);
+}
+
 #ifdef __cplusplus
 }
 #endif

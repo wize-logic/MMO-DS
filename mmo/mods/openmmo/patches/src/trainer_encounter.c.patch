@@ -1,0 +1,19 @@
+--- a/src/trainer_encounter.c
++++ b/src/trainer_encounter.c
+@@ -87,6 +87,16 @@
+     MapObjectManager *mapObjMan = fieldSystem->mapObjMan;
+     PlayerAvatar *playerAvatar = fieldSystem->playerAvatar;
+ 
++    /* A ported trainer's fight is the server's to run one day; started
++     * here it would be this game's script at that id, and the port
++     * refuses those, which left ScriptManager_Set without a task for
++     * SetApproachingTrainer to write into. Nobody approaches on a
++     * ported map. */
++    extern int openmmo_trainer_sight_blocked(FieldSystem *fieldSystem);
++    if (openmmo_trainer_sight_blocked(fieldSystem)) {
++        return FALSE;
++    }
++
+     if (!FindUndefeatedTrainerInSight(fieldSystem, mapObjMan, playerAvatar, NULL, &trainer)) {
+         return FALSE;
+     }

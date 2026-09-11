@@ -350,6 +350,37 @@ static void test_script_state_save_blocks(void)
                                      NULL, 0, &nv, &vs, rb, 4, &nb, &bs) == -1,
           "a block that claims more bytes than the body holds is refused");
 
+    /* A full frame keeps every block. */
+    {
+        mmo_save_block full[MMO_SAVE_BLOCK_MAX];
+        mmo_save_block over[MMO_SAVE_BLOCK_MAX + 1];
+        mmo_save_block rfull[MMO_SAVE_BLOCK_MAX];
+        int i;
+
+        for (i = 0; i < MMO_SAVE_BLOCK_MAX; i++) {
+            full[i].id = i + 1;
+            full[i].len = 2;
+            full[i].data = poffins;
+            over[i] = full[i];
+        }
+        over[MMO_SAVE_BLOCK_MAX] = full[0];
+        mmo_wbuf_init(&w);
+        CHECK(mmo_game_write_script_state(&w, NULL, 0, NULL, 0, full,
+                                          MMO_SAVE_BLOCK_MAX) == 0,
+              "a frame of the most blocks the wire carries frames");
+        CHECK(mmo_game_read_script_state(w.data, w.len, NULL, 0, &nf, &fs,
+                                         NULL, 0, &nv, &vs, rfull,
+                                         MMO_SAVE_BLOCK_MAX, &nb, &bs) == 0
+                  && nb == MMO_SAVE_BLOCK_MAX && bs == MMO_SAVE_BLOCK_MAX,
+              "and every one of them is kept, none dropped");
+        mmo_wbuf_free(&w);
+        mmo_wbuf_init(&w);
+        CHECK(mmo_game_write_script_state(&w, NULL, 0, NULL, 0, over,
+                                          MMO_SAVE_BLOCK_MAX + 1) == -1,
+              "one more than that is refused before it is framed");
+        mmo_wbuf_free(&w);
+    }
+
     /* The writer refuses what the reader would have to: a block past the wire's
      * own width, and a count with no rows behind it. */
     const mmo_save_block wide = { 14, MMO_SAVE_BLOCK_BYTES + 1, fashion };

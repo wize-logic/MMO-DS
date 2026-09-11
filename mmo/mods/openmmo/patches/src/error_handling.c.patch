@@ -1,5 +1,5 @@
---- a/src/error_handling.c
-+++ b/src/error_handling.c
+--- a/src/error_handling.c	2026-09-03 00:19:09.467771539 -0400
++++ b/src/error_handling.c	2026-09-03 00:20:13.504899802 -0400
 @@ -10,6 +10,13 @@
  
  void ErrorHandling_AssertFail(void)
@@ -8,8 +8,8 @@
 +     * written to rule out. The body below only speaks when the DS comm stack is
 +     * up, which on a host it never is, so every one of them was being discarded
 +     * and the caller carried on into the impossible state. */
-+    extern void openmmo_engine_assert_failed(void);
-+    openmmo_engine_assert_failed();
++    extern void openmmo_engine_assert_failed(const void *caller);
++    openmmo_engine_assert_failed(__builtin_return_address(0));
 +
      if (CommManager_IsInitialized() && (OS_GetProcMode() != OS_PROCMODE_IRQ)) {
          ErrorMessageReset_PrintErrorAndReset();

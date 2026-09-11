@@ -280,6 +280,85 @@ static void test_create_character_encode(void)
     CHECK(strcmp(ref.name, "Aba") == 0 && ref.gender == 1, "name and rivalSex");
 }
 
+static void test_name_cap_counts_units(void)
+{
+    /* Thirty-two of U+65E5, the longest name the server's VARCHAR(32) takes:
+     * ninety-six UTF-8 bytes, and the two lengths disagree by a factor of three. */
+    char full[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
+    char over[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX) + 3];
+    char astral[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
+    mmo_create_character in;
+    mmo_character_ref ref;
+    mmo_wbuf b;
+    u8 body[1 + 8 + 2 * MMO_CHAR_NAME_MAX + 2 + 2 + 4 + 1];
+    size_t at;
+    int i;
+
+    printf("a name cap counts characters, not bytes:\n");
+
+    for (i = 0; i < MMO_CHAR_NAME_MAX; i++)
+        memcpy(full + i * 3, "\xE6\x97\xA5", 3);
+    full[MMO_CHAR_NAME_MAX * 3] = '\0';
+    memcpy(over, full, sizeof full);
+    memcpy(over + MMO_CHAR_NAME_MAX * 3, "\xE6\x97\xA5", 4);
+    /* Sixteen of U+1F310: also thirty-two units, because each is a pair. */
+    for (i = 0; i < MMO_CHAR_NAME_MAX / 2; i++)
+        memcpy(astral + i * 4, "\xF0\x9F\x8C\x90", 4);
+    astral[(MMO_CHAR_NAME_MAX / 2) * 4] = '\0';
+
+    CHECK(strlen(full) == 96 && mmo_utf16_units(full) == MMO_CHAR_NAME_MAX,
+          "thirty-two full-width characters are ninety-six bytes and thirty-two units");
+    CHECK(strlen(astral) == 64 && mmo_utf16_units(astral) == MMO_CHAR_NAME_MAX,
+          "and sixteen astral ones are thirty-two units too, a pair each");
+
+    memset(&in, 0, sizeof in);
+    in.gender = 0;
+    in.starting_region = 3;
+    in.appearance.region_selection_index = 3;
+
+    in.name = full;
+    mmo_wbuf_init(&b);
+    CHECK(mmo_game_write_create_character(&b, &in) == 0 &&
+              b.len == 2 * MMO_CHAR_NAME_MAX + 2 + 5,
+          "a name at the cap encodes, however wide its characters are");
+    mmo_wbuf_free(&b);
+
+    in.name = astral;
+    mmo_wbuf_init(&b);
+    CHECK(mmo_game_write_create_character(&b, &in) == 0,
+          "and so does one made of surrogate pairs");
+    mmo_wbuf_free(&b);
+
+    in.name = over;
+    mmo_wbuf_init(&b);
+    CHECK(mmo_game_write_create_character(&b, &in) == -1,
+          "one character past the cap is refused");
+    mmo_wbuf_free(&b);
+
+    /* The other direction: the server sends it back and it has to survive the
+     * buffer it lands in. Sized in bytes it came back as ten characters. */
+    at = 0;
+    body[at++] = 1;
+    for (i = 0; i < 8; i++)
+        body[at++] = (u8)(8 - i);
+    for (i = 0; i < MMO_CHAR_NAME_MAX; i++) {
+        body[at++] = 0xE5;
+        body[at++] = 0x65;
+    }
+    body[at++] = 0;
+    body[at++] = 0;
+    body[at++] = 0; /* namePrefix "" */
+    body[at++] = 0;
+    body[at++] = 0; /* userId */
+    body[at++] = 0;
+    body[at++] = 0;
+    body[at++] = 0;
+    body[at++] = 1; /* rivalSex */
+    CHECK(mmo_game_read_first_character(body, at, &ref) == 0 &&
+              strcmp(ref.name, full) == 0,
+          "and one read back off the wire arrives whole, not cut to a third");
+}
+
 static void test_pick_character(void)
 {
     mmo_character_list list;
@@ -363,7 +442,7 @@ static void test_movement_encode(void)
     static const u8 up_run[5] = { 0x64, 0x00, 0xFA, 0x00, 0x81 };
     mmo_wbuf b;
     mmo_wbuf_init(&b);
-    mmo_game_write_movement(&b, 100, 250, mmo_game_dir_from_ds(0), 1);
+    mmo_game_write_movement(&b, 100, 250, mmo_game_dir_from_ds(0), 1, 1);
     CHECK(!b.err, "encoder reported no error");
     CHECK(b.len == sizeof up_run, "encoded length is 5 bytes");
     CHECK(b.len == sizeof up_run && memcmp(b.data, up_run, sizeof up_run) == 0,
@@ -373,7 +452,7 @@ static void test_movement_encode(void)
     /* A plain walk south clears the running bit; state = DOWN(0). */
     static const u8 down_walk[5] = { 0x64, 0x00, 0xFA, 0x00, 0x00 };
     mmo_wbuf_init(&b);
-    mmo_game_write_movement(&b, 100, 250, mmo_game_dir_from_ds(1), 0);
+    mmo_game_write_movement(&b, 100, 250, mmo_game_dir_from_ds(1), 0, 1);
     CHECK(b.len == sizeof down_walk && memcmp(b.data, down_walk, sizeof down_walk) == 0,
           "SOUTH walking clears the running bit and packs DOWN");
     mmo_wbuf_free(&b);
@@ -381,9 +460,28 @@ static void test_movement_encode(void)
     /* Negative from-tile coordinates are S16LE two's complement. */
     static const u8 neg[5] = { 0xFF, 0xFF, 0x00, 0x00, 0x03 };
     mmo_wbuf_init(&b);
-    mmo_game_write_movement(&b, -1, 0, mmo_game_dir_from_ds(3), 0);
+    mmo_game_write_movement(&b, -1, 0, mmo_game_dir_from_ds(3), 0, 1);
     CHECK(b.len == sizeof neg && memcmp(b.data, neg, sizeof neg) == 0,
           "a negative x packs as S16LE and EAST maps to RIGHT");
+    mmo_wbuf_free(&b);
+
+    /* A step longer than one tile packs (tiles - 1) into bits 2..3, which the
+     * captured official bodies leave clear, so a one-tile step is byte-identical
+     * to what this encoder wrote before the field existed (the three vectors
+     * above), and a three-tile ramp jump east reads 0x0B. */
+    static const u8 ramp_east[5] = { 0x64, 0x00, 0xFA, 0x00, 0x0B };
+    mmo_wbuf_init(&b);
+    mmo_game_write_movement(&b, 100, 250, mmo_game_dir_from_ds(3), 0, 3);
+    CHECK(b.len == sizeof ramp_east && memcmp(b.data, ramp_east, sizeof ramp_east) == 0,
+          "a three-tile step east packs the span above the direction");
+    mmo_wbuf_free(&b);
+
+    /* Out of range is clamped rather than allowed to bleed into the run bit. */
+    static const u8 clamped[5] = { 0x64, 0x00, 0xFA, 0x00, 0x0B };
+    mmo_wbuf_init(&b);
+    mmo_game_write_movement(&b, 100, 250, mmo_game_dir_from_ds(3), 0, 9);
+    CHECK(b.len == sizeof clamped && memcmp(b.data, clamped, sizeof clamped) == 0,
+          "a span past three is clamped to three");
     mmo_wbuf_free(&b);
 }
 
@@ -1063,6 +1161,43 @@ static void test_dialog_action_decode(void)
     };
     CHECK(mmo_game_read_dialog_action(short_list, sizeof short_list, &box) == -1,
           "a list whose shorts run out is refused");
+
+    /* The bank indexes the text archive's member table, so one the archive
+     * does not hold has to be refused here rather than handed on: 724 is one
+     * past the last member (idmap_text.gen.h). The sign test this replaced let
+     * every one of them through. */
+    static const u8 far_bank[] = {
+        0x00, 0x31,
+        0x50, 0x00, 0x17, 0x30,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0x00, 0x00, 0x00, 0x00,
+        0x00,
+        0x00, 0x00,
+        0xd4, 0x02,
+        0x01,
+        0x2d, 0x00,
+    };
+    CHECK(mmo_game_read_dialog_action(far_bank, sizeof far_bank, &box) == -1,
+          "a list naming a bank the archive does not hold is refused");
+
+    /* 0xFFF is the one bank outside the archive that is legal: it names no
+     * member at all, it means each entry is a map header to be named by its
+     * own label (MMO_DIALOG_BANK_MAP_LABEL). */
+    static const u8 label_bank[] = {
+        0x00, 0x31,
+        0x50, 0x00, 0x17, 0x30,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0x00, 0x00, 0x00, 0x00,
+        0x00,
+        0x00, 0x00,
+        0xff, 0x0f,
+        0x01,
+        0x9b, 0x01,
+    };
+    CHECK(mmo_game_read_dialog_action(label_bank, sizeof label_bank, &box) == 0
+              && box.choice_bank == MMO_DIALOG_BANK_MAP_LABEL
+              && box.choice_count == 1 && box.choices[0] == 411,
+          "the map-label bank is carried, and its entry is a map header");
 }
 
 static void test_dialog_reply_encode(void)
@@ -2634,6 +2769,87 @@ static void test_battle_event_decode(void)
           "a switch-in shorter than the active detail is refused");
 }
 
+/*
+ * The row a scene's report is made of, byte for byte, against the server codec this build
+ * talks to (BattleOutcomePacket.kt).
+ */
+static const u8 outcome_vec[51] = {
+    0x01,
+    0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, /* id */
+    0x10,                                           /* level 16 */
+    0xB8, 0x0B, 0x00, 0x00,                         /* exp 3000 */
+    0x16, 0x00,                                     /* hp 22 */
+    0x34, 0x00, 0x18,                               /* move 52, 24 pp */
+    0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00,
+    0x01, 0x02, 0x03, 0x04, 0x05,                   /* conditions */
+    0x06,                                           /* sheen */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /* no ribbons */
+    0x05, 0x00,                                     /* species 5 */
+    0xDC, 0x00,                                     /* friendship 220 */
+    0x72, 0x14,                                     /* held item 5234 */
+    0x00,                                           /* not an egg */
+    0x88, 0x00                                      /* badly poisoned */
+};
+
+static void test_battle_outcome_encode(void)
+{
+    printf("a scene's report carries the species, friendship, held item, egg"
+           " bit and condition the engine holds:\n");
+
+    mmo_battle_mon_outcome mon;
+    memset(&mon, 0, sizeof mon);
+    mon.id = 0x0102030405060708LL;
+    mon.level = 16;
+    mon.exp = 3000;
+    mon.hp = 22;
+    mon.move[0] = 52;
+    mon.pp[0] = 24;
+    for (int i = 0; i < MMO_MON_CONDITIONS; i++)
+        mon.cond[i] = (u8)(i + 1);
+    mon.sheen = 6;
+    mon.species = 5;
+    mon.friendship = 220;
+    mon.held_item = 5234; /* Leftovers */
+    /* Bad poison, which is what a fight leaves that the hit points do not say. */
+    mon.status = 0x88;
+
+    mmo_wbuf b;
+    mmo_wbuf_init(&b);
+    mmo_game_write_battle_outcome(&b, &mon, 1);
+    CHECK(!b.err, "encoder reported no error");
+    CHECK(b.len == sizeof outcome_vec, "one row is 51 bytes");
+    CHECK(b.len == sizeof outcome_vec
+              && memcmp(b.data, outcome_vec, sizeof outcome_vec) == 0,
+          "the row matches the server codec's field order");
+    mmo_wbuf_free(&b);
+
+    /* An egg still counting down, which is the only row whose last byte is not
+     * the value above. The hatch is that bit going back to 0, and the 0 is what
+     * the server acts on: an egg's row says nothing it has not said before. */
+    mon.egg = 1;
+    mmo_wbuf_init(&b);
+    mmo_game_write_battle_outcome(&b, &mon, 1);
+    CHECK(!b.err && b.len == sizeof outcome_vec, "an egg's row is the same size");
+    CHECK(b.len == sizeof outcome_vec
+              && b.data[sizeof outcome_vec - 3] == 0x01,
+          "the egg bit sits in front of the condition word");
+    mmo_wbuf_free(&b);
+
+    /* A word with bits the engine does not define is not a condition it could
+     * be handed back, so the row carries only the twelve it does. */
+    mon.egg = 0;
+    mon.status = 0xF888;
+    mmo_wbuf_init(&b);
+    mmo_game_write_battle_outcome(&b, &mon, 1);
+    CHECK(!b.err && b.len == sizeof outcome_vec
+              && b.data[sizeof outcome_vec - 2] == 0x88
+              && b.data[sizeof outcome_vec - 1] == 0x08,
+          "the condition word is masked to the bits the engine defines");
+    mmo_wbuf_free(&b);
+}
+
 static void test_battle_outcome_decode(void)
 {
     printf("catch / forced-switch packets walk the official client's readers:\n");
@@ -3056,6 +3272,79 @@ static void test_monster_detail_fields(void)
     CHECK(m[0].ribbons_super == (MMO_MON_RIBBON_BIT(0, 1) | MMO_MON_RIBBON_BIT(4, 3)),
           "the ribbon mask reads back as the bits that were set");
 
+    /* The held item rides the same list, for the same reason: the record names
+     * an item nowhere. A record with no entry says the monster is carrying
+     * nothing, which is what every record written before this tag existed
+     * says. */
+    CHECK(m[0].held_item == 0,
+          "a record with no held-item entry carries nothing");
+
+    static const u8 held_tail[] = {
+        MMO_MON_TLV_HELD_ITEM, 2, 0x72, 0x14,   /* Leftovers, wire 5234 */
+        MMO_MON_TLV_RIBBONS_SUPER, 8,
+        0x02, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00,
+    };
+    u8 holding[sizeof body + sizeof held_tail];
+    memcpy(holding, body, sizeof body);
+    holding[sizeof body - 1] = (u8)sizeof held_tail;
+    memcpy(holding + sizeof body, held_tail, sizeof held_tail);
+    CHECK(mmo_game_read_pokemon_container(holding, sizeof holding, &ct, m, 1) == 0 &&
+          ct.trailing == 0 && m[0].held_item == 5234,
+          "a held-item entry reads back as the item, beside the ribbons");
+
+    /*
+     * The location label rides the same list, on its own entry rather than as a fourth value
+     * of the place: a label names up to 46 map headers at once, so neither of the two reads
+     * back out of the other.
+     */
+    CHECK(m[0].caught_location_label == 0,
+          "a record with no location-label entry carries none");
+
+    static const u8 label_tail[] = {
+        MMO_MON_TLV_CAUGHT_LABEL, 2, 0x22, 0x00,  /* label 34 */
+        MMO_MON_TLV_HELD_ITEM, 2, 0x72, 0x14,
+    };
+    u8 labelled[sizeof body + sizeof label_tail];
+    memcpy(labelled, body, sizeof body);
+    labelled[sizeof body - 1] = (u8)sizeof label_tail;
+    memcpy(labelled + sizeof body, label_tail, sizeof label_tail);
+    CHECK(mmo_game_read_pokemon_container(labelled, sizeof labelled, &ct, m, 1) == 0 &&
+          ct.trailing == 0 && m[0].caught_location_label == 34 &&
+          m[0].held_item == 5234,
+          "a location-label entry reads back as the label, beside the held item");
+    CHECK(m[0].caught_map == -1,
+          "and it leaves the place absent rather than standing in for one");
+
+    /* The condition word rides the same list. Twelve bits wide, because the bad
+     * poison keeps a counter above the six condition bits, and a record for a
+     * healthy monster carries no entry at all. */
+    CHECK(m[0].status == 0,
+          "a record with no condition entry carries a healthy monster");
+
+    static const u8 status_tail[] = {
+        MMO_MON_TLV_STATUS, 2, 0x88, 0x03,  /* badly poisoned, counter 3 */
+        MMO_MON_TLV_HELD_ITEM, 2, 0x72, 0x14,
+    };
+    u8 ill[sizeof body + sizeof status_tail];
+    memcpy(ill, body, sizeof body);
+    ill[sizeof body - 1] = (u8)sizeof status_tail;
+    memcpy(ill + sizeof body, status_tail, sizeof status_tail);
+    CHECK(mmo_game_read_pokemon_container(ill, sizeof ill, &ct, m, 1) == 0 &&
+          ct.trailing == 0 && m[0].status == 0x0388 &&
+          m[0].held_item == 5234,
+          "a condition entry reads back whole, counter and all");
+
+    static const u8 wide_tail[] = {
+        MMO_MON_TLV_STATUS, 2, 0x88, 0xF3,  /* bits the engine does not define */
+    };
+    u8 wide[sizeof body + sizeof wide_tail];
+    memcpy(wide, body, sizeof body);
+    wide[sizeof body - 1] = (u8)sizeof wide_tail;
+    memcpy(wide + sizeof body, wide_tail, sizeof wide_tail);
+    CHECK(mmo_game_read_pokemon_container(wide, sizeof wide, &ct, m, 1) == 0 &&
+          m[0].status == 0x0388,
+          "and a word with undefined bits is masked to the ones it has");
+
     /* A tag this build does not know is stepped over by its length, so a newer
      * server can add one without stranding an older client, and the entry
      * after it still reads. */
@@ -3086,6 +3375,76 @@ static void test_monster_detail_fields(void)
           "an entry longer than the list it sits in is refused");
 }
 
+/* The seat's shiny arithmetic, against the rule it has to satisfy. */
+static int shiny_by_the_engines_rule(u32 otid, u32 pid)
+{
+    return ((((otid & 0xFFFF0000u) >> 16) ^ (otid & 0xFFFFu)
+             ^ ((pid & 0xFFFF0000u) >> 16) ^ (pid & 0xFFFFu)) < 8);
+}
+
+static void test_shiny_personality(void)
+{
+    printf("the seat can put a record's shiny bit on the personality:\n");
+
+    /* Trainer ids across the range, including the two the arithmetic could trip
+     * on: 0, and one whose halves already cancel. */
+    static const u32 otids[] = {
+        0u, 0x00010001u, 0xFFFFFFFFu, 0x1A2B3C4Du, 0x9000BEEFu, 0x0000ABCDu,
+    };
+    int wrong_shiny = 0, wrong_nature = 0, wrong_low = 0, unmoved = 0;
+    unsigned t, n;
+    int want;
+
+    for (t = 0; t < sizeof otids / sizeof otids[0]; t++) {
+        for (n = 0; n < MMO_MON_NATURES; n++) {
+            for (want = 0; want <= 1; want++) {
+                /* A base personality of the shape the seat hands over: some
+                 * number whose residue is the nature the record holds. */
+                u32 base = 0x51E37A00u + n * 37u;
+                u32 pid;
+
+                base = base - (base % 25u) + n;
+                pid = mmo_mon_shiny_personality(base, otids[t], want, (int)n);
+                if (shiny_by_the_engines_rule(otids[t], pid) != want)
+                    wrong_shiny++;
+                if (pid % 25u != n)
+                    wrong_nature++;
+                if ((pid & 0xFFu) != (base & 0xFFu))
+                    wrong_low++;
+                /* The ordinary monster keeps the personality it had. Eight
+                 * personalities in 65536 collide with any one trainer id, and
+                 * none of these bases is one of them. */
+                if (!want && pid != base)
+                    unmoved++;
+            }
+        }
+    }
+    CHECK(wrong_shiny == 0,
+          "every solved personality is shiny exactly when the record says");
+    CHECK(wrong_nature == 0, "and keeps the nature the record holds");
+    CHECK(wrong_low == 0, "and keeps the low byte the gender and ability read");
+    CHECK(unmoved == 0, "and an ordinary monster keeps the personality it had");
+
+    /* The one case that has to move a monster nobody asked to move: a base that
+     * is accidentally shiny against this trainer, for a record that is not. */
+    {
+        u32 otid = 0x1234ABCDu;
+        u32 base = 0;
+        u32 pid;
+        int nature;
+
+        /* Pick a base that trips the rule, then hold the solver to undoing it. */
+        base = ((0x1234u ^ 0xABCDu) ^ 0x0000u) << 16; /* halves cancel: shiny */
+        nature = (int)(base % 25u);
+        CHECK(shiny_by_the_engines_rule(otid, base),
+              "a base personality can collide with a trainer id by accident");
+        pid = mmo_mon_shiny_personality(base, otid, 0, nature);
+        CHECK(!shiny_by_the_engines_rule(otid, pid) && pid % 25u == (u32)nature
+                  && (pid & 0xFFu) == (base & 0xFFu),
+              "and the solver moves it off the collision, nature and byte kept");
+    }
+}
+
 static void test_pokemon_move_encode(void)
 {
     printf("PokemonMovePacket body (the game client's own pair layout):\n");
@@ -3110,6 +3469,18 @@ static void test_pokemon_move_encode(void)
     CHECK(mmo_game_write_pokemon_move(&b, batch, 2) == 0, "a two-pair batch encodes");
     CHECK(b.len == 1 + 2 * 6, "the batch is one count byte and six bytes a pair");
     CHECK(b.len > 0 && b.data[0] == 2, "the count is the pair count");
+    mmo_wbuf_free(&b);
+
+    /* Handing one over the day care counter is the same pair with the day care's
+     * own container byte, which is 3, the fourth of the seven containers the
+     * join block carries, and the position `PokemonContainer.DAYCARE` has. */
+    static const u8 board[7] = { 0x01, 0x01, 0x04, 0x00, 0x03, 0x01, 0x00 };
+    mmo_pokemon_move hand_over = { MMO_CONTAINER_PARTY, 4, MMO_CONTAINER_DAYCARE, 1 };
+    mmo_wbuf_init(&b);
+    CHECK(mmo_game_write_pokemon_move(&b, &hand_over, 1) == 0,
+          "a day care hand-over encodes");
+    CHECK(b.len == sizeof board && memcmp(b.data, board, sizeof board) == 0,
+          "and it is the same pair with container 3 as the destination");
     mmo_wbuf_free(&b);
 
     /* The batches the game client will not send. */
@@ -3778,6 +4149,7 @@ int game_tests_run(void)
     test_select_character_encode();
     test_first_character_id();
     test_create_character_encode();
+    test_name_cap_counts_units();
     test_pick_character();
     test_selected_character();
     test_presence_decode();
@@ -3807,9 +4179,11 @@ int game_tests_run(void)
     test_battle_field_state_decode();
     test_battle_event_decode();
     test_battle_outcome_decode();
+    test_battle_outcome_encode();
     test_battle_select_encode();
     test_pokemon_container_decode();
     test_monster_detail_fields();
+    test_shiny_personality();
     test_pokemon_move_encode();
     test_move_learn_codec();
     test_incubator_decode();

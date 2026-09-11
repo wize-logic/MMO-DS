@@ -67,6 +67,9 @@ constructor(
     val packet = event.packet
     log.info { "MailCompose char=$charId to='${packet.recipientName}'" }
 
+    // Nothing is carried on a letter yet, so this is the whole of the rule today. When attachments
+    // do open, a monster brought in from an offline save stays refused here for the same reason the
+    // trade table and the shelf refuse it: a letter is a way to hand one to somebody else.
     if (packet.attachments.isNotEmpty()) {
       ctx.send(MailResultPacket(MAIL_ATTACH_ITEM))
       return

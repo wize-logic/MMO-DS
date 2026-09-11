@@ -14,7 +14,7 @@ struct launch_row {
 static const struct launch_row rows[MMO_LAUNCH_R_COUNT] = {
     { "ACCOUNT",      MMO_LAUNCH_ROW_TEXT   },
     { "PASSWORD",     MMO_LAUNCH_ROW_SECRET },
-    { "ROM DIR",      MMO_LAUNCH_ROW_TEXT   },
+    { "CARTRIDGES",   MMO_LAUNCH_ROW_TEXT   },
     { "PACING",       MMO_LAUNCH_ROW_CHOICE },
     { "SCALE",        MMO_LAUNCH_ROW_CHOICE },
     { "VIEWPORT",     MMO_LAUNCH_ROW_CHOICE },
@@ -28,6 +28,7 @@ static const struct launch_row rows[MMO_LAUNCH_R_COUNT] = {
     { "BUTTONS",      MMO_LAUNCH_ROW_CHOICE },
     { "DISCORD",      MMO_LAUNCH_ROW_CHOICE },
     { "PLAY",         MMO_LAUNCH_ROW_ACTION },
+    { "PLAY OFFLINE", MMO_LAUNCH_ROW_ACTION },
     { "QUIT",         MMO_LAUNCH_ROW_ACTION },
 };
 
@@ -154,7 +155,8 @@ const char *mmo_launch_menu_value(const mmo_launch_menu *m, int r,
         scratch[sizeof "********" - 1] = '\0';
         return scratch;
     case MMO_LAUNCH_R_ROM:
-        return s->rom[0] != '\0' ? s->rom : "(folder with pokeplatinum.us.nds)";
+        return s->rom[0] != '\0' ? s->rom
+                                 : "(none: Platinum, Heart Gold and Black)";
     case MMO_LAUNCH_R_PACE:
         return s->pace == MMO_PACE_UNLIMITED ? "UNLIMITED"
                                              : "CONSOLE RATE (60 FPS)";
@@ -170,9 +172,10 @@ const char *mmo_launch_menu_value(const mmo_launch_menu *m, int r,
         snprintf(scratch, cap, "%dX", s->render_scale);
         return scratch;
     case MMO_LAUNCH_R_HD3D:
-        /* SD or HD; which multiplier that is stays inside the plan. */
+        /* SD, HD or ULTRA; which multiplier that is stays inside the plan. */
         snprintf(scratch, cap, "%s",
-                 s->hd3d >= MMO_LAUNCH_HD3D_MAX ? "HD" : "SD");
+                 s->hd3d >= MMO_LAUNCH_HD3D_MAX ? "ULTRA"
+                 : (s->hd3d > MMO_LAUNCH_HD3D_MIN ? "HD" : "SD"));
         return scratch;
     case MMO_LAUNCH_R_FILTER:
         return mmo_launch_filter_name(s->filter);
@@ -240,6 +243,8 @@ int mmo_launch_menu_key(mmo_launch_menu *m, int key)
             return MMO_LAUNCH_MENU_QUIT;
         if (m->sel == MMO_LAUNCH_R_PLAY)
             return MMO_LAUNCH_MENU_PLAY;
+        if (m->sel == MMO_LAUNCH_R_PLAY_OFFLINE)
+            return MMO_LAUNCH_MENU_PLAY_OFFLINE;
         if (m->sel == MMO_LAUNCH_R_ROM)
             return MMO_LAUNCH_MENU_PICK_ROM;
         if (rows[m->sel].kind == MMO_LAUNCH_ROW_TEXT ||

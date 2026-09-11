@@ -27,18 +27,57 @@
 #include "unk_020298BC.h"
 #include "vars_flags.h"
 
+#include "pc_modfs.h"
+
 #define CONTEST_HEAP HEAP_ID_FIELD2
+
+/* ---- the cartridge's own sprites, for the length of a contest ------------- */
+#define CARTRIDGE_POKEGRA_MEMBERS 2964u
+#define CARTRIDGE_HEIGHT_MEMBERS  1976u
+
+static int s_scene_up;
+
+static int contest_claim_mask(const char *path, unsigned index)
+{
+    if (strcmp(path, "poketool/pokegra/pl_pokegra.narc") == 0)
+        return index < CARTRIDGE_POKEGRA_MEMBERS;
+    if (strcmp(path, "poketool/pokegra/height.narc") == 0)
+        return index < CARTRIDGE_HEIGHT_MEMBERS;
+    return 0;
+}
+
+/* Called from Contest_Init (1) and Contest_Free (0). */
+void openmmo_contest_scene(int up)
+{
+    s_scene_up = up ? 1 : 0;
+    pc_modfs_set_claim_mask(s_scene_up ? contest_claim_mask : NULL);
+}
+
+/* openmmo_sprite.c asks, so the live compositor stays out of a sheet the
+ * cartridge is drawing. */
+int openmmo_contest_scene_up(void)
+{
+    return s_scene_up;
+}
 
 typedef struct {
     Contest *contest;
     String *trainerName;
     u32 mapID;
+    int link;
 } ContestRun;
 
 enum {
     CONTEST_RUN_START = 0,
+    CONTEST_RUN_LINK_SETUP,
     CONTEST_RUN_FINISH,
 };
+
+/* The group this client is seated in, and the two ends
+ * of a link contest's life. The pipe is already up by the time a run starts,
+ * the seat is what starts it, and it comes down in the run's own teardown,
+ * where the placements also go up. */
+extern void openmmo_contest_link_ended(void *contest);
 
 int openmmo_contest_party_count(FieldSystem *fs)
 {
@@ -76,13 +115,45 @@ static BOOL contest_task(FieldTask *task)
 
     switch (task->state) {
     case CONTEST_RUN_START:
+        /*
+         * A link contest opens with an exchange of its own before any round runs, the seeds,
+         * the entered monsters and the trainers, which is the lobby script's
+         * ScrCmd_WaitForLinkContestSetup, in the same order: set the mode up, then wait for
+         * the comm task it starts.
+         */
+        if (run->link && Contest_SetUpLinkContest(run->contest)) {
+            task->state = CONTEST_RUN_LINK_SETUP;
+            break;
+        }
+        if (run->link) {
+            /* CommSys says there is no group. Running it solo would look like
+             * a link contest and be three engine rivals, so say so and let the
+             * rounds run for what they are. */
+            printf("openmmo: link contest, no group was up, so this is a"
+                   " solo contest\n");
+            run->link = 0;
+        }
         /* Pushes the engine's own contest task in front of this one; this
          * state machine resumes on the frame it returns. */
         task->state = CONTEST_RUN_FINISH;
         FieldTask_InitRunContestTask(task, run->contest);
         break;
 
+    case CONTEST_RUN_LINK_SETUP:
+        if (!Contest_IsCommTaskDone(run->contest))
+            break;
+        printf("openmmo: link contest, the group is set up; the rounds"
+               " start\n");
+        task->state = CONTEST_RUN_FINISH;
+        FieldTask_InitRunContestTask(task, run->contest);
+        break;
+
     case CONTEST_RUN_FINISH:
+        /* Before EndContest, exactly where the lobby's own teardown command has
+         * it: the placements this client computed go up and the pipe comes
+         * down, while the Contest is still allocated. A no-op when there was no
+         * pipe. */
+        openmmo_contest_link_ended(run->contest);
         /* The script's own EndContest, in the same order: record it, then
          * free it (scrcmd_contests.c, ScrCmd_EndContest). */
         Contest_EndContest(run->contest, fs->saveData, run->mapID,
@@ -102,7 +173,7 @@ static BOOL contest_task(FieldTask *task)
  * so a caller that is a task gets the contest pushed in front of it and
  * resumes when the contest is over. */
 int openmmo_contest_start(FieldSystem *fs, FieldTask *caller, int rank,
-                          int type, int competition, int slot)
+                          int type, int competition, int slot, int link)
 {
     PlayerMonContestDTO dto;
     ContestRun *run;
@@ -133,6 +204,7 @@ int openmmo_contest_start(FieldSystem *fs, FieldTask *caller, int rank,
         return 0;
     }
     memset(run, 0, sizeof(*run));
+    run->link = link;
     run->trainerName = bounded_trainer_name(info);
     if (run->trainerName == NULL) {
         Heap_Free(run);
@@ -169,7 +241,8 @@ int openmmo_contest_start(FieldSystem *fs, FieldTask *caller, int rank,
         FieldTask_InitCall(caller, contest_task, run);
     else
         FieldSystem_CreateTask(fs, contest_task, run);
-    printf("openmmo: contest starting, rank %d, type %d, competition %d,"
-           " slot %d\n", rank, type, competition, slot + 1);
+    printf("openmmo: %s starting, rank %d, type %d, competition %d,"
+           " slot %d\n", link ? "link contest" : "contest", rank, type,
+           competition, slot + 1);
     return 1;
 }

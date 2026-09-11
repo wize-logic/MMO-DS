@@ -49,10 +49,10 @@ class GrantBudgetTest :
       }
 
       /**
-       * Spending, consuming and releasing are the player giving something up. Counting those would
-       * mean a player who shops enough can no longer shop.
+       * A shiny is one monster in 8,192, so a minute says nothing about how many are honest and an
+       * hour says everything. It is the one kind measured over its own window, and a kind whose
+       * window has not turned over must not be reset by the ones that have.
        */
-      /** A shiny is rare enough that a minute says nothing about it and an hour says everything. */
       test("a shiny is counted over its own hour, not the minute the rest use") {
         var now = 0L
         val budget =
@@ -71,6 +71,10 @@ class GrantBudgetTest :
         budget.allow(1, GrantBudget.Kind.SHINY, 1) shouldBe true
       }
 
+      /**
+       * Spending, consuming and releasing are the player giving something up. Counting those would
+       * mean a player who shops enough can no longer shop.
+       */
       test("giving something up is not a grant and costs no allowance") {
         var now = 0L
         val budget = budget({ now })

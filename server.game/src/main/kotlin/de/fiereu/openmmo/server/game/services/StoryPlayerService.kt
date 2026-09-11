@@ -52,6 +52,8 @@ constructor(
        * request for one. Null where the server is the one rolling it.
        */
       val individual: Individual? = null,
+      /** Whether what is landing carries the provenance mark ([Pokemon.offlineOrigin]). */
+      val offlineOrigin: Boolean = false,
   )
 
   /**
@@ -93,6 +95,7 @@ constructor(
             caughtRegionId = (stored.info.positionRegionId.toInt() and 0xFF),
             caughtBankId = (stored.info.positionBankId.toInt() and 0xFF),
             caughtMapId = (stored.info.positionMapId.toInt() and 0xFF),
+            offlineOrigin = grant.offlineOrigin,
         )
     // Only tell the client about it once the database has it. Where it sits is the store's answer:
     // it takes the free slot inside the same update that writes the monster, so two grants that
@@ -103,15 +106,10 @@ constructor(
     session.send(SocialListEntryAddPacket(pokemon))
     species.get(dexId)?.let { session.send(acquiredMonsterDelta(pokemon, it)) }
     val fresh = characters.getCharacter(characterId)
-    session.send(
-        PokemonContainerPacket(
-            container = container,
-            hasChange = true,
-            delete = false,
-            pokemon =
-                (if (container == PokemonContainer.PC) fresh?.pcStorage else fresh?.pokemon)
-                    ?: listOf(pokemon),
-        ))
+    session.sendContainer(
+        container,
+        (if (container == PokemonContainer.PC) fresh?.pcStorage else fresh?.pokemon)
+            ?: listOf(pokemon))
     return pokemon
   }
 
@@ -130,6 +128,7 @@ constructor(
             container = PokemonContainer.PARTY,
             ot = stored.info.name,
             isEgg = true,
+            friendship = species.get(dexId)?.eggCycles ?: rolled.friendship,
         )
     val egg = characters.addPokemon(characterId, offered) ?: return null
     session.send(SocialListEntryAddPacket(egg))
@@ -144,8 +143,22 @@ constructor(
   }
 
   fun healParty(session: SessionContext, state: PlayerState) {
-    val characterId = state.characterId ?: return
-    val stored = characters.getCharacter(characterId) ?: return
+    val healed = healPartyStored(state.characterId ?: return) ?: return
+    session.send(
+        PokemonContainerPacket(
+            container = PokemonContainer.PARTY,
+            hasChange = true,
+            delete = false,
+            pokemon = healed,
+        ))
+  }
+
+  /**
+   * The half of [healParty] that writes, for a caller with nobody to tell. Returns the healed party
+   * so the caller can send it, or null when the character is not loaded.
+   */
+  fun healPartyStored(characterId: Long): List<Pokemon>? {
+    val stored = characters.getCharacter(characterId) ?: return null
     val healed =
         stored.pokemon.map { pokemon ->
           val definition = species.get(pokemon.dexId) ?: return@map pokemon
@@ -159,13 +172,7 @@ constructor(
           )
         }
     healed.forEach { characters.updatePokemon(characterId, it) }
-    session.send(
-        PokemonContainerPacket(
-            container = PokemonContainer.PARTY,
-            hasChange = true,
-            delete = false,
-            pokemon = healed,
-        ))
+    return healed
   }
 
   /** The decomp's `CheckItem`: whether the bag holds at least [quantity] of [item]. */
@@ -233,9 +240,13 @@ fun storyItemStacksPacket(items: Map<Int, Int>) =
               ItemStack(
                   objectId = (itemId.toLong() shl 16) or ITEM_ENTITY_TAG,
                   itemId = itemId.toShort(),
-                  quantity = quantity.toShort(),
+                  quantity = wireQuantity(quantity),
               )
             })
+
+/** A bag count as the wire carries it, held to what the client's own bag can show. */
+private fun wireQuantity(quantity: Int): Short =
+    quantity.coerceIn(0, BAG_MAX_QUANTITY_ITEM).toShort()
 
 /**
  * A bag stack, not a monster. The open shop window only refreshes its count when the update arrives
@@ -248,7 +259,7 @@ fun itemStackUpdatePacket(itemId: Int, quantity: Int) =
             BattleAddPokemon(
                 entityId = (itemId.toLong() shl 16) or ITEM_ENTITY_TAG,
                 frontSpriteId = itemId.toShort(),
-                backSpriteId = quantity.toShort(),
+                backSpriteId = wireQuantity(quantity),
                 side = 1,
                 slot = 0,
                 partyIndex = -1,

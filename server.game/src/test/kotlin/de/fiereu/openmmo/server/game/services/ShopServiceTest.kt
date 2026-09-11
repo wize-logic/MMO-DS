@@ -6,6 +6,7 @@ import de.fiereu.openmmo.common.enums.Region
 import de.fiereu.openmmo.items.ItemDef
 import de.fiereu.openmmo.items.ItemRegistry
 import de.fiereu.openmmo.items.generated.Items
+import de.fiereu.openmmo.net.game.packets.ChatMessagePacket
 import de.fiereu.openmmo.net.game.packets.ExchangeItemRequestPacket
 import de.fiereu.openmmo.net.game.packets.LocalCharacterDeltaPacket
 import de.fiereu.openmmo.net.game.packets.ShopCatalogPacket
@@ -14,6 +15,7 @@ import de.fiereu.openmmo.net.game.packets.battle.BattleSideAddPokemonPacket
 import de.fiereu.openmmo.server.game.session.OPEN_SHOP
 import de.fiereu.openmmo.server.game.storage.CharacterStore
 import de.fiereu.openmmo.server.game.storage.EntityIdService
+import de.fiereu.openmmo.server.game.storage.InMemoryOfflineItemRepository
 import de.fiereu.openmmo.server.game.testsupport.FakeCharacterRepository
 import de.fiereu.openmmo.server.game.testsupport.FakeSession
 import io.kotest.core.spec.style.FunSpec
@@ -21,6 +23,7 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
@@ -31,7 +34,8 @@ private const val CLERK_ENTITY = 4711L
 private class ShopFixture(scope: CoroutineScope) {
   val items = ItemRegistry()
   val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), scope)
-  val service = ShopService(store, items)
+  val offlineItems = InMemoryOfflineItemRepository()
+  val service = ShopService(store, items, offlineItems)
 
   suspend fun shopper(): Pair<FakeSession, Long> {
     val created = store.createCharacter(1, "Ash", CharacterGender.MALE, Region.HOENN)
@@ -180,6 +184,62 @@ class ShopServiceTest :
 
           fx.held(charId, 5017) shouldBe 1
           fx.money(charId) shouldBe 30000 - 300
+        }
+      }
+
+      /*
+       * A mart is where a bag turns into money, and money does not cross the import door, so
+       * an item that came in from a save file must not walk through this counter instead.
+       */
+      test("a mart will not buy what came in from a save file") {
+        runTest {
+          val fx = ShopFixture(backgroundScope)
+          val (session, charId) = fx.shopper()
+          fx.buy(session, 5017, 4)
+          // Two of those four are the file's.
+          fx.offlineItems.replace(charId, mapOf(5017 to 2))
+          val before = fx.money(charId)
+          session.sent.clear()
+
+          fx.sell(session, 5017, 3)
+
+          // Nothing sold, nothing paid, and the player is told how many they may sell.
+          fx.held(charId, 5017) shouldBe 4
+          fx.money(charId) shouldBe before
+          session.sent.filterIsInstance<ChatMessagePacket>().single().message shouldContain
+              "2 of your"
+        }
+      }
+
+      test("it buys the part that was earned here, and no more") {
+        runTest {
+          val fx = ShopFixture(backgroundScope)
+          val (session, charId) = fx.shopper()
+          fx.buy(session, 5017, 4)
+          fx.offlineItems.replace(charId, mapOf(5017 to 2))
+          val before = fx.money(charId)
+
+          fx.sell(session, 5017, 2)
+
+          fx.held(charId, 5017) shouldBe 2
+          fx.money(charId) shouldBe before + 300
+          // And now every one left is the file's, so the counter is done with this stack.
+          fx.sell(session, 5017, 1)
+          fx.held(charId, 5017) shouldBe 2
+        }
+      }
+
+      test("a stack nothing marks is sold as it always was") {
+        runTest {
+          val fx = ShopFixture(backgroundScope)
+          val (session, charId) = fx.shopper()
+          fx.buy(session, 5017, 2)
+          val before = fx.money(charId)
+
+          fx.sell(session, 5017, 2)
+
+          fx.held(charId, 5017) shouldBe 0
+          fx.money(charId) shouldBe before + 300
         }
       }
 

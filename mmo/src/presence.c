@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "endpoint.h" /* openmmo_dev_env, for the two overrides below */
 #include "platform.h" /* mmo_plat_pid, for the pid SET_ACTIVITY wants */
 
 #if defined(_WIN32)
@@ -415,7 +416,7 @@ static void copy_line(char *dst, const char *src)
 
 const char *mmo_presence_app_id(void)
 {
-    const char *over = getenv("OPENMMO_DISCORD_APP");
+    const char *over = openmmo_dev_env("OPENMMO_DISCORD_APP");
 
     return (over != NULL && over[0] != '\0') ? over : MMO_PRESENCE_APP_ID;
 }
@@ -433,7 +434,7 @@ void mmo_presence_init(mmo_presence *p, const char *app_id)
     }
     snprintf(p->app_id, sizeof p->app_id, "%s", app_id);
     {
-        const char *over = getenv("OPENMMO_DISCORD_IPC");
+        const char *over = openmmo_dev_env("OPENMMO_DISCORD_IPC");
 
         if (over != NULL && over[0] != '\0')
             snprintf(p->path, sizeof p->path, "%s", over);

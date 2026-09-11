@@ -32,8 +32,9 @@ private fun rootCause(t: Throwable): Throwable {
 class FrameAndChecksumTest :
     FunSpec({
       /**
-       * The limiter answers by not reading rather than by refusing, so nothing is dropped and
-       * nobody is disconnected for being quick.
+       * Everything behind the limiter is work a peer can ask for, most of it landing on a coroutine
+       * mailbox the socket can fill faster than the handlers drain it, and none of it needing the
+       * peer to have authenticated.
        */
       test("InboundRateLimiter stops reading when the burst is spent, and reads again after") {
         var now = 0L

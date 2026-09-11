@@ -25,9 +25,13 @@
 #include <unistd.h>
 
 #include <android_native_app_glue.h>
+#include <dirent.h>
 
 #include "view_channel.h"   /* our own copy of the frame page */
+#include "crypto.h"         /* sha256, for the package digest */
 #include "sdlshim_android.h" /* the desktop viewer, when it is linked in */
+#include "mmo_device.h"      /* the device's own defaults */
+#include "mmo_calibrate.h"   /* what it held last time */
 
 #define TAG "openmmo"
 /* Every line goes to A FILE too, and the FILE IS where a player can reach it. */
@@ -265,6 +269,7 @@ static void *log_pump(void *arg)
             if (used > 0) {
                 __android_log_write(ANDROID_LOG_INFO, "openmmo.engine", line);
                 log_file_write("engine", line);
+                mmo_calibrate_note_line(line);
             }
             used = 0;
             if (c != '\n') {
@@ -318,11 +323,22 @@ extern int mmo_frontdoor_run(const char *art_dir, char *user, size_t ucap,
                              char *pass, size_t pcap) __attribute__((weak));
 extern void mmo_frontdoor_apply(char *view_args, size_t cap)
     __attribute__((weak));
+/* The package's asset manager, for the art the door draws (bg.png and the
+ * wordmark travel as assets; nothing else does). */
+extern void mmo_frontdoor_assets(void *mgr) __attribute__((weak));
+
+/* The game's own frame, stopped and started again inside the engine
+ * (mmo/mods/openmmo/src/openmmo_boot.c). Weak for the same reason as the
+ * rest: an APK built without the mod objects still runs the surface. */
+extern void openmmo_mod_pause(int on) __attribute__((weak));
 
 static void engine_go(struct android_app *app);
 static void engine_env(struct android_app *app);
 
 static int g_viewer_started;
+/* Set by the engine's thread when main() has returned, which is the port
+ * having run its own exit, the card flushed, the report written. */
+static volatile int g_engine_done;
 
 static int viewer_on(void)
 {
@@ -365,6 +381,13 @@ static int find_rom(struct android_app *app)
      * unit with no ANativeActivity of its own to ask. */
     if (dirs[0] != NULL) {
         setenv("OPENMMO_EXTERNAL_DIR", dirs[0], 1);
+    }
+    /* And the private one, for what must not be reachable by another app:
+     * a downloaded update waits there between being proved and being
+     * streamed to the installer, and the installer's verdict is written
+     * there by the activity (mmo_update_notice.c). */
+    if (dirs[1] != NULL) {
+        setenv("OPENMMO_INTERNAL_DIR", dirs[1], 1);
     }
     /*
      * The chosen cartridge first. The front door saves a path the player picked
@@ -433,6 +456,78 @@ static int find_rom(struct android_app *app)
 }
 
 /* Knobs, from the device, without a rebuild. */
+/* The packages the device composed for itself, digested. */
+static void mods_digest_walk(const char *root, const char *rel, FILE *out)
+{
+    char path[1024];
+    DIR *d;
+    struct dirent *e;
+
+    snprintf(path, sizeof path, "%s%s%s", root, rel[0] ? "/" : "", rel);
+    d = opendir(path);
+    if (d == NULL) {
+        return;
+    }
+    while ((e = readdir(d)) != NULL) {
+        char sub[1024];
+        struct stat st;
+
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) {
+            continue;
+        }
+        snprintf(sub, sizeof sub, "%s%s%s", rel, rel[0] ? "/" : "", e->d_name);
+        snprintf(path, sizeof path, "%s/%s", root, sub);
+        if (stat(path, &st) != 0) {
+            continue;
+        }
+        if (S_ISDIR(st.st_mode)) {
+            mods_digest_walk(root, sub, out);
+        } else if (S_ISREG(st.st_mode)) {
+            static unsigned char buf[65536];
+            mmo_sha256_ctx c;
+            u8 dg[MMO_SHA256_DIGEST];
+            FILE *f = fopen(path, "rb");
+            size_t n;
+            int i;
+
+            if (f == NULL) {
+                continue;
+            }
+            mmo_sha256_init(&c);
+            while ((n = fread(buf, 1, sizeof buf, f)) > 0) {
+                mmo_sha256_update(&c, buf, n);
+            }
+            fclose(f);
+            mmo_sha256_final(&c, dg);
+            for (i = 0; i < MMO_SHA256_DIGEST; i++) {
+                fprintf(out, "%02x", dg[i]);
+            }
+            fprintf(out, " %lld %s\n", (long long)st.st_size, sub);
+        }
+    }
+    closedir(d);
+}
+
+static void mods_digest(const char *ext)
+{
+    const char *e = getenv("OPENMMO_MODS_DIGEST");
+    char root[600], outp[600];
+    FILE *out;
+
+    if (e == NULL || e[0] == '\0' || e[0] == '0' || ext == NULL) {
+        return;
+    }
+    snprintf(root, sizeof root, "%s/mods", ext);
+    snprintf(outp, sizeof outp, "%s/mods-digest.txt", ext);
+    out = fopen(outp, "w");
+    if (out == NULL) {
+        return;
+    }
+    mods_digest_walk(root, "", out);
+    fclose(out);
+    LOGI("mods: digest written to %s", outp);
+}
+
 static void engine_env_file(const char *dir)
 {
     char path[512];
@@ -480,6 +575,7 @@ static void *engine_thread(void *arg)
     LOGI("engine: entering main()");
     main(1, argv);
     LOGE("engine: main() returned, the game has stopped");
+    g_engine_done = 1;
     return NULL;
 }
 
@@ -532,17 +628,30 @@ static void *viewer_thread(void *arg)
 
             snprintf(art, sizeof art, "%s/launcher",
                      ext != NULL ? ext : "");
-            if (mmo_frontdoor_run(art, fd_user, sizeof fd_user, fd_pass,
-                                  sizeof fd_pass) != 0) {
+            if (mmo_frontdoor_assets != NULL)
+                mmo_frontdoor_assets(app->activity->assetManager);
+            int door = mmo_frontdoor_run(art, fd_user, sizeof fd_user,
+                                         fd_pass, sizeof fd_pass);
+
+            if (door == 1) {
                 LOGI("front door: exit");
                 exit(0);
             }
-            LOGI("front door: playing as %s%s", fd_user,
-                 fd_pass[0] == '\0' ? " (saved sign-in)" : "");
-            setenv("OPENMMO_USER", fd_user, 1);
-            setenv("OPENMMO_PASS", fd_pass, 1);
+            if (door == 2) {
+                /* PLAY OFFLINE. The door has already named the save, the
+                 * clock and the recording and said there is no session
+                 * (mmo_frontdoor_launch.c); there is no account to hand
+                 * over, and the game is the port with its own file. */
+                LOGI("front door: playing offline");
+            } else {
+                LOGI("front door: playing as %s%s", fd_user,
+                     fd_pass[0] == '\0' ? " (saved sign-in)" : "");
+                setenv("OPENMMO_USER", fd_user, 1);
+                setenv("OPENMMO_PASS", fd_pass, 1);
+            }
         }
     }
+    mods_digest(ext);
     /* The settings become the game's environment and the window's rows, the
      * way the desktop plan pushes them, after the door, so what was just
      * saved is what applies, and on scripted runs too. openmmo.env still
@@ -682,6 +791,24 @@ static void engine_start(struct android_app *app)
         }
     }
 
+    /*
+     * Where the token and launcher.cfg live: the desktop keeps them under the config home, so
+     * point that inside the sandbox and both sides of the client (token.c here, the mod's mint
+     * on a password login) agree on the same file.
+     */
+    if (app->activity->internalDataPath != NULL) {
+        /*
+         * Created here, NOT assumed. The framework makes this directory lazily, for apps that
+         * ask through Context.getFilesDir(), which a C app never does.
+         */
+        if (mkdir(app->activity->internalDataPath, 0700) != 0
+            && errno != EEXIST) {
+            LOGE("config: cannot create %s: %s",
+                 app->activity->internalDataPath, strerror(errno));
+        }
+        setenv("XDG_CONFIG_HOME", app->activity->internalDataPath, 0);
+    }
+
     /* Scanned before the door, and again after it. The door now carries a
      * cartridge picker (mmo_frontdoor.c), so a player with no ROM can supply
      * one without leaving the app, and the file that was not there when
@@ -701,23 +828,6 @@ static void engine_start(struct android_app *app)
     /* Paced by the game's own clock, not by this thread's swap: the two are
      * separate on purpose, so a dropped picture never slows the game down. */
     engine_env(app);
-    /* Where the token and launcher.cfg live: the desktop keeps them under
-     * the config home, so point that inside the sandbox and both sides of
-     * the client (token.c here, the mod's mint on a password login) agree
-     * on the same file. */
-    if (app->activity->internalDataPath != NULL) {
-        /*
-         * Created here, NOT assumed. The framework makes this directory lazily, for apps that
-         * ask through Context.getFilesDir(), which a C app never does.
-         */
-        if (mkdir(app->activity->internalDataPath, 0700) != 0
-            && errno != EEXIST) {
-            LOGE("config: cannot create %s: %s",
-                 app->activity->internalDataPath, strerror(errno));
-        }
-        setenv("XDG_CONFIG_HOME", app->activity->internalDataPath, 0);
-    }
-
     viewer_start(app);
     if (!viewer_on()) {
         /* No viewer, no front door: the old path boots the engine now. */
@@ -745,11 +855,29 @@ static void engine_env(struct android_app *app)
      * so a session is the default and openmmo.env can still say 0 to boot the bare port.
      */
     setenv("OPENMMO_SESSION", "1", 0);
-    /* Four worker threads, not the engine's cpus-minus-two six: measured on
-     * this device at hd3d 2, six and four hold the same frame rate, but six
-     * lands two workers on the little cores and the worst frame goes from
-     * 22 ms to 50, the tail is what a player feels. openmmo.env overrides. */
-    setenv("PC_THREADS", "4", 0);
+    /*
+     * The worker pool, sized to the device's BIG cores rather than to the engine's cpus-minus-
+     * two: measured on the RG556 at hd3d 2, six and four hold the same frame rate, but six
+     * lands two workers on the little cores and the worst frame goes from 22 ms to 50, the
+     * tail is what a player feels.
+     */
+    {
+        struct mmo_device_defaults d;
+        char buf[8];
+
+        mmo_device_defaults(&d);
+        snprintf(buf, sizeof buf, "%d", d.threads);
+        setenv("PC_THREADS", buf, 0);
+    }
+    /* The pacer's five-second verdicts, which are what the calibration
+     * reads (mmo_calibrate.c). One line every 300 frames into a log the
+     * app writes anyway. */
+    setenv("PC_TRACE_PACE", "1", 0);
+    /* Whatever decided PC_HD3D, the door, the file, openmmo.env, this
+     * is the level the session is measured at. */
+    if (getenv("PC_HD3D") != NULL) {
+        mmo_calibrate_session_level(atoi(getenv("PC_HD3D")));
+    }
 }
 
 /* The game's own threads, started when the account question is settled: by
@@ -1511,7 +1639,9 @@ static int32_t on_input(struct android_app *app, AInputEvent *ev)
 
 
 /* ====================================================================== sound */
-#define AA_IN_RATE  OPENMMO_VIEW_AUDIO_RATE
+/* The page's rate, read when the stream opens; the constant until then. */
+static uint32_t g_aa_in_rate = OPENMMO_VIEW_AUDIO_RATE;
+#define AA_IN_RATE  g_aa_in_rate
 
 static AAudioStream *g_aa;
 static uint32_t g_aa_tail;
@@ -1521,21 +1651,37 @@ static double   g_aa_pos;            /* fractional position between two
                                         input frames, when resampling */
 static uint32_t g_aa_cushion;        /* frames to stay behind the writer */
 static uint64_t g_aa_rebuffers;
+static uint64_t g_aa_trimmed;      /* frames the governor dropped */
 static int16_t  g_aa_prev[2];
 static int      g_aa_have_prev;
 
 /* Pull `want` input frames out of the ring, padding with silence. */
-static void aa_resync(void)
-{
-    uint32_t head = __atomic_load_n(&g_page->audio_head, __ATOMIC_ACQUIRE);
-
-    g_aa_tail = head - (head < g_aa_cushion ? head : g_aa_cushion);
-}
+static int g_aa_priming = 1;    /* silence until the cushion is back */
 
 static unsigned aa_pull(int16_t *dst, unsigned want)
 {
-    uint32_t lost = 0;
+    uint32_t head = __atomic_load_n(&g_page->audio_head, __ATOMIC_ACQUIRE);
+    uint32_t lost = 0, backlog;
     unsigned got;
+
+    if (g_aa_priming) {
+        if (head - g_aa_tail < g_aa_cushion) {
+            memset(dst, 0, (size_t)want * 2 * sizeof(int16_t));
+            g_aa_starved += want;
+            return 0;
+        }
+        g_aa_priming = 0;
+    }
+
+    /*
+     * The governor. Four cushions of backlog is latency nobody asked for and the way to the
+     * ring's own capacity; land back on one cushion and say so.
+     */
+    backlog = head - g_aa_tail;
+    if (backlog > g_aa_cushion * 4u) {
+        g_aa_tail = head - g_aa_cushion;
+        g_aa_trimmed += backlog - g_aa_cushion;
+    }
 
     got = openmmo_view_audio_read(g_page, &g_aa_tail, dst, want, &lost);
     g_aa_dropped += lost;
@@ -1543,10 +1689,8 @@ static unsigned aa_pull(int16_t *dst, unsigned want)
         g_aa_starved += want - got;
         memset(dst + (size_t)got * 2, 0,
                (size_t)(want - got) * 2 * sizeof(int16_t));
-        if (got == 0) {
-            g_aa_rebuffers++;
-            aa_resync();
-        }
+        g_aa_rebuffers++;
+        g_aa_priming = 1;
     }
     return got;
 }
@@ -1628,6 +1772,7 @@ static void audio_start(void)
     if (g_page->audio_rate == 0) {
         return;
     }
+    g_aa_in_rate = g_page->audio_rate;
     r = AAudio_createStreamBuilder(&b);
     if (r != AAUDIO_OK) {
         LOGE("sound: no stream builder (%s)", AAudio_convertResultToText(r));
@@ -1667,7 +1812,10 @@ static void audio_start(void)
     if (g_aa_cushion == 0 || g_aa_cushion > OPENMMO_VIEW_AUDIO_FRAMES / 4u) {
         g_aa_cushion = 2048u;
     }
-    aa_resync();
+    /* Start priming rather than level with the writer: the first callback
+     * arrives before the engine has made a cushion's worth of anything. */
+    g_aa_tail = __atomic_load_n(&g_page->audio_head, __ATOMIC_ACQUIRE);
+    g_aa_priming = 1;
     g_aa_pos = 0.0;
     LOGI("sound: %d Hz out, %u Hz in%s, %d-frame burst, %u-frame cushion"
          " (%.0f ms)", g_aa_rate, (unsigned)AA_IN_RATE,
@@ -1681,21 +1829,57 @@ static void audio_start(void)
     }
 }
 
+/* The ledger, and it has to print while the game IS playing or it answers nothing. */
 static void audio_report(void)
 {
     static uint64_t last_frames;
+    uint32_t head, backlog;
     int32_t xruns;
 
-    if (g_aa == NULL) {
+    if (g_aa == NULL || g_page == NULL) {
         return;
     }
+    head = __atomic_load_n(&g_page->audio_head, __ATOMIC_ACQUIRE);
+    backlog = head - g_aa_tail;
     xruns = AAudioStream_getXRunCount(g_aa);
-    LOGI("sound: %llu frames out, %llu padded with silence, %llu dropped"
-         " behind, %llu rebuffer(s), %d underrun(s) the device counted",
+    LOGI("sound: %llu frames out, backlog %u (%u ms) of %u cushion%s;"
+         " %llu padded with silence, %llu dropped behind, %llu trimmed,"
+         " %llu rebuffer(s), %d underrun(s) the device counted",
          (unsigned long long)(g_aa_frames - last_frames),
+         (unsigned)backlog,
+         (unsigned)((uint64_t)backlog * 1000u / (AA_IN_RATE ? AA_IN_RATE : 1u)),
+         (unsigned)g_aa_cushion, g_aa_priming ? " (priming)" : "",
          (unsigned long long)g_aa_starved, (unsigned long long)g_aa_dropped,
+         (unsigned long long)g_aa_trimmed,
          (unsigned long long)g_aa_rebuffers, (int)xruns);
     last_frames = g_aa_frames;
+}
+
+/*
+ * Whether this run has a session, asked exactly as the game asks it (openmmo_boot.c,
+ * session_configured): set, not empty, and not starting with a zero.
+ */
+static int session_configured(void)
+{
+    const char *s = getenv("OPENMMO_SESSION");
+
+    return s != NULL && s[0] != '\0' && s[0] != '0';
+}
+
+/*
+ * The engine's loop, parked while the app is away and only when there is no server on the
+ * other end of it.
+ */
+static void engine_pause(int on)
+{
+    if (openmmo_mod_pause == NULL) {
+        return;
+    }
+    if (on && (!g_engine_started || session_configured())) {
+        return;
+    }
+    openmmo_mod_pause(on);
+    LOGI("engine: %s", on ? "parked while the app is away" : "running again");
 }
 
 static void on_cmd(struct android_app *app, int32_t cmd)
@@ -1710,6 +1894,10 @@ static void on_cmd(struct android_app *app, int32_t cmd)
             break;
         }
         probe_guest_map();
+        /* The surface's real size, ahead of the door that lays itself out
+         * on it and the defaults that read the panel's rows. */
+        mmo_device_note_window(ANativeWindow_getWidth(app->window),
+                               ANativeWindow_getHeight(app->window));
         engine_start(app);      /* reads openmmo.env, starts both threads */
         if (viewer_on()) {
             mmo_sdlshim_set_window(app->window);
@@ -1727,16 +1915,20 @@ static void on_cmd(struct android_app *app, int32_t cmd)
         }
         break;
     case APP_CMD_PAUSE:
+        /* What the session has measured so far, written now: a paused app
+         * is often a killed app a minute later. */
+        mmo_calibrate_flush();
         /* A backgrounded game that keeps playing is a game somebody hears
-         * from another app. The engine keeps running: it is a session on a
-         * server and stopping it is a disconnection. */
+         * from another app. */
         if (viewer_on()) {
             mmo_sdlshim_background(1);
         } else {
             audio_stop();
         }
+        engine_pause(1);
         break;
     case APP_CMD_RESUME:
+        engine_pause(0);
         if (viewer_on()) {
             mmo_sdlshim_background(0);
         } else {
@@ -1903,9 +2095,8 @@ int mmo_android_rom_uri_fd(const char *uri)
 }
 
 /*
- * Hand a URL to whatever browses on this device, the update notice's "get it" button
- * (android/src/mmo_update_notice.c), which is what an app has instead of the desktop's
- * patcher.
+ * Hand a URL to whatever browses on this device, the update notice's last resort
+ * (android/src/mmo_update_notice.c) when the installer will not take the package it fetched.
  */
 int mmo_android_open_url(const char *url)
 {
@@ -1922,6 +2113,51 @@ int mmo_android_open_url(const char *url)
     return rc;
 }
 
+/*
+ * Hand a downloaded, proven APK to the package installer, the activity's installApk
+ * (OpenMMOActivity.java), which streams it into an installer session and asks the system to
+ * confirm.
+ */
+int mmo_android_install_apk(const char *path)
+{
+    jvalue arg;
+    JNIEnv *env = pick_env();
+    int rc;
+
+    if (env == NULL || path == NULL || path[0] == '\0') {
+        return -1;
+    }
+    arg.l = (*env)->NewStringUTF(env, path);
+    rc = pick_call("installApk", "(Ljava/lang/String;)V", &arg, NULL, 'v');
+    (*env)->DeleteLocalRef(env, arg.l);
+    return rc;
+}
+
+/* The installer's verdict, if one has arrived: 1 with the line in `out`
+ * (and the file consumed), 0 while nothing has been said yet. The lines are
+ * the activity's: "pending", "denied", "done", or "failed <reason>". */
+int mmo_android_install_result(char *out, size_t cap)
+{
+    char path[600];
+    const char *dir = getenv("OPENMMO_INTERNAL_DIR");
+    FILE *f;
+    size_t n;
+
+    if (dir == NULL) {
+        return 0;
+    }
+    snprintf(path, sizeof path, "%s/update.result", dir);
+    f = fopen(path, "rb");
+    if (f == NULL) {
+        return 0;
+    }
+    n = fread(out, 1, cap - 1, f);
+    fclose(f);
+    remove(path);
+    out[n] = '\0';
+    return 1;
+}
+
 void android_main(struct android_app *app)
 {
     g_app = app;
@@ -1936,6 +2172,9 @@ void android_main(struct android_app *app)
      * 1920x1003 against an EGL surface of 1920x1080, 77 rows the system draws over.
      */
     ANativeActivity_setWindowFlags(app->activity, AWINDOW_FLAG_FULLSCREEN, 0);
+    /* What this device is, panel, cores, memory, before anything
+     * defaults on it. The window and the GL driver report themselves later. */
+    mmo_device_probe(app);
     {
         /* The load base, because every address in a stall report or a crash is
          * relative to it and an app's /proc/self/maps is readable by nobody
@@ -1969,8 +2208,31 @@ void android_main(struct android_app *app)
             if (app->destroyRequested != 0) {
                 LOGI("android_main: %u frames, %u presented", frames,
                      presented);
+                mmo_calibrate_flush();
                 audio_stop();
                 egl_down();
+                /*
+                 * The activity ending IS the game ending, and the port has to hear it: its
+                 * card is written through a flush that runs at exit, and so is the report an
+                 * offline save is offered back to the server with (openmmo_import.c).
+                 */
+                if (g_engine_started) {
+                    struct openmmo_view_shm *p = page();
+                    int waited;
+
+                    if (p != NULL) {
+                        p->in_quit = 1;
+                    }
+                    for (waited = 0; waited < 40 && !g_engine_done; waited++) {
+                        struct timespec ts = { 0, 100000000 };
+
+                        nanosleep(&ts, NULL);
+                    }
+                    LOGI("android_main: exiting so the game's save and report"
+                         " are written (%s)", g_engine_done ? "the game quit"
+                                                            : "after a wait");
+                    exit(0);
+                }
                 return;
             }
             timeout = 0;
@@ -1989,9 +2251,18 @@ void android_main(struct android_app *app)
                 uint32_t seq = p != NULL ? p->seq : 0;
                 double secs = (double)(now - last) / 1e9;
 
+                /*
+                 * The page's seq bumps twice a frame, odd while the writer is in it, even
+                 * when it is stable, so the halving is what makes this the guest's frame
+                 * rate rather than twice it.
+                 */
                 LOGI("game: published %.1f fps over %.0f s (viewer %s)",
-                     (double)(seq - last_seq) / secs, secs,
+                     (double)(seq - last_seq) / 2.0 / secs, secs,
                      mmo_sdlshim_active() ? "up" : "starting");
+                /* The sound's own ledger, on the same heartbeat: this branch
+                 * returns to the top of the loop, so the report below the
+                 * present path never ran during a session. */
+                audio_report();
                 last_seq = seq;
                 last = now;
             }

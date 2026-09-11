@@ -1,8 +1,12 @@
 package de.fiereu.openmmo.server.game.services
 
 import de.fiereu.network.PacketEvent
+import de.fiereu.openmmo.common.Pokemon
 import de.fiereu.openmmo.common.enums.CharacterGender
 import de.fiereu.openmmo.common.enums.Direction
+import de.fiereu.openmmo.common.enums.EVs
+import de.fiereu.openmmo.common.enums.IVs
+import de.fiereu.openmmo.common.enums.PokemonContainer
 import de.fiereu.openmmo.common.enums.Region
 import de.fiereu.openmmo.common.test.encodeToBytes
 import de.fiereu.openmmo.maps.MapManager
@@ -12,6 +16,7 @@ import de.fiereu.openmmo.net.game.packets.GbaEntityMovePacket
 import de.fiereu.openmmo.net.game.packets.GbaEntityMovePacketCodec
 import de.fiereu.openmmo.net.game.packets.LoadEntityPacketCodec
 import de.fiereu.openmmo.net.game.packets.MovementPacket
+import de.fiereu.openmmo.pokemon.SpeciesRegistry
 import de.fiereu.openmmo.server.game.script.Script
 import de.fiereu.openmmo.server.game.script.ScriptRegistry
 import de.fiereu.openmmo.server.game.session.SCRIPT_SCOPE
@@ -26,6 +31,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
+import java.time.LocalDateTime
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 
@@ -38,13 +44,69 @@ class SinnohWalkTest :
           val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
           val created = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info
 
-          val packet = MapLoadService(MapManager()).createLoadEntity(created)
+          val packet = MapLoadService(MapManager(), SpeciesRegistry()).createLoadEntity(created)
           packet.mapId shouldBe 159
           packet.x shouldBe 4
           packet.y shouldBe 6
 
           val bytes = LoadEntityPacketCodec.encodeToBytes(packet)
           bytes.size shouldBeGreaterThan (0)
+        }
+      }
+
+      // Which party member walks behind the trainer, and it is HeartGold's rule
+      // rather than "the first one": the first still standing, or, when the whole
+      // party has fainted, the first that is not an egg. An egg never follows.
+      test("the follower published is the first that can walk, HeartGold's rule") {
+        runTest {
+          val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+          val created = store.createCharacter(2, "Dawn", CharacterGender.FEMALE, Region.SINNOH).info
+          val service = MapLoadService(MapManager(), SpeciesRegistry())
+
+          fun mon(dex: Int, hp: Int, egg: Boolean = false) =
+              Pokemon(
+                  id = dex.toLong(),
+                  ownerId = created.id,
+                  container = PokemonContainer.PARTY,
+                  containerSlot = 0,
+                  dexId = dex,
+                  seed = 0,
+                  ot = "Dawn",
+                  nickname = "",
+                  level = 5,
+                  hp = hp.toShort(),
+                  xp = 0,
+                  eVs = EVs(),
+                  iVs = IVs(),
+                  moves = listOf(),
+                  isShiny = false,
+                  hasHiddenAbility = false,
+                  isAlpha = false,
+                  isSecret = false,
+                  isFatefulEncounter = false,
+                  isRaidEncounter = false,
+                  caughtAt = LocalDateTime.now(),
+                  isEgg = egg,
+              )
+
+          // A fainted lead is passed over for the one behind it.
+          service.createLoadEntity(created, party = listOf(mon(1, 0), mon(4, 12))).let {
+            it.hasFollower shouldBe true
+            it.followerDexId shouldBe 4
+          }
+          // A whole party on the floor still has somebody behind you.
+          service.createLoadEntity(created, party = listOf(mon(1, 0), mon(4, 0))).let {
+            it.hasFollower shouldBe true
+            it.followerDexId shouldBe 1
+          }
+          // An egg is never it, in either arm.
+          service.createLoadEntity(created, party = listOf(mon(1, 0, egg = true), mon(4, 9))).let {
+            it.hasFollower shouldBe true
+            it.followerDexId shouldBe 4
+          }
+          service.createLoadEntity(created, party = listOf(mon(1, 5, egg = true))).let {
+            it.hasFollower shouldBe false
+          }
         }
       }
 
@@ -87,7 +149,10 @@ class SinnohWalkTest :
           val maps = MapManager()
           val presence =
               PresenceService(
-                  InterestManager(), PassThroughInterestPolicy(), MapLoadService(maps), store)
+                  InterestManager(),
+                  PassThroughInterestPolicy(),
+                  MapLoadService(maps, SpeciesRegistry()),
+                  store)
           val movement = movementService(store, maps, presence)
 
           val walker =

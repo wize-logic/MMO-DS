@@ -1,0 +1,69 @@
+--- a/include/overlay005/map_prop_animation.h
++++ b/include/overlay005/map_prop_animation.h
+@@ -7,7 +7,14 @@
+ 
+ #define MAP_PROP_ANIME_LIST_FILE_ARCHIVE_IDS_COUNT 4
+ 
+-#define MAP_PROP_ANIMATION_MANAGER_MAX_ANIMATIONS               16
++/* Raised from 16 for a ported region. This game loads every ambient
++ * animation of an AREA's whole build list into these slots at area entry,
++ * and a HeartGold area spans a town and its roads at once: 31 slots even
++ * deduped, measured on 2026-08-31. The manager is one struct inside the
++ * field's heap, so the raise costs 48 * sizeof(MapPropAnimation) = 1920
++ * bytes; the loader skips a row past the slots rather than asserting
++ * (src/overlay005/map_prop_animation.c). */
++#define MAP_PROP_ANIMATION_MANAGER_MAX_ANIMATIONS               64
+ #define MAP_PROP_ANIMATION_MANAGER_MAX_BICYCLE_SLOPE_ANIMATIONS 2
+ 
+ #define MAP_PROP_ONE_SHOT_ANIMATION_MAX_ANIMATIONS 4
+@@ -16,6 +23,14 @@
+ 
+ #define MAP_PROP_ONE_SHOT_ANIMATION_MANAGER_MAX_ITEMS 16
+ 
++/* openmmo: how many placed props one animation slot may drive at once. An
++ * animation object sits in ONE render object's list, its own `next` is the
++ * link, and a HeartGold area places the same sign or flower many times,
++ * so every placement gets a clone of the slot's object, advanced with the
++ * slot, and gives it back when its chunk unloads
++ * (src/overlay005/map_prop_animation.c, map_prop.c). */
++#define MAP_PROP_ANIMATION_CLONES 48
++
+ typedef struct MapPropAnimation {
+     NNSG3dAnmObj *animationObj;
+     BOOL loaded;
+@@ -27,6 +42,12 @@
+     BOOL looping;
+     BOOL reversed;
+     int pastoriaGymButtonGroup;
++    /* openmmo: the texture set the slot was bound against, and the clones
++     * with the render object each one sits in. */
++    NNSG3dResTex *texture;
++    NNSG3dAnmObj *clones[MAP_PROP_ANIMATION_CLONES];
++    NNSG3dRenderObj *cloneOwner[MAP_PROP_ANIMATION_CLONES];
++    int cloneCount;
+ } MapPropAnimation;
+ 
+ typedef struct BicycleSlopeAnimation {
+@@ -78,6 +99,22 @@
+ void MapPropAnimationManager_UnloadAnimation(MapPropAnimation *animation, MapPropAnimationManager *manager);
+ void MapPropAnimationManager_RemoveAnimationFromRenderObj(MapPropAnimationManager *manager, NNSG3dRenderObj *mapPropRenderObj, const int mapPropModelID, const int mapPropAnimIndex);
+ void MapPropAnimationManager_Free(MapPropAnimationManager *manager);
++/* openmmo: everything the clones above need doing to them, all of it in
++ * mods/openmmo/src/openmmo_propanim.c. Declared here rather than as an extern
++ * in the patched source so that both sides are the compiler's problem: the
++ * engine file and the mod source include this header, and a signature that
++ * stops matching is an error rather than a silent argument.
++ *
++ * ReleaseRenderObj is the one an engine file other than map_prop_animation.c
++ * calls: a placed prop's render object is going away with its chunk, so the
++ * clones in it are freed (map_prop.c). NULL-safe, cheap when none. */
++void MapPropAnimationManager_ReleaseRenderObj(NNSG3dRenderObj *renderObj);
++void openmmo_prop_anim_bind(MapPropAnimationManager *manager);
++void openmmo_prop_anim_unbind(MapPropAnimationManager *manager);
++void openmmo_prop_anim_slot_bound(MapPropAnimation *animation, NNSG3dResTex *texture);
++NNSG3dAnmObj *openmmo_prop_anim_object(MapPropAnimation *animation, NNSG3dRenderObj *renderObj, NNSFndAllocator *allocator, BOOL isBicycleSlope);
++void openmmo_prop_anim_sync(MapPropAnimation *animation);
++void openmmo_prop_anim_free_clones(MapPropAnimation *animation, NNSFndAllocator *allocator);
+ MapPropAnimation *MapPropAnimationManager_GetAnimationByPastoriaGymButtonGroup(const int pastoriaGymButtonGroup, MapPropAnimationManager *manager);
+ MapPropAnimation *MapPropAnimationManager_GetAnimation(const int mapPropModelID, const int mapPropAnimIndex, MapPropAnimationManager *manager);
+ void MapPropAnimationManager_AdvanceAnimations(MapPropAnimationManager *manager);

@@ -6,7 +6,8 @@
 
 /*
  * Order is the official client's, and it is generation order rather than id order: Kanto, Johto, Hoenn,
- * Sinnoh, Unova.
+ * Sinnoh, Unova. The reasons are measured, not guessed, the server's own region list is
+ * Kanto, Hoenn, Sinnoh and Johto, and only Sinnoh is one a character may be made in.
  */
 /* Each reason is one sentence a player reads, and it has to survive being put
  * in front of "Only Sinnoh can be played here." inside a failure message the
@@ -16,7 +17,7 @@ static const mmo_region roster[] = {
     { MMO_REGION_KANTO, "Kanto", 1, 0, 0,
       "Kanto's maps are a Game Boy Advance game's, which this client cannot read." },
     { MMO_REGION_JOHTO, "Johto", 1, 0, 0,
-      "Johto is not built yet: neither side of the connection has its maps." },
+      "Johto is reached from Sinnoh, so there is no Johto to start in." },
     { MMO_REGION_HOENN, "Hoenn", 1, 0, 0,
       "Hoenn's maps are a Game Boy Advance game's, and no DS game covers it." },
     { MMO_REGION_SINNOH, "Sinnoh", 1, 1, 1, NULL },

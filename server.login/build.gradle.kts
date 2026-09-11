@@ -33,6 +33,8 @@ dependencies {
 tasks.named<JavaExec>("run") {
   listOf(
           "OPENMMO_SESSION_SECRET",
+          // Whether the secret this repository ships with is allowed.
+          "OPENMMO_ALLOW_DEV_SECRET",
           "OPENMMO_ADMIN_USERNAME",
           "OPENMMO_ADMIN_PASSWORD",
           "LOGIN_HOST",
@@ -51,6 +53,9 @@ tasks.named<JavaExec>("run") {
   // Off unless .env asks for it, the same as the game server's. All db/dev holds now is the
   // cleanup for what older checkouts seeded.
   environment("LOGIN_DB_SEED_DEV", env.fetchOrNull("LOGIN_DB_SEED_DEV") ?: "false")
+
+  // LISTEN ON IPv4 AS WELL, which only matters for a client on the other side of WSL.
+  jvmArgs("-Djava.net.preferIPv4Stack=true")
 }
 
 listOf("classes", "processResources").forEach { taskName ->

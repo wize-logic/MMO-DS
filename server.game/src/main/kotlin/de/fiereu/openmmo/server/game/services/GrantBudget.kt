@@ -15,38 +15,45 @@ class GrantBudget(private val limits: Limits, private val clock: () -> Long) {
   /** What the server builds. The other constructor is for a test that drives its own clock. */
   @Inject constructor() : this(Limits(), System::nanoTime)
 
-  /** The ceilings, per character per [window]. */
+  /** The ceilings, per character per window. */
   data class Limits(
       val window: Duration = Duration.ofMinutes(1),
       val moneyGained: Int = 1_000_000,
       val itemsGained: Int = 2_000,
       val monstersGranted: Int = 20,
-      /**
-       * Monsters an hour, over the top of the minute above. A minute is the right window for a
-       * burst and the wrong one for a grind, and it matters more since the individual behind a
-       * reported capture became the server's draw ([ReportedIndividual]): the one way left to hunt
-       * a shiny is to take a monster, let it go and report another, which costs a slot here every
-       * time.
-       */
+      /** Monsters an hour, over the top of the minute above. */
       val monstersPerHour: Int = 300,
       /** Levels one monster may gain in a single reported battle outcome. */
       val levelsPerOutcome: Int = 10,
-      /** Levels a whole party may gain per window. Well above a hard hour of grinding. */
-      val levelsGained: Int = 30,
-      /** Contest condition and sheen points per window. A tray of Poffins is a few hundred. */
-      val contestPointsGained: Int = 1_000,
-      /** Super Contest ribbons per window. A contest takes minutes and awards one. */
-      val ribbonsWon: Int = 4,
       /**
-       * Shiny monsters per [shinyWindow]. The roll is the server's now ([ReportedIndividual]), so a
-       * shiny that gets here is real and is never taken away. The count is for the grind: at one in
-       * 8,192, eight in an hour is about sixty-five thousand encounters, so passing it says
-       * captures are being turned over rather than met.
+       * Levels a character's whole party may gain per window. The per-outcome cap above bounds one
+       * report; this bounds how many reports are worth sending.
        */
+      val levelsGained: Int = 30,
+      /**
+       * Contest condition and sheen points per window. A Poffin raises one condition and the sheen
+       * that caps it; a tray of them is a few hundred points, so a thousand a minute is a player
+       * cooking as fast as the screen allows.
+       */
+      val contestPointsGained: Int = 1_000,
+      /**
+       * Super Contest ribbons per window. A contest is minutes of play and awards exactly one, so
+       * four a minute cannot be reached by playing and an unearned set cannot be claimed at once.
+       */
+      val ribbonsWon: Int = 4,
+      /** Friendship points a character's whole party may gain per window. */
+      val friendshipGained: Int = 500,
+      /** Shiny monsters per [shinyWindow]. */
       val shinyGranted: Int = 8,
       val shinyWindow: Duration = Duration.ofHours(1),
-      /** Story flag and var writes per window. A bound on the cost, not on what they buy. */
+      /**
+       * Story flag and var writes per window. These gate no server behaviour today, so the bound is
+       * not on what they buy but on what they cost: each one is a write to the character's own
+       * story rows, and a full packet of them is twenty thousand.
+       */
       val storyWrites: Int = 2_000,
+      /** Offline saves one character may bring in per [shinyWindow]. */
+      val importsGranted: Int = 24,
   )
 
   enum class Kind {
@@ -57,8 +64,10 @@ class GrantBudget(private val limits: Limits, private val clock: () -> Long) {
     LEVELS,
     CONTEST_POINTS,
     RIBBONS,
+    FRIENDSHIP,
     SHINY,
     STORY_WRITES,
+    IMPORT,
   }
 
   private data class Window(val startedAt: Long, val spent: Long)
@@ -102,20 +111,25 @@ class GrantBudget(private val limits: Limits, private val clock: () -> Long) {
         Kind.LEVELS -> limits.levelsGained.toLong()
         Kind.CONTEST_POINTS -> limits.contestPointsGained.toLong()
         Kind.RIBBONS -> limits.ribbonsWon.toLong()
+        Kind.FRIENDSHIP -> limits.friendshipGained.toLong()
         Kind.SHINY -> limits.shinyGranted.toLong()
         Kind.STORY_WRITES -> limits.storyWrites.toLong()
+        Kind.IMPORT -> limits.importsGranted.toLong()
       }
 
   /**
    * A shiny is rare enough that a minute says nothing about it, and a grind is the same shape, so
-   * both take the hour. Everything else shares a window.
+   * both are measured over the hour. Every other kind uses the minute.
    */
   private fun windowFor(kind: Kind): Duration =
-      if (kind == Kind.SHINY || kind == Kind.MONSTERS_HOURLY) limits.shinyWindow else limits.window
+      if (kind == Kind.SHINY || kind == Kind.MONSTERS_HOURLY || kind == Kind.IMPORT)
+          limits.shinyWindow
+      else limits.window
 
   /**
    * Keeps the table from holding a row for every character the server has ever seen. Each row is
-   * measured against its own kind's window, so a shiny count inside its hour survives.
+   * measured against its own kind's window, so pruning cannot drop a shiny count that is still
+   * inside its hour because the minute-long kinds have turned over.
    */
   private fun prune(now: Long) {
     if (windows.size < PRUNE_THRESHOLD) return

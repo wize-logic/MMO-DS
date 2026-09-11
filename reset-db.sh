@@ -1,26 +1,20 @@
 #!/usr/bin/env bash
-#
 # Empty both databases and build the schemas again, leaving this checkout the
-# way a fresh install starts: no accounts, no characters, nothing on the shelf.
+# way a fresh install starts: no accounts, no characters, nothing on the
+# shelf.
 #
 #   ./reset-db.sh                     # asks first
 #   ./reset-db.sh --yes               # does not ask
-#
-# The first account made afterwards is a developer, so the way back is
-# ./start-server.sh then server.login create-user <name> <password>.
-#
-# Both databases go together on purpose: a user id is the only thing tying them
-# to each other, so emptying one leaves the other holding characters owned by
-# accounts that no longer exist. For one side only, each server takes
-# `reset-db --yes` on its own.
-#
+#   ./start-server.sh
+#   ./server.login/build/install/server.login/bin/server.login create-user <name> <password>
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 [[ -f .env ]] || { printf '\033[31m[openmmo]\033[0m %s\n' ".env not found. It holds the local database settings." >&2; exit 1; }
 
-# Read up front, because the connection check below and the servers themselves
-# both take their database settings from here.
+# Read up front, because both the connection check below and the servers
+# themselves take their database settings from here. start-server.sh sources it
+# late and only needs it late; this script needs it before it decides anything.
 set -a
 # shellcheck disable=SC1091
 . ./.env
@@ -46,14 +40,7 @@ command -v docker &>/dev/null || die "docker not found; the databases run in con
 export JAVA_HOME
 export PATH="$JAVA_HOME/bin:$PATH"
 
-# A live server can quietly undo this: the game server holds characters in
-# memory and writes them back on a timer, so a reset with one still up comes
-# back half full a minute later.
-#
-# Ports are the friendly half of the check, not the whole of it. The game
-# server takes its port from -Dserver.port, so one on 7778 for a two-window
-# test is in no fixed list, and an unwritten launcher config leaves this
-# guessing at 7777.
+# A live server is the one thing that can quietly undo this.
 for port_pair in "login:$LOGIN_PORT" "game:$GAME_PORT" "game:7777" "game:7778"; do
     name="${port_pair%%:*}"
     port="${port_pair##*:}"
@@ -68,12 +55,14 @@ if [[ $ASSUME_YES -eq 0 ]]; then
     [[ "$answer" == "reset" ]] || die "nothing was touched"
 fi
 
-# They have to be up to be emptied, and they are the slow part to start.
+# The databases have to be up to be emptied, and they are the slow part to
+# start, so bring them up rather than asking for them.
 say "databases"
 docker compose up -d login-db game-db >/dev/null || die "the database containers would not start"
 
-# The check that settles it: ask each database who is connected. That sees a
-# server on any port, on any host, started by anybody.
+# The check that actually settles it: ask each database who is connected to it.
+# That sees a server on any port, on any host and started by anybody, which is
+# the only version of this question worth answering.
 connections() {
     local container="$1" user="$2" db="$3" pass="$4"
     docker exec -e PGPASSWORD="$pass" "$container" \

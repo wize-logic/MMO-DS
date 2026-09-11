@@ -111,13 +111,16 @@ static void test_fallback_and_faint(void)
 
     printf("a move the engine cannot draw falls back, a KO faints:\n");
 
+    /* 468 stopped being "post-DS" on 2026-08-30: the client names Black's
+     * moves to 559 and the engine's own clamp decides whether one plays
+     * (move_port.h). Past 559 the fallback is still this one. */
     memset(&mv, 0, sizeof mv);
-    mv.source_move = 468;
+    mv.source_move = 560;
     got = mmo_battle_map_move(&mv, a, MMO_BATTLE_ANIM_MAX);
-    CHECK(got == 2 && a[0].kind == MMO_ANIM_PRINT && a[0].id == 468
+    CHECK(got == 2 && a[0].kind == MMO_ANIM_PRINT && a[0].id == 560
               && a[1].fallback && a[1].id == MMO_BTL_ANIM_FALLBACK_MOVE
               && a[1].why != NULL && a[1].command == MMO_BTLCMD_SET_MOVE_ANIMATION,
-          "a post-DS move prints its id and plays as Pound");
+          "a move past the last one either side names prints its id and plays as Pound");
 
     mv.source_move = 1000;
     got = mmo_battle_map_move(&mv, a, MMO_BATTLE_ANIM_MAX);

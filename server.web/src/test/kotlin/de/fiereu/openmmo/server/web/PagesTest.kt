@@ -15,6 +15,6 @@ class PagesTest :
         val page = Pages.created("ash")
 
         page shouldContain "You're in, ash."
-        page shouldContain """href="https://github.com/wize-logic/OpenMMO-DS""""
+        page shouldContain """href="/download.html""""
       }
     })

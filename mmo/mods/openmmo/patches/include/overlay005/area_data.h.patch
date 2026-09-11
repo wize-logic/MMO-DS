@@ -1,0 +1,18 @@
+--- a/include/overlay005/area_data.h
++++ b/include/overlay005/area_data.h
+@@ -6,7 +6,14 @@
+ #include "overlay005/map_prop_animation.h"
+ #include "overlay005/map_prop_material_shape.h"
+ 
+-#define MAX_MAP_PROP_MODEL_FILES 768
++/* Raised from 768 for a ported region. This game loads its own props by
++ * ABSOLUTE model id, `mapPropModelFiles[mapPropModelID]`, so an appended
++ * model has to have a slot of its own, and a whole Johto is 450 of them on top
++ * of the 590 this game ships. The array is pointers inside one AreaDataManager,
++ * one allocation from HEAP_ID_FIELD1, so the raise costs (1152-768)*4 = 1536
++ * bytes of a heap this client already builds 0x14000 larger than the engine
++ * does (mods/openmmo/src/openmmo_heap.c). */
++#define MAX_MAP_PROP_MODEL_FILES 1152
+ 
+ typedef struct AreaDataManagerLoadData {
+     int areaDataArchiveID;

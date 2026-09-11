@@ -63,7 +63,11 @@ class JooqUserStoreIT :
         store.getUserId("test") shouldBe null
       }
 
-      /** Runs before anything else adds a row, which is the whole point. */
+      /**
+       * Runs before anything else adds a row, which is the whole point: somebody has to be able to
+       * work a server that has nobody on it, and the answer used to be two accounts whose passwords
+       * were printed in this repository.
+       */
       test("the first account on the server is a developer and the next one is not") {
         val first = store.addUser("Aaron", "first")
         val second = store.addUser("Amber", "second")
@@ -110,8 +114,8 @@ class JooqUserStoreIT :
       }
 
       /**
-       * The point of the change. The client sends a SHA-1 and this used to be what the row held, so
-       * the column was the credential and reading the table was logging in as everybody.
+       * The point of the whole change. The client sends a SHA-1 and this used to be what the row
+       * held, so the column was the credential and reading the table was logging in as everybody.
        */
       test("the stored row is not the value the client sends") {
         store.addUser("Erika", "grass")
@@ -157,7 +161,10 @@ class JooqUserStoreIT :
         store.getUserId("alice") shouldBe id
       }
 
-      /** A row rather than a signature, which is what makes it revocable and unmintable. */
+      /**
+       * The remembered login is a row now, not a signature, which is what makes it revocable and
+       * what stops any other server minting one.
+       */
       test("a remembered login is spent when it is used and can be revoked") {
         val tokens = JooqRememberMeTokens(db, config, Dispatchers.IO)
         val id = store.addUser("Janine", "kunoichi")

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="100" viewBox="0 0 1100 100">
+<!-- The middle cloud band: a 1100px tile against the far band's 900, so the two
+     loops only line up every eleven screens. Same drawing, larger and less
+     transparent. The soft edges are what stop the drift shimmering; the note in
+     clouds-back.svg says why. -->
+<defs>
+<filter id="soft" color-interpolation-filters="sRGB">
+<feGaussianBlur stdDeviation="0.9"/>
+</filter>
+<g id="c" fill="#fff">
+<rect x="30" y="-24" width="180" height="24"/>
+<circle cx="34" cy="-16" r="16"/>
+<circle cx="52" cy="-34" r="30"/>
+<circle cx="100" cy="-52" r="42"/>
+<circle cx="126" cy="-62" r="26"/>
+<circle cx="150" cy="-40" r="34"/>
+<circle cx="188" cy="-24" r="22"/>
+<circle cx="204" cy="-14" r="14"/>
+</g>
+</defs>
+<g filter="url(#soft)">
+<use href="#c" transform="translate(60 74) scale(0.52)" opacity="0.40"/>
+<use href="#c" transform="translate(300 92) scale(0.44)" opacity="0.34"/>
+<use href="#c" transform="translate(520 66) scale(0.60)" opacity="0.46"/>
+<use href="#c" transform="translate(760 88) scale(0.40)" opacity="0.32"/>
+<use href="#c" transform="translate(920 78) scale(0.50)" opacity="0.38"/>
+</g>
+</svg>

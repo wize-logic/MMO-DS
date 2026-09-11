@@ -1,0 +1,1485 @@
+{
+  "source": {
+    "cartridge": "IRBO POKEMON B",
+    "note": "written by mmo/tools/gen5_tables.py; do not edit by hand"
+  },
+  "moves": [
+    {
+      "id": 468,
+      "name": "Hone Claws",
+      "effect": 277,
+      "power": 0,
+      "type": 17,
+      "accuracy": 0,
+      "pp": 15,
+      "chance": 0,
+      "target": "USER",
+      "priority": 0,
+      "flags": [
+        "SNATCH_AFFECTED"
+      ]
+    },
+    {
+      "id": 469,
+      "name": "Wide Guard",
+      "effect": 278,
+      "power": 0,
+      "type": 5,
+      "accuracy": 0,
+      "pp": 10,
+      "chance": 0,
+      "target": "USER",
+      "priority": 3,
+      "flags": [
+        "SNATCH_AFFECTED"
+      ]
+    },
+    {
+      "id": 470,
+      "name": "Guard Split",
+      "effect": 279,
+      "power": 0,
+      "type": 14,
+      "accuracy": 0,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 471,
+      "name": "Power Split",
+      "effect": 280,
+      "power": 0,
+      "type": 14,
+      "accuracy": 0,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 472,
+      "name": "Wonder Room",
+      "effect": 281,
+      "power": 0,
+      "type": 14,
+      "accuracy": 0,
+      "pp": 10,
+      "chance": 0,
+      "target": "USER",
+      "priority": -7,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    {
+      "id": 473,
+      "name": "Psyshock",
+      "effect": 282,
+      "power": 80,
+      "type": 14,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 474,
+      "name": "Venoshock",
+      "effect": 283,
+      "power": 65,
+      "type": 3,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 475,
+      "name": "Autotomize",
+      "effect": 284,
+      "power": 0,
+      "type": 8,
+      "accuracy": 0,
+      "pp": 15,
+      "chance": 0,
+      "target": "USER",
+      "priority": 0,
+      "flags": [
+        "SNATCH_AFFECTED"
+      ]
+    },
+    {
+      "id": 476,
+      "name": "Rage Powder",
+      "effect": 172,
+      "power": 0,
+      "type": 6,
+      "accuracy": 0,
+      "pp": 20,
+      "chance": 0,
+      "target": "USER",
+      "priority": 3,
+      "flags": []
+    },
+    {
+      "id": 477,
+      "name": "Telekinesis",
+      "effect": 285,
+      "power": 0,
+      "type": 14,
+      "accuracy": 0,
+      "pp": 15,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAGIC_COAT_AFFECTED",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 478,
+      "name": "Magic Room",
+      "effect": 286,
+      "power": 0,
+      "type": 14,
+      "accuracy": 0,
+      "pp": 10,
+      "chance": 0,
+      "target": "USER",
+      "priority": -7,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED"
+      ]
+    },
+    {
+      "id": 479,
+      "name": "Smack Down",
+      "effect": 287,
+      "power": 50,
+      "type": 5,
+      "accuracy": 100,
+      "pp": 15,
+      "chance": 100,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 480,
+      "name": "Storm Throw",
+      "effect": 288,
+      "power": 40,
+      "type": 1,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 481,
+      "name": "Flame Burst",
+      "effect": 289,
+      "power": 70,
+      "type": 10,
+      "accuracy": 100,
+      "pp": 15,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 482,
+      "name": "Sludge Wave",
+      "effect": 2,
+      "power": 95,
+      "type": 3,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 10,
+      "target": "FOES_AND_ALLY",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 483,
+      "name": "Quiver Dance",
+      "effect": 290,
+      "power": 0,
+      "type": 6,
+      "accuracy": 0,
+      "pp": 20,
+      "chance": 0,
+      "target": "USER",
+      "priority": 0,
+      "flags": [
+        "SNATCH_AFFECTED"
+      ]
+    },
+    {
+      "id": 484,
+      "name": "Heavy Slam",
+      "effect": 291,
+      "power": 1,
+      "type": 8,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 485,
+      "name": "Synchronoise",
+      "effect": 292,
+      "power": 70,
+      "type": 14,
+      "accuracy": 100,
+      "pp": 15,
+      "chance": 0,
+      "target": "FOES_AND_ALLY",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 486,
+      "name": "Electro Ball",
+      "effect": 293,
+      "power": 1,
+      "type": 13,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 487,
+      "name": "Soak",
+      "effect": 294,
+      "power": 0,
+      "type": 11,
+      "accuracy": 100,
+      "pp": 20,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAGIC_COAT_AFFECTED",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 488,
+      "name": "Flame Charge",
+      "effect": 295,
+      "power": 50,
+      "type": 10,
+      "accuracy": 100,
+      "pp": 20,
+      "chance": 100,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 489,
+      "name": "Coil",
+      "effect": 322,
+      "power": 0,
+      "type": 3,
+      "accuracy": 0,
+      "pp": 20,
+      "chance": 0,
+      "target": "USER",
+      "priority": 0,
+      "flags": [
+        "SNATCH_AFFECTED"
+      ]
+    },
+    {
+      "id": 490,
+      "name": "Low Sweep",
+      "effect": 20,
+      "power": 60,
+      "type": 1,
+      "accuracy": 100,
+      "pp": 20,
+      "chance": 100,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 491,
+      "name": "Acid Spray",
+      "effect": 296,
+      "power": 40,
+      "type": 3,
+      "accuracy": 100,
+      "pp": 20,
+      "chance": 100,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 492,
+      "name": "Foul Play",
+      "effect": 297,
+      "power": 95,
+      "type": 17,
+      "accuracy": 100,
+      "pp": 15,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 493,
+      "name": "Simple Beam",
+      "effect": 298,
+      "power": 0,
+      "type": 0,
+      "accuracy": 100,
+      "pp": 15,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAGIC_COAT_AFFECTED",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 494,
+      "name": "Entrainment",
+      "effect": 299,
+      "power": 0,
+      "type": 0,
+      "accuracy": 100,
+      "pp": 15,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAGIC_COAT_AFFECTED",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 495,
+      "name": "After You",
+      "effect": 300,
+      "power": 0,
+      "type": 0,
+      "accuracy": 0,
+      "pp": 15,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": []
+    },
+    {
+      "id": 496,
+      "name": "Round",
+      "effect": 301,
+      "power": 60,
+      "type": 0,
+      "accuracy": 100,
+      "pp": 15,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 497,
+      "name": "Echoed Voice",
+      "effect": 302,
+      "power": 40,
+      "type": 0,
+      "accuracy": 100,
+      "pp": 15,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 498,
+      "name": "Chip Away",
+      "effect": 303,
+      "power": 70,
+      "type": 0,
+      "accuracy": 100,
+      "pp": 20,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 499,
+      "name": "Clear Smog",
+      "effect": 304,
+      "power": 50,
+      "type": 3,
+      "accuracy": 0,
+      "pp": 15,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 500,
+      "name": "Stored Power",
+      "effect": 305,
+      "power": 20,
+      "type": 14,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 501,
+      "name": "Quick Guard",
+      "effect": 306,
+      "power": 0,
+      "type": 1,
+      "accuracy": 0,
+      "pp": 15,
+      "chance": 0,
+      "target": "USER",
+      "priority": 3,
+      "flags": [
+        "SNATCH_AFFECTED"
+      ]
+    },
+    {
+      "id": 502,
+      "name": "Ally Switch",
+      "effect": 307,
+      "power": 0,
+      "type": 14,
+      "accuracy": 0,
+      "pp": 15,
+      "chance": 0,
+      "target": "USER",
+      "priority": 1,
+      "flags": []
+    },
+    {
+      "id": 503,
+      "name": "Scald",
+      "effect": 4,
+      "power": 80,
+      "type": 11,
+      "accuracy": 100,
+      "pp": 15,
+      "chance": 30,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 504,
+      "name": "Shell Smash",
+      "effect": 308,
+      "power": 0,
+      "type": 0,
+      "accuracy": 0,
+      "pp": 15,
+      "chance": 0,
+      "target": "USER",
+      "priority": 0,
+      "flags": [
+        "SNATCH_AFFECTED"
+      ]
+    },
+    {
+      "id": 505,
+      "name": "Heal Pulse",
+      "effect": 309,
+      "power": 0,
+      "type": 14,
+      "accuracy": 0,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAGIC_COAT_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 506,
+      "name": "Hex",
+      "effect": 310,
+      "power": 50,
+      "type": 7,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 507,
+      "name": "Sky Drop",
+      "effect": 311,
+      "power": 60,
+      "type": 2,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 508,
+      "name": "Shift Gear",
+      "effect": 312,
+      "power": 0,
+      "type": 8,
+      "accuracy": 0,
+      "pp": 10,
+      "chance": 0,
+      "target": "USER",
+      "priority": 0,
+      "flags": [
+        "SNATCH_AFFECTED"
+      ]
+    },
+    {
+      "id": 509,
+      "name": "Circle Throw",
+      "effect": 313,
+      "power": 60,
+      "type": 1,
+      "accuracy": 90,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": -6,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 510,
+      "name": "Incinerate",
+      "effect": 314,
+      "power": 30,
+      "type": 10,
+      "accuracy": 100,
+      "pp": 15,
+      "chance": 0,
+      "target": "BOTH",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 511,
+      "name": "Quash",
+      "effect": 315,
+      "power": 0,
+      "type": 17,
+      "accuracy": 100,
+      "pp": 15,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 512,
+      "name": "Acrobatics",
+      "effect": 317,
+      "power": 55,
+      "type": 2,
+      "accuracy": 100,
+      "pp": 15,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 513,
+      "name": "Reflect Type",
+      "effect": 318,
+      "power": 0,
+      "type": 0,
+      "accuracy": 0,
+      "pp": 15,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 514,
+      "name": "Retaliate",
+      "effect": 319,
+      "power": 70,
+      "type": 0,
+      "accuracy": 100,
+      "pp": 5,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 515,
+      "name": "Final Gambit",
+      "effect": 320,
+      "power": 1,
+      "type": 1,
+      "accuracy": 100,
+      "pp": 5,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 516,
+      "name": "Bestow",
+      "effect": 323,
+      "power": 0,
+      "type": 0,
+      "accuracy": 0,
+      "pp": 15,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 517,
+      "name": "Inferno",
+      "effect": 4,
+      "power": 100,
+      "type": 10,
+      "accuracy": 50,
+      "pp": 5,
+      "chance": 100,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 518,
+      "name": "Water Pledge",
+      "effect": 324,
+      "power": 50,
+      "type": 11,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 519,
+      "name": "Fire Pledge",
+      "effect": 325,
+      "power": 50,
+      "type": 10,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 520,
+      "name": "Grass Pledge",
+      "effect": 326,
+      "power": 50,
+      "type": 12,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 521,
+      "name": "Volt Switch",
+      "effect": 228,
+      "power": 70,
+      "type": 13,
+      "accuracy": 100,
+      "pp": 20,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 522,
+      "name": "Struggle Bug",
+      "effect": 71,
+      "power": 30,
+      "type": 6,
+      "accuracy": 100,
+      "pp": 20,
+      "chance": 100,
+      "target": "BOTH",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 523,
+      "name": "Bulldoze",
+      "effect": 70,
+      "power": 60,
+      "type": 4,
+      "accuracy": 100,
+      "pp": 20,
+      "chance": 100,
+      "target": "FOES_AND_ALLY",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 524,
+      "name": "Frost Breath",
+      "effect": 288,
+      "power": 40,
+      "type": 15,
+      "accuracy": 90,
+      "pp": 10,
+      "chance": 100,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 525,
+      "name": "Dragon Tail",
+      "effect": 313,
+      "power": 60,
+      "type": 16,
+      "accuracy": 90,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": -6,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 526,
+      "name": "Work Up",
+      "effect": 327,
+      "power": 0,
+      "type": 0,
+      "accuracy": 0,
+      "pp": 30,
+      "chance": 0,
+      "target": "USER",
+      "priority": 0,
+      "flags": [
+        "SNATCH_AFFECTED"
+      ]
+    },
+    {
+      "id": 527,
+      "name": "Electroweb",
+      "effect": 20,
+      "power": 55,
+      "type": 13,
+      "accuracy": 95,
+      "pp": 15,
+      "chance": 100,
+      "target": "BOTH",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 528,
+      "name": "Wild Charge",
+      "effect": 48,
+      "power": 90,
+      "type": 13,
+      "accuracy": 100,
+      "pp": 15,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 529,
+      "name": "Drill Run",
+      "effect": 43,
+      "power": 80,
+      "type": 4,
+      "accuracy": 95,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 530,
+      "name": "Dual Chop",
+      "effect": 44,
+      "power": 40,
+      "type": 16,
+      "accuracy": 90,
+      "pp": 15,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 531,
+      "name": "Heart Stamp",
+      "effect": 31,
+      "power": 60,
+      "type": 14,
+      "accuracy": 100,
+      "pp": 25,
+      "chance": 30,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 532,
+      "name": "Horn Leech",
+      "effect": 3,
+      "power": 75,
+      "type": 12,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 533,
+      "name": "Sacred Sword",
+      "effect": 303,
+      "power": 90,
+      "type": 1,
+      "accuracy": 100,
+      "pp": 20,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 534,
+      "name": "Razor Shell",
+      "effect": 69,
+      "power": 75,
+      "type": 11,
+      "accuracy": 95,
+      "pp": 10,
+      "chance": 50,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 535,
+      "name": "Heat Crash",
+      "effect": 291,
+      "power": 1,
+      "type": 10,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 536,
+      "name": "Leaf Tornado",
+      "effect": 73,
+      "power": 65,
+      "type": 12,
+      "accuracy": 90,
+      "pp": 10,
+      "chance": 50,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 537,
+      "name": "Steamroller",
+      "effect": 150,
+      "power": 65,
+      "type": 6,
+      "accuracy": 100,
+      "pp": 20,
+      "chance": 30,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 538,
+      "name": "Cotton Guard",
+      "effect": 328,
+      "power": 0,
+      "type": 12,
+      "accuracy": 0,
+      "pp": 10,
+      "chance": 0,
+      "target": "USER",
+      "priority": 0,
+      "flags": [
+        "SNATCH_AFFECTED"
+      ]
+    },
+    {
+      "id": 539,
+      "name": "Night Daze",
+      "effect": 73,
+      "power": 85,
+      "type": 17,
+      "accuracy": 95,
+      "pp": 10,
+      "chance": 40,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 540,
+      "name": "Psystrike",
+      "effect": 282,
+      "power": 100,
+      "type": 14,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 541,
+      "name": "Tail Slap",
+      "effect": 29,
+      "power": 25,
+      "type": 0,
+      "accuracy": 85,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 542,
+      "name": "Hurricane",
+      "effect": 337,
+      "power": 120,
+      "type": 2,
+      "accuracy": 70,
+      "pp": 10,
+      "chance": 30,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 543,
+      "name": "Head Charge",
+      "effect": 48,
+      "power": 120,
+      "type": 0,
+      "accuracy": 100,
+      "pp": 15,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 544,
+      "name": "Gear Grind",
+      "effect": 44,
+      "power": 50,
+      "type": 8,
+      "accuracy": 85,
+      "pp": 15,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 545,
+      "name": "Searing Shot",
+      "effect": 4,
+      "power": 100,
+      "type": 10,
+      "accuracy": 100,
+      "pp": 5,
+      "chance": 30,
+      "target": "FOES_AND_ALLY",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 546,
+      "name": "Techno Blast",
+      "effect": 268,
+      "power": 85,
+      "type": 0,
+      "accuracy": 100,
+      "pp": 5,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 547,
+      "name": "Relic Song",
+      "effect": 329,
+      "power": 75,
+      "type": 0,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 10,
+      "target": "BOTH",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 548,
+      "name": "Secret Sword",
+      "effect": 282,
+      "power": 85,
+      "type": 1,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 549,
+      "name": "Glaciate",
+      "effect": 330,
+      "power": 65,
+      "type": 15,
+      "accuracy": 95,
+      "pp": 10,
+      "chance": 100,
+      "target": "BOTH",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 550,
+      "name": "Bolt Strike",
+      "effect": 6,
+      "power": 130,
+      "type": 13,
+      "accuracy": 85,
+      "pp": 5,
+      "chance": 20,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 551,
+      "name": "Blue Flare",
+      "effect": 4,
+      "power": 130,
+      "type": 10,
+      "accuracy": 85,
+      "pp": 5,
+      "chance": 20,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 552,
+      "name": "Fiery Dance",
+      "effect": 276,
+      "power": 80,
+      "type": 10,
+      "accuracy": 100,
+      "pp": 10,
+      "chance": 50,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 553,
+      "name": "Freeze Shock",
+      "effect": 331,
+      "power": 140,
+      "type": 15,
+      "accuracy": 90,
+      "pp": 5,
+      "chance": 30,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 554,
+      "name": "Ice Burn",
+      "effect": 332,
+      "power": 140,
+      "type": 15,
+      "accuracy": 90,
+      "pp": 5,
+      "chance": 30,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 555,
+      "name": "Snarl",
+      "effect": 71,
+      "power": 55,
+      "type": 17,
+      "accuracy": 95,
+      "pp": 15,
+      "chance": 100,
+      "target": "BOTH",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 556,
+      "name": "Icicle Crash",
+      "effect": 31,
+      "power": 85,
+      "type": 15,
+      "accuracy": 90,
+      "pp": 10,
+      "chance": 30,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 557,
+      "name": "V-create",
+      "effect": 334,
+      "power": 180,
+      "type": 10,
+      "accuracy": 95,
+      "pp": 5,
+      "chance": 100,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MAKES_CONTACT",
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 558,
+      "name": "Fusion Flare",
+      "effect": 335,
+      "power": 100,
+      "type": 10,
+      "accuracy": 100,
+      "pp": 5,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    },
+    {
+      "id": 559,
+      "name": "Fusion Bolt",
+      "effect": 336,
+      "power": 100,
+      "type": 13,
+      "accuracy": 100,
+      "pp": 5,
+      "chance": 0,
+      "target": "SELECTED",
+      "priority": 0,
+      "flags": [
+        "MIRROR_MOVE_AFFECTED",
+        "PROTECT_AFFECTED"
+      ]
+    }
+  ]
+}

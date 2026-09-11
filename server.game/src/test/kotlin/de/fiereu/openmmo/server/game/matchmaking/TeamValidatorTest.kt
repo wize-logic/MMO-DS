@@ -9,8 +9,11 @@ import de.fiereu.openmmo.common.pvp.Clause
 import de.fiereu.openmmo.common.pvp.MatchmakingQueue
 import de.fiereu.openmmo.common.pvp.SignupOutcome
 import de.fiereu.openmmo.common.pvp.TierGroup
+import de.fiereu.openmmo.items.ItemRegistry
+import de.fiereu.openmmo.items.generated.Items
 import de.fiereu.openmmo.pokemon.EvolutionRegistry
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
@@ -25,9 +28,20 @@ private const val EEVEE = 133
 private const val MEWTWO = 150
 private const val ARCEUS = 493
 
+/** Two wire item ids, read out of the catalogue by [ItemRegistry] in the test body. */
+private val LEFTOVERS = ItemRegistry().idOf(Items.LEFTOVERS)
+private val EVERSTONE = ItemRegistry().idOf(Items.EVERSTONE)
+
 private var nextId = 1L
 
-private fun mon(dexId: Int, level: Byte = 50, ot: String = "Red", form: Int = 0): Pokemon =
+private fun mon(
+    dexId: Int,
+    level: Byte = 50,
+    ot: String = "Red",
+    form: Int = 0,
+    heldItemId: Int = 0,
+    offlineOrigin: Boolean = false,
+): Pokemon =
     Pokemon(
         id = nextId++,
         ownerId = 1L,
@@ -51,6 +65,8 @@ private fun mon(dexId: Int, level: Byte = 50, ot: String = "Red", form: Int = 0)
         isRaidEncounter = false,
         caughtAt = LocalDateTime.now(),
         form = form,
+        heldItemId = heldItemId,
+        offlineOrigin = offlineOrigin,
     )
 
 /** Six distinct, unrelated, level-50 species, a party that passes everything by default. */
@@ -60,7 +76,8 @@ private fun legalSix(ot: String = "Red") =
 private fun rules(
     group: TierGroup = TierGroup.OVER_USED,
     clauses: List<ClauseSetting>,
-) = QueueRules(MatchmakingQueue.OVER_USED, group, clauses)
+    queue: MatchmakingQueue = MatchmakingQueue.OVER_USED,
+) = QueueRules(queue, group, clauses)
 
 private val STANDARD =
     listOf(
@@ -136,10 +153,30 @@ class TeamValidatorTest :
         validator.validate(legalSix(ot = "Red"), withOt, "Red") shouldBe TeamVerdict.Accepted
       }
 
-      test("a clause no record can answer refuses instead of passing") {
+      test("the item clause reads the item the record now carries") {
         val withItem = rules(clauses = STANDARD + ClauseSetting(Clause.UNIQUE_ITEM))
-        validator.unsupported(withItem) shouldContainExactly listOf(Clause.UNIQUE_ITEM)
-        validator.validate(legalSix(), withItem, "Red") shouldBe
+        validator.unsupported(withItem).shouldBeEmpty()
+        // Six carrying nothing are not six carrying the same thing.
+        validator.validate(legalSix(), withItem, "Red") shouldBe TeamVerdict.Accepted
+        val twoLeftovers =
+            legalSix().mapIndexed { at, m -> if (at < 2) m.copy(heldItemId = LEFTOVERS) else m }
+        validator.validate(twoLeftovers, withItem, "Red") shouldBe
+            TeamVerdict.Refused(SignupOutcome.CLAUSE_VIOLATED, Clause.UNIQUE_ITEM)
+        val distinct =
+            legalSix().mapIndexed { at, m ->
+              when (at) {
+                0 -> m.copy(heldItemId = LEFTOVERS)
+                1 -> m.copy(heldItemId = EVERSTONE)
+                else -> m
+              }
+            }
+        validator.validate(distinct, withItem, "Red") shouldBe TeamVerdict.Accepted
+      }
+
+      test("a clause no record can answer refuses instead of passing") {
+        val withRentals = rules(clauses = STANDARD + ClauseSetting(Clause.NO_RENTALS))
+        validator.unsupported(withRentals) shouldContainExactly listOf(Clause.NO_RENTALS)
+        validator.validate(legalSix(), withRentals, "Red") shouldBe
             TeamVerdict.Refused(SignupOutcome.UNKNOWN)
       }
 
@@ -151,5 +188,31 @@ class TeamValidatorTest :
         val withSleep = rules(clauses = STANDARD + ClauseSetting(Clause.SLEEP))
         withSleep.teamClauses.map { it.clause } shouldContainExactly STANDARD.map { it.clause }
         validator.validate(legalSix(), withSleep, "Red").shouldBeInstanceOf<TeamVerdict.Accepted>()
+      }
+
+      test("a ranked queue turns away a party holding a monster out of a save") {
+        val ranked = rules(clauses = STANDARD, queue = MatchmakingQueue.OVER_USED_RANKED)
+        ranked.noOfflineOrigin shouldBe true
+        val party = legalSix().dropLast(1) + mon(143, offlineOrigin = true)
+        validator.validate(party, ranked, "Red") shouldBe
+            TeamVerdict.Refused(SignupOutcome.MONSTER_BANNED)
+        // The rule is about where the monster came from and nothing else: the same six without it
+        // are the same six.
+        validator.validate(legalSix(), ranked, "Red") shouldBe TeamVerdict.Accepted
+      }
+
+      test("an unranked queue takes the same party") {
+        val unranked = rules(clauses = STANDARD)
+        unranked.noOfflineOrigin shouldBe false
+        val party = legalSix().dropLast(1) + mon(143, offlineOrigin = true)
+        validator.validate(party, unranked, "Red") shouldBe TeamVerdict.Accepted
+      }
+
+      test("every ranked queue asks, and no unranked one does") {
+        // The setting is a default off MatchmakingQueue.ranked rather than a list somebody keeps in
+        // step, so a queue added later is covered by having been declared ranked.
+        MatchmakingQueue.entries.forEach { queue ->
+          QueueRules(queue, TierGroup.OVER_USED, STANDARD).noOfflineOrigin shouldBe queue.ranked
+        }
       }
     })

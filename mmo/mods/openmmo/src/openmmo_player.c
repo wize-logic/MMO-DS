@@ -83,7 +83,7 @@ void openmmo_player_attach(openmmo_client *c)
     s_live = NULL;
 }
 
-static String *latin1(enum HeapID heap, const char *s)
+static String *utf8_string(enum HeapID heap, const char *s)
 {
     mmo_charcode buf[64];
     String *out = String_Init(64, heap);
@@ -160,7 +160,7 @@ static int start_actions(FieldSystem *fs, PlayerMenu *p)
         return 0;
     for (i = 0; i < n; i++) {
         label = (i == ACT_FRIEND) ? friend_label(p->is_friend) : labels[i];
-        p->rowStr[i] = latin1(PLAYER_HEAP, label);
+        p->rowStr[i] = utf8_string(PLAYER_HEAP, label);
         if (p->rowStr[i] == NULL)
             return 0;
         StringList_AddFromString(p->choices, p->rowStr[i], (u32)i);
@@ -236,7 +236,7 @@ static int paint_message(FieldSystem *fs, PlayerMenu *p, const char *text)
         String_Free(p->msgStr);
         p->msgStr = NULL;
     }
-    p->msgStr = latin1(PLAYER_HEAP, text);
+    p->msgStr = utf8_string(PLAYER_HEAP, text);
     if (p->msgStr == NULL)
         return 0;
     FieldMessage_AddWindow(fs->bgConfig, &p->msgWin, BG_LAYER_MAIN_3);

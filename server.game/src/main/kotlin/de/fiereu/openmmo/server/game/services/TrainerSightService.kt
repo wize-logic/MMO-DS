@@ -48,7 +48,7 @@ constructor(
     if (session.attributes[CLIENT_RUNS_SCRIPTS] == true) return false
     if (state.inDialog) return false
     val charId = state.characterId ?: return false
-    val region = Region.byWireValue(state.regionId.toByte()) ?: return false
+    val region = regionOf(map, state) ?: return false
     val seen = trainerInSight(session, map, x, y, charId, region) ?: return false
 
     log.info {
@@ -66,23 +66,36 @@ constructor(
   }
 
   /** The player walked up and pressed A instead of being spotted. */
-  fun challengeOnInteract(session: SessionContext, state: PlayerState, npc: NpcDef): Boolean {
+  fun challengeOnInteract(
+      session: SessionContext,
+      state: PlayerState,
+      npc: NpcDef,
+      map: MapDef,
+  ): Boolean {
+    // Same sentence as [onStep]: a client that runs scripts fights its own trainers, ported or not.
     if (session.attributes[CLIENT_RUNS_SCRIPTS] == true) return false
     val charId = state.characterId ?: return false
-    val region = Region.byWireValue(state.regionId.toByte()) ?: return false
+    val region = regionOf(map, state) ?: return false
     val def = trainers.get(region, npc.trainerId) ?: return false
     if (def.defeatedFlag.isNotEmpty() && storyService.isFlagSet(charId, def.defeatedFlag)) {
       log.info { "Trainer ${npc.trainerId} is already beaten and has no ported line to say" }
       return true
     }
-    val seen = SeenBy(npc, distance = 1, facing = npc.facing, defeatedFlag = def.defeatedFlag)
+    val seen =
+        SeenBy(
+            npc,
+            distance = 1,
+            facing = npc.facing,
+            defeatedFlag = def.defeatedFlag,
+            badge = def.badge,
+            region = region)
     scriptRunner.run(
         session,
         state,
         Script { ctx ->
-          if (ctx.trainerBattle(npc.trainerId) == BattleResult.VICTORY &&
-              seen.defeatedFlag.isNotEmpty()) {
-            ctx.setFlag(seen.defeatedFlag)
+          if (ctx.trainerBattle(npc.trainerId, seen.region) == BattleResult.VICTORY) {
+            if (seen.defeatedFlag.isNotEmpty()) ctx.setFlag(seen.defeatedFlag)
+            if (seen.badge.isNotEmpty()) ctx.setFlag(seen.badge)
           }
         },
         npcService.entityIdFor(state.regionId, state.bankId, state.mapId, npc.entityIdx),
@@ -95,10 +108,16 @@ constructor(
     // One tile short of the player, then facing them: the engine's own approach.
     val approach = List(seen.distance - 1) { seen.toward } + seen.facePlayer
     ctx.moveNpc(seen.npc.entityIdx, *approach.toTypedArray())
-    if (ctx.trainerBattle(seen.npc.trainerId) == BattleResult.VICTORY &&
-        seen.defeatedFlag.isNotEmpty())
-        ctx.setFlag(seen.defeatedFlag)
+    if (ctx.trainerBattle(seen.npc.trainerId, seen.region) == BattleResult.VICTORY) {
+      if (seen.defeatedFlag.isNotEmpty()) ctx.setFlag(seen.defeatedFlag)
+      // A gym leader's badge, which the source's own gym script hands over after the fight.
+      if (seen.badge.isNotEmpty()) ctx.setFlag(seen.badge)
+    }
   }
+
+  /** Which region's trainer table this map's people are numbered in. */
+  private fun regionOf(map: MapDef, state: PlayerState): Region? =
+      if (map.ported) Region.JOHTO else Region.byWireValue(state.regionId.toByte())
 
   /** Whoever can see ([x], [y]) and has not been beaten, or null. */
   private fun trainerInSight(
@@ -129,7 +148,7 @@ constructor(
           if (npc.trainerType == VIEW_ALL_DIRECTIONS) Direction.entries else listOf(npc.facing)
       for (facing in lines) {
         val distance = distanceAlong(map, npc, facing, x, y) ?: continue
-        return SeenBy(npc, distance, facing, def.defeatedFlag)
+        return SeenBy(npc, distance, facing, def.defeatedFlag, def.badge, region)
       }
     }
     return null
@@ -165,6 +184,10 @@ constructor(
       val distance: Int,
       val facing: Direction,
       val defeatedFlag: String,
+      /** The badge this trainer's defeat earns, or "", a ported gym leader's. */
+      val badge: String,
+      /** Whose table this trainer is numbered in, which a ported map's is not the player's. */
+      val region: Region,
   ) {
     /** One step along the way it is looking. */
     val toward: MovementStep

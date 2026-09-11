@@ -25,10 +25,23 @@
      return NULL;
  }
  
-@@ -1313,6 +1331,30 @@
+@@ -1313,6 +1331,43 @@
          v0++;
      } while (v0->unk_00 != 0xffff);
  
++    /* A cooked row that wears an engine id's whole renderer row, a composed
++     * player look, laid out frame for frame like the sheet it stands in for
++     * (mods/openmmo/src/openmmo_billboard.c). The texture alone is its own,
++     * and that is read from the nsbtx table, not from here. */
++    {
++        extern int openmmo_billboard_like(int gfx_id);
++        int like = openmmo_billboard_like(param0);
++
++        if (like >= 0) {
++            return ov5_021EDD04(like);
++        }
++    }
++
 +    /* A cooked row that names its own model and frame sequence. A follower
 +     * Pokemon is 8 frames and two palettes where the youngster is 16 and one,
 +     * and 31 of them are 64x64, so cloning the youngster draws it out of the
@@ -56,3 +69,40 @@
      if (pc_modfs_billboard_nsbtx(param0) >= 0) {
          return ov5_021EDD04(OBJ_EVENT_GFX_YOUNGSTER);
      }
+@@ -1465,11 +1520,36 @@
+     v1.y += 0;
+     v1.z += (FX32_ONE * 6);
+ 
++    /* openmmo: the follower Pokemon's picture bobs as it walks and rises
++     * over a ledge, HeartGold's ov01_02205470 and ov01_022054E0 on its
++     * billboard (mods/openmmo/src/openmmo_follow_move.c). Everyone else
++     * answers 0. */
++    {
++        extern fx32 openmmo_follow_draw_offset(MapObject *obj, fx32 frameNum, int walking);
++        int walking = MapObject_CheckStatusFlag(param0, MAP_OBJ_STATUS_4) == FALSE
++            && MapObject_CheckStatusFlag(param0, MAP_OBJ_STATUS_PAUSE_ANIMATION) == FALSE
++            && LocalMapObj_CheckAnimationFinished(param0) == FALSE;
++        v1.y += openmmo_follow_draw_offset(param0, Billboard_GetFrameNum(param1), walking);
++    }
++
+     Billboard_SetPos(param1, &v1);
+ 
+     return 0;
+ }
+ 
++/* openmmo: the billboard an object draws with, for the follower's ball
++ * effects to scale and whiten (mods/openmmo/src/openmmo_follow_fx.c). */
++Billboard *openmmo_map_object_billboard(MapObject *mapObj)
++{
++    UnkStruct_ov5_021EE698 *v0 = sub_02062AF0(mapObj);
++
++    if (v0 == NULL) {
++        return NULL;
++    }
++
++    return v0->unk_24;
++}
++
+ void ov5_021EDED8(MapObject *param0, Billboard *param1)
+ {
+     int v0 = 1;

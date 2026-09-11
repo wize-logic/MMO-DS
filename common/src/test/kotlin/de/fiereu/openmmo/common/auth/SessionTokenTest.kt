@@ -43,7 +43,11 @@ class SessionTokenTest :
         SessionTokenVerifier(secret).verify(ByteArray(size + 1)) shouldBe null
       }
 
-      /** The ticket is the only thing that tells the game server what an account may do. */
+      /**
+       * The game server holds no user table, so this ticket is the only thing that tells it what an
+       * account may do. The roles have to survive the trip and be as forgeable as the id beside
+       * them, which is to say not at all.
+       */
       test("the roles the login server signed are the roles that come back") {
         val roles = AccountRoles.of(AccountRole.DEVELOPER)
 

@@ -1,28 +1,21 @@
 package de.fiereu.openmmo.common.auth
 
-/**
- * What an account may do beyond playing.
- *
- * These belong to the account, not to a character, so starting a new character keeps them.
- *
- * The order is a ranking: every role carries what the ones before it carry, so a check asks for the
- * least it needs and a developer passes all of them.
- */
+/** What an account may do beyond playing. */
 enum class AccountRole {
-  /** Keeps the peace. Aimed at players rather than at the server. */
+  /** Keeps the peace: aimed at players rather than at the server. */
   MODERATOR,
 
-  /** Runs the server. */
+  /** Runs the server: everything a moderator may do, and the server's own settings. */
   ADMIN,
 
-  /** Builds the server. The debug commands. */
+  /** Builds the server. The debug commands, which can make anything out of nothing. */
   DEVELOPER;
 
   val bit: Int
     get() = 1 shl ordinal
 
   companion object {
-    /** Reads a role a person typed, for the command line. Null when it is not one. */
+    /** Reads a role written by a person, for the command line. Null when it is not one. */
     fun parse(text: String): AccountRole? = entries.firstOrNull { it.name.equals(text, true) }
 
     /** Every name, for a usage line. */
@@ -30,7 +23,10 @@ enum class AccountRole {
   }
 }
 
-/** The roles one account holds, as the bits stored on its row and signed into its join ticket. */
+/**
+ * The set of roles one account holds, as the bits stored on its row and signed into its join
+ * ticket.
+ */
 @JvmInline
 value class AccountRoles(val mask: Int) {
 

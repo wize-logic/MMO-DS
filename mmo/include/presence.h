@@ -46,10 +46,11 @@ typedef struct {
     int    fd;     /* POSIX: the IPC socket, -1 when closed */
     void  *pipe;   /* Windows: the pipe handle, NULL when closed */
     char   app_id[32];
-    /* OPENMMO_DISCORD_IPC: one path (or pipe name) that replaces the whole
-     * sweep. The suite points it at a socket it owns, and on WSL, where
-     * Discord is a Windows program and there is no socket to find, it is the
-     * only way to reach one at all. */
+    /*
+     * OPENMMO_DISCORD_IPC: one path (or pipe name) that replaces the whole sweep. The suite
+     * points it at a socket it owns, and on WSL, where Discord is a Windows program and
+     * there is no socket to find, it is the only way to reach one at all.
+     */
     char   path[MMO_PRESENCE_PATH];
     char   location[MMO_PRESENCE_LINE];
     char   player[MMO_PRESENCE_LINE];
@@ -65,8 +66,8 @@ typedef struct {
     size_t rx_len;
 } mmo_presence;
 
-/* This build's application id: OPENMMO_DISCORD_APP if the environment names
- * one, else MMO_PRESENCE_APP_ID. */
+/* This build's application id: OPENMMO_DISCORD_APP if a development build's
+ * environment names one, else MMO_PRESENCE_APP_ID. */
 const char *mmo_presence_app_id(void);
 
 /* Ready one. An empty or absent app_id leaves it OFF for good: a build with no

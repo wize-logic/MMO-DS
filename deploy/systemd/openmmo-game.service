@@ -14,14 +14,16 @@ Group=openmmo
 # from the repository .env, root readable only.
 EnvironmentFile=/etc/openmmo/game.env
 ExecStart=/opt/openmmo/game/bin/server.game
-# The JVM leaves on SIGTERM with 128+15, which systemd would otherwise record as a
-# failure, leaving the unit failed with nothing to bring it back.
+# The jvm leaves on SIGTERM with 128+15. Without this a plain `systemctl stop`
+# records the unit as failed, which is how the website came to be down for
+# hours with nothing to bring it back.
 SuccessExitStatus=143
 Restart=always
 RestartSec=5s
-# The shutdown hook flushes every character in the world back to the database, which
-# takes up to ten seconds under load. Say the timeout out loud: docker's 10s was not
-# enough, which is why game.compose.yml carries a stop_grace_period too.
+# The shutdown hook flushes every character that is in the world back to the
+# database, which takes up to ten seconds under load. Give it room: systemd's
+# default 90s is enough, but say so, because docker's 10s was not and that is
+# why deploy/game.compose.yml carries a stop_grace_period too.
 TimeoutStopSec=60
 
 NoNewPrivileges=yes

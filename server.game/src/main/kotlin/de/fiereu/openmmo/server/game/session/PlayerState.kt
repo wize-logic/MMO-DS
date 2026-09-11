@@ -13,8 +13,9 @@ import java.util.concurrent.ConcurrentHashMap
 data class PlayerState(
     val userId: Int,
     /**
-     * What this account may do, as its join ticket stated it. Roles belong to the account, and this
-     * server has no user table of its own to ask.
+     * What this account may do beyond playing, as its join ticket stated it. Read from the ticket
+     * rather than from the character, because roles belong to the account and this server has no
+     * user table of its own to ask.
      */
     val roles: AccountRoles = AccountRoles.NONE,
     @field:Volatile var characterId: Long? = null,
@@ -44,12 +45,7 @@ data class PlayerState(
      * every boulder is where the map put it.
      */
     val boulderTiles: MutableMap<Int, Pair<Int, Int>> = ConcurrentHashMap(),
-    /**
-     * Whether this session is sitting at a trade table. While it is,
-     * [de.fiereu.openmmo.server.game.services.PokemonStorageService] refuses to move a monster
-     * between containers, because a move landing between the two halves of a settlement takes back
-     * the monster the first half just handed over.
-     */
+    /** Whether this session is sitting at a trade table. */
     @field:Volatile var atTradeTable: Boolean = false,
     /**
      * A script is warping and will run the destination's entry scripts itself. The arrival must not
@@ -57,6 +53,12 @@ data class PlayerState(
      * clears it while the script is parked on the map load.
      */
     @field:Volatile var scriptOwnsMapEntry: Boolean = false,
+    /**
+     * A white out this player is owed, because the battle that wiped their party was one a script
+     * staged and that script still owns the connection. The script runner clears it and runs the
+     * white out on its own coroutine once the script has ended.
+     */
+    @field:Volatile var pendingBlackOut: Boolean = false,
     /** Maps the client already holds. A warp sends deleteCache, which empties this. */
     val loadedMaps: MutableSet<Int> = ConcurrentHashMap.newKeySet(),
     /**
@@ -75,6 +77,13 @@ data class PlayerState(
 /** The npc setHasPartner named, kept so a map change can spawn them again. */
 data class PartnerFollow(val entityId: Long, val npc: NpcDef)
 
-/** Packs a map address into one key for [PlayerState.loadedMaps]. */
+/** Where the player is, from three numbers that reached here as signed bytes. */
+fun PlayerState.setMapAddress(regionId: Int, bankId: Int, mapId: Int) {
+  this.regionId = regionId and 0xFF
+  this.bankId = bankId and 0xFF
+  this.mapId = mapId and 0xFF
+}
+
+/** Packs a map address into one key for [PlayerState.loadedMaps]. Masked for the same reason. */
 fun mapCacheKey(regionId: Int, bankId: Int, mapId: Int): Int =
-    (regionId shl 16) or (bankId shl 8) or mapId
+    ((regionId and 0xFF) shl 16) or ((bankId and 0xFF) shl 8) or (mapId and 0xFF)

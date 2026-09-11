@@ -61,15 +61,26 @@ AROOT := $(abspath $(dir $(firstword $(MAKEFILE_LIST))))
 ARM        ?= arm-linux-gnueabihf
 ARM_PREFIX ?= $(HOME)/.local/opt/cross-armhf
 ARM_TOOLS  ?= $(if $(wildcard $(ARM_PREFIX)/usr/bin/$(ARM)-gcc),$(ARM_PREFIX)/usr/bin/$(ARM),$(ARM))
-ARM_CC     ?= $(ARM_TOOLS)-gcc
+# AND NOT WHICHEVER VERSION THE DISTRIBUTION SPELLS `-gcc`, EITHER. GCC 14 made
+# implicit-function-declaration and incompatible-pointer-types hard errors, and
+# the engine's pc/ sources trip both: on Ubuntu 26.04's arm-linux-gnueabihf-gcc
+# 15 a `fused` build SKIPs pc_lab.o and pc_main.o and ends at the link, with a
+# page of missing symbols that says nothing about the compiler. The desktop
+# build answers this with a gcc-13 first on $PATH, the engine's pc/Makefile
+# hard-assigns `CC := gcc`, so PATH is the only lever there, but a cross
+# driver is named for its triple and has no such trick, so the version is
+# chosen here: the -13 driver when the distribution ships one
+# (gcc-13-arm-linux-gnueabihf), and the unsuffixed name otherwise. Measured
+# 2026-09-10: the same tree that SKIPs those two under 15 links under 13.
+ARM_CC     ?= $(if $(shell command -v $(ARM_TOOLS)-gcc-13 2>/dev/null),$(ARM_TOOLS)-gcc-13,$(ARM_TOOLS)-gcc)
 CC      := $(ARM_CC)
 AR      := $(ARM_TOOLS)-ar
 READELF ?= $(ARM_TOOLS)-readelf
 OBJDUMP ?= $(ARM_TOOLS)-objdump
 
 ifeq ($(shell command -v $(ARM_CC) 2>/dev/null),)
-$(error no $(ARM_CC); run $(ENGINE)/pc/install_arm_toolchain.sh, or install \
- gcc-arm-linux-gnueabihf and qemu-user)
+$(error no $(ARM_CC); run the engine tree's pc/install_arm_toolchain.sh, or \
+ install gcc-13-arm-linux-gnueabihf and qemu-user)
 endif
 
 # The emulator, and the sysroot it needs for a dynamic binary's loader. The
@@ -204,6 +215,16 @@ include $(AROOT)/Makefile
 # this is the same flag either way.
 OPTFLAGS += -funwind-tables
 
+# ------------------------------------------------------- the game's compiler
+#
+# The engine's pc/Makefile.arm picks its own cross driver, with the same
+# `ARM_CC ?= $(ARM_TOOLS)-gcc` default this file used to have, so choosing
+# the -13 driver up there and saying nothing here would leave `fused` on the
+# distribution's newest gcc and back at the two SKIPped port objects. Passed
+# rather than exported: a sub-make's `?=` yields to a variable named on its
+# command line and to nothing else.
+FUSEDVARS += ARM_CC=$(ARM_CC)
+
 # --------------------------------------------------------------- the gate
 #
 # What "it built for ARM" means, read off the finished binary rather than
@@ -318,5 +339,5 @@ neon: fused
 	                               sub(/>:.*/, "", fn) } \
 	              NF > 2 && $$3 ~ /q[0-9]/ { n[fn]++; t++ } \
 	              END { for (f in n) printf "  NEON  %6d  %s\n", n[f], f; \
-	                    printf " NEON %6d , in the whole binary --\n", t }' | \
+	                    printf "  NEON %6d , in the whole binary --\n", t }' | \
 	  sort -k2 -rn | head -20

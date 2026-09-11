@@ -13,9 +13,12 @@ class SinnohNpcGraphicsTest :
       val sinnoh = 3
       val maps = MapManager()
       // The generated set has no index, so a region-wide claim walks every bank and map number.
+      // A ported map travels as Sinnoh too, but its people are drawn by the client out of another
+      // cartridge's art, so they carry no sprite of this game's and are not part of this claim.
       val drawn =
           (0..255)
               .flatMap { bank -> (0..255).mapNotNull { map -> maps.getMap(sinnoh, bank, map) } }
+              .filterNot { it.ported }
               .flatMap { map -> map.npcs.map { it.graphicsId } }
               .toSet()
 

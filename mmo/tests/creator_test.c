@@ -272,13 +272,30 @@ static void test_girl_default_body(void)
 
 /* The list widget owns its own scrolling and asks for any row by absolute
  * index; the appearance step is the long one and offers the whole catalog. */
+/* The i-th catalog row of one gender, the way the creator lists them. */
+static int offered_row_of_gender(int gender, int want)
+{
+    int i, seen = 0;
+
+    for (i = 0; i < mmo_appearance_count(); i++) {
+        const mmo_appearance *a = mmo_appearance_at(i);
+
+        if (!a->offered || a->gender != gender)
+            continue;
+        if (seen == want)
+            return i;
+        seen++;
+    }
+    return -1;
+}
+
 static void test_appear_full_list(void)
 {
     mmo_creator c;
     mmo_creator_row row;
     int n;
 
-    printf("the appearance step lists the whole catalog, absolutely addressed:\n");
+    printf("the appearance step lists the chosen gender's looks, absolutely addressed:\n");
     mmo_creator_reset(&c);
     mmo_creator_set_list(&c, NULL);
     mmo_creator_confirm(&c);
@@ -287,15 +304,127 @@ static void test_appear_full_list(void)
     mmo_creator_confirm(&c);
     CHECK(c.step == MMO_CREATOR_APPEAR, "on the appearance step");
     n = mmo_creator_row_count(&c);
-    CHECK(n == mmo_appearance_count(), "every catalog row is a list row");
-    CHECK(mmo_creator_visible_count(&c) == MMO_CREATOR_VISIBLE,
-          "the visible window is still eight rows");
+    {
+        /* Not the whole catalog: the gender was chosen a step ago, so the
+         * list is that gender's rows, one look a game, and the other
+         * gender's are not on it. */
+        int offered = 0, i;
+
+        for (i = 0; i < mmo_appearance_count(); i++) {
+            const mmo_appearance *a = mmo_appearance_at(i);
+
+            if (a->offered && a->gender == c.gender)
+                offered++;
+        }
+        CHECK(n == offered, "every offered look of the gender is a list row");
+        CHECK(n < mmo_appearance_count(),
+            "and the other gender's are not, so the list is not the raw catalog");
+        CHECK(n == 3, "three games, one boy each");
+        for (i = 0; i < n; i++)
+            CHECK(mmo_creator_appear_gfx_at(&c, i)
+                      == mmo_appearance_at(offered_row_of_gender(c.gender, i))->gfx,
+                  "the row's preview gfx is that row's walking sheet");
+        CHECK(mmo_creator_appear_gfx_at(&c, n) < 0, "and off the end there is none");
+    }
+    CHECK(mmo_creator_visible_count(&c) == n && n < MMO_CREATOR_VISIBLE,
+          "three rows fit the window without scrolling");
     CHECK(mmo_creator_row_at(&c, 0, &row) && row.selected,
           "row 0 is the cursor's");
     CHECK(mmo_creator_row_at(&c, n - 1, &row) && !row.selected
               && row.text[0] != '\0',
           "the last row reads without scrolling");
     CHECK(!mmo_creator_row_at(&c, n, &row), "off the end is refused");
+}
+
+/* PLAY offline's front door: one save per cartridge, so the list is the
+ * screen. No NEW CHARACTER row to meet before the character, and no action
+ * menu behind the row, A on it is the pick, because PLAY is the only verb
+ * offline and the launcher owns restore. */
+static void test_fixed_list_is_the_whole_screen(void)
+{
+    mmo_creator c;
+    mmo_character_list list = two_chars();
+    mmo_creator_row row;
+
+    printf("a fixed list has no create row and no action menu:\n");
+    list.count = 1;
+    list.held = 1;
+    mmo_creator_reset(&c);
+    mmo_creator_fix_list(&c, 1);
+    mmo_creator_set_list(&c, &list);
+    CHECK(c.step == MMO_CREATOR_SELECT, "the list opens");
+    CHECK(mmo_creator_row_count(&c) == 1, "one row, and it is the character");
+    CHECK(mmo_creator_row_at(&c, 0, &row) == 1
+              && strstr(row.text, "Lucas") != NULL,
+          "the row is Lucas");
+    CHECK(!mmo_creator_row_at(&c, 1, &row), "there is no NEW CHARACTER after it");
+    CHECK(strstr(mmo_creator_hint(&c), "NEW CHARACTER") == NULL,
+          "and the footer does not offer one");
+    mmo_creator_move(&c, MMO_CREATOR_DOWN);
+    CHECK(c.cursor == 0, "DOWN cannot walk off the only row");
+    CHECK(mmo_creator_confirm(&c) == 1 && c.step == MMO_CREATOR_SELECT,
+          "A does not open the action menu");
+    CHECK(mmo_creator_has_pick(&c) && mmo_creator_pick_index(&c) == 0,
+          "A is the pick itself");
+    CHECK(!mmo_creator_has_delete(&c), "and nothing was offered to delete");
+
+    printf("a refusal on a fixed list is why the row will not open:\n");
+    mmo_creator_reset(&c);
+    mmo_creator_fix_list(&c, 1);
+    mmo_creator_set_list(&c, &list);
+    mmo_creator_refuse(&c, "SPECIES 634 NEEDS YOUR BLACK CARTRIDGE");
+    CHECK(strcmp(mmo_creator_hint(&c), "SPECIES 634 NEEDS YOUR BLACK CARTRIDGE") == 0,
+          "the sentence is the hint under the row");
+    CHECK(mmo_creator_confirm(&c) == 0 && !mmo_creator_has_pick(&c),
+          "and A does not pick it");
+    CHECK(strcmp(mmo_creator_hint(&c), "SPECIES 634 NEEDS YOUR BLACK CARTRIDGE") == 0,
+          "the sentence stays up, because it is still the reason");
+
+    printf("the same list without the flag is the online screen:\n");
+    mmo_creator_reset(&c);
+    mmo_creator_set_list(&c, &list);
+    CHECK(mmo_creator_row_count(&c) == 2, "one character and NEW CHARACTER");
+    CHECK(mmo_creator_confirm(&c) == 1 && c.step == MMO_CREATOR_ACTION,
+          "and A still opens what to do with the row");
+}
+
+/* The other half of that front door: nothing saved here yet. The list is empty,
+ * so the only row is the one past the end, and offline that row is NEW GAME,
+ * one press, because the cartridge's own opening asks the name and the gender
+ * the four creator steps would ask first. */
+static void test_direct_new_is_one_press(void)
+{
+    mmo_creator c;
+    mmo_creator_row row;
+
+    printf("an empty list offline is one row that starts a new game:\n");
+    mmo_creator_reset(&c);
+    mmo_creator_direct_new(&c, 1);
+    mmo_creator_set_list(&c, NULL);
+    CHECK(mmo_creator_row_count(&c) == 1, "one row");
+    CHECK(mmo_creator_row_at(&c, 0, &row) && strcmp(row.text, "NEW GAME") == 0,
+          "and it says NEW GAME, not NEW CHARACTER");
+    CHECK(strstr(mmo_creator_hint(&c), "NEW GAME") != NULL,
+          "the footer says so too");
+    CHECK(mmo_creator_confirm(&c) == 1, "A takes it");
+    CHECK(c.step == MMO_CREATOR_SELECT,
+          "and the step does not move, so no name screen opens");
+    CHECK(!mmo_creator_needs_entry(&c), "nothing is waiting to be typed");
+    CHECK(mmo_creator_wants_new(&c), "the caller is told to start one");
+    CHECK(!mmo_creator_has_pick(&c) && !mmo_creator_ready(&c),
+          "and it is neither a pick nor a filled-in create");
+    mmo_creator_begin_wait(&c);
+    CHECK(!mmo_creator_wants_new(&c), "the answer is taken once");
+
+    printf("the same empty list online still walks the creator:\n");
+    mmo_creator_reset(&c);
+    mmo_creator_set_list(&c, NULL);
+    CHECK(mmo_creator_row_at(&c, 0, &row)
+              && strcmp(row.text, "NEW CHARACTER") == 0,
+          "the row is NEW CHARACTER");
+    CHECK(mmo_creator_confirm(&c) == 1 && c.step == MMO_CREATOR_NAME,
+          "and A starts the four steps");
+    CHECK(!mmo_creator_wants_new(&c), "nothing asks the caller for a new game");
 }
 
 int creator_tests_run(void)
@@ -310,6 +439,8 @@ int creator_tests_run(void)
     test_back_and_name_cap();
     test_girl_default_body();
     test_appear_full_list();
+    test_fixed_list_is_the_whole_screen();
+    test_direct_new_is_one_press();
 
     if (failures)
         printf("creator: %d check(s) FAILED\n", failures);

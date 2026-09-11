@@ -1,12 +1,12 @@
-OpenMMO DS
+MMO-DS
 Copyright (C) 2026 wize-logic
 
 Two licences apply here.
 
 AGPL-3.0-or-later, in LICENSE, covers the work written for this project:
-the Kotlin servers, the shared protocol and network modules, the launcher,
-the website, and the C client's own sources under mmo/src, mmo/include,
-mmo/viewer, mmo/launcher and mmo/tools.
+the Kotlin servers, the shared protocol and network modules, the website,
+and the C client's own sources under mmo/src, mmo/include, mmo/viewer,
+mmo/launcher, mmo/android and mmo/tools.
 
 GPL-3.0-or-later covers the parts derived from the engine this client is
 fused with, which is itself GPL-3.0: everything under mmo/mods/openmmo, both

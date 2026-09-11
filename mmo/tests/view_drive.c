@@ -9,6 +9,8 @@
 
 #include <SDL.h>
 
+#include "hud_channel.h"
+#include "status_channel.h"
 #include "text_channel.h"
 #include "view_channel.h"
 #include "view_geom.h"
@@ -92,11 +94,56 @@ static void page_fill(struct openmmo_view_shm *v, unsigned version, int magic)
     if (magic) v->magic = OPENMMO_VIEW_MAGIC;
 }
 
+/*
+ * The hud page, the same way. The window's in-game UI is drawn off this and off nothing else,
+ * whether the bar is up at all is a question about the snapshot, so a check of that UI
+ * needs a page saying what the game would say.
+ */
+static int hud_publish(const char *channel, uint32_t lower, uint32_t state)
+{
+    char name[192];
+    struct openmmo_hud_shm *h;
+    struct openmmo_hud_snap snap;
+    int fd;
+
+    snprintf(name, sizeof name, "%s%s", channel, OPENMMO_HUD_SUFFIX);
+    shm_unlink(name);
+    fd = shm_open(name, O_RDWR | O_CREAT, 0600);
+    if (fd < 0) {
+        fprintf(stderr, "view-drive: shm_open(%s): %s\n", name,
+                strerror(errno));
+        return 1;
+    }
+    if (ftruncate(fd, (off_t)sizeof *h) != 0) {
+        fprintf(stderr, "view-drive: ftruncate: %s\n", strerror(errno));
+        close(fd);
+        return 1;
+    }
+    h = mmap(NULL, sizeof *h, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    if (h == MAP_FAILED) {
+        fprintf(stderr, "view-drive: mmap: %s\n", strerror(errno));
+        return 1;
+    }
+    memset(h, 0, sizeof *h);
+    h->version = OPENMMO_HUD_VERSION;
+    h->writer = (uint32_t)getpid();
+    __sync_synchronize();
+    h->magic = OPENMMO_HUD_MAGIC;
+    memset(&snap, 0, sizeof snap);
+    snap.lower = lower;
+    snap.net.state = state;
+    openmmo_hud_publish(h, &snap);
+    return 0;
+}
+
 static int cmd_publish(int argc, char **argv)
 {
     struct openmmo_view_shm *v;
     unsigned version = OPENMMO_VIEW_VERSION;
     const char *name = NULL;
+    const char *hud = NULL;
+    uint32_t state = OPENMMO_ST_DISCONNECTED;
     int magic = 1, i;
 
     for (i = 0; i < argc; i++) {
@@ -104,6 +151,10 @@ static int cmd_publish(int argc, char **argv)
             version = (unsigned)strtoul(argv[++i], NULL, 0);
         else if (strcmp(argv[i], "--no-magic") == 0)
             magic = 0;
+        else if (strcmp(argv[i], "--hud") == 0 && i + 1 < argc)
+            hud = argv[++i];
+        else if (strcmp(argv[i], "--hud-state") == 0 && i + 1 < argc)
+            state = (uint32_t)strtoul(argv[++i], NULL, 0);
         else
             name = argv[i];
     }
@@ -113,6 +164,12 @@ static int cmd_publish(int argc, char **argv)
     v = page_map(name, 1);
     if (v == NULL) return 1;
     page_fill(v, version, magic);
+    if (hud != NULL) {
+        uint32_t lower = strcmp(hud, "poketch") == 0 ? OPENMMO_HUD_LOWER_POKETCH
+                                                     : OPENMMO_HUD_LOWER_GUEST;
+
+        if (hud_publish(name, lower, state) != 0) return 1;
+    }
     return 0;
 }
 
@@ -130,11 +187,13 @@ static int cmd_stamp(const char *name)
 
 static int cmd_unlink(const char *name)
 {
-    char text[160];
+    char text[160], hud[160];
 
     snprintf(text, sizeof text, "%s%s", name, OPENMMO_TEXT_SUFFIX);
+    snprintf(hud, sizeof hud, "%s%s", name, OPENMMO_HUD_SUFFIX);
     shm_unlink(name);
     shm_unlink(text);
+    shm_unlink(hud);
     return 0;
 }
 
@@ -196,6 +255,22 @@ static int cmd_shotcheck(const char *path, const char *want)
         CHECK(blue == 256u * 192u, "the touch screen is presented at 1x, whole");
         CHECK(other == 0, "every pixel is a published colour or the background");
         if (red != 512u * 384u || blue != 256u * 192u || other != 0)
+            printf("       red=%u blue=%u black=%u other=%u\n",
+                   red, blue, black, other);
+    } else if (strcmp(want, "bar") == 0) {
+        /* The world is drawn and something of the window's own is over it.
+         * Nothing here is filtered, so every pixel of the published page is
+         * exactly one of the two colours it was filled with and the third is
+         * the background: anything else in the shot is the UI layer. */
+        CHECK(red > 0, "the world is presented under the window's own UI");
+        CHECK(other > 0, "and the bar is drawn over it");
+        if (other == 0)
+            printf("       red=%u blue=%u black=%u other=%u\n",
+                   red, blue, black, other);
+    } else if (strcmp(want, "nobar") == 0) {
+        CHECK(red > 0, "the world is presented");
+        CHECK(other == 0, "and nothing of the window's own is drawn over it");
+        if (other != 0)
             printf("       red=%u blue=%u black=%u other=%u\n",
                    red, blue, black, other);
     } else {
@@ -533,7 +608,9 @@ static int cmd_feed_audio(const char *name, int ms)
 static void usage(void)
 {
     fprintf(stderr,
-        "usage: view-drive publish [--version N] [--no-magic] <channel>\n"
+        "usage: view-drive publish [--version N] [--no-magic]\n"
+        "                          [--hud poketch|guest] [--hud-state N]\n"
+        "                          <channel>\n"
         "       view-drive stamp <channel>     write the magic, as the game\n"
         "                                      writes it last\n"
         "       view-drive unlink <channel>    the page and its text page\n"

@@ -67,6 +67,10 @@ constructor(
             isFatefulEncounter = false,
             isRaidEncounter = false,
             caughtAt = LocalDateTime.now(),
+            // Where a fresh monster starts liking its trainer. Its own species answers this:
+            // Chansey starts at 140 and Dratini at 35, and the walking and the level ups move it
+            // from there.
+            friendship = def.friendship,
         )
     return mon.copy(hp = StatCalculator.computeAll(def, mon).hp.toShort())
   }

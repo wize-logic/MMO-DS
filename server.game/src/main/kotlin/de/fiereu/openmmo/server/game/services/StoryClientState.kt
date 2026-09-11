@@ -65,23 +65,62 @@ internal object StoryClientState {
       flags: Collection<String>,
       vars: Map<String, Int>,
       saveBlocks: Map<Int, ByteArray> = emptyMap(),
+      // Rows the server derives from what it holds elsewhere (SyntheticRows): the badges and the
+      // respawn. They are never stored as vm rows, so they are added here rather than read back.
+      syntheticFlags: List<ScriptFlagEntry> = emptyList(),
+      syntheticVars: List<ScriptVarEntry> = emptyList(),
   ): ScriptStatePacket =
-      ScriptStatePacket(
-          flags
-              .mapNotNull { VmStoryKeys.flagId(regionId, it) }
-              .sorted()
-              .map { ScriptFlagEntry(it.toShort(), true) },
-          vars.entries
-              .mapNotNull { (key, value) ->
-                VmStoryKeys.varId(regionId, key)?.let { id -> id to value }
-              }
-              .filter { it.second != 0 }
-              .sortedBy { it.first }
-              .map { (id, value) -> ScriptVarEntry(id.toShort(), value.toShort()) },
+      fitOnePacket(
+          (flags
+                  .mapNotNull { VmStoryKeys.flagId(regionId, it) }
+                  .map { ScriptFlagEntry(it.toShort(), true) } + syntheticFlags)
+              .sortedBy { it.id },
+          (vars.entries
+                  .mapNotNull { (key, value) ->
+                    VmStoryKeys.varId(regionId, key)?.let { id -> id to value }
+                  }
+                  .filter { it.second != 0 }
+                  .map { (id, value) -> ScriptVarEntry(id.toShort(), value.toShort()) } +
+                  syntheticVars)
+              .sortedBy { it.id },
           // Whole save blocks, in id order so a seat is the same bytes twice running. A block the
           // store does not hold is left off, and the client keeps whatever its own fresh save has.
           saveBlocks.entries.sortedBy { it.key }.map { SaveBlockEntry(it.key, it.value) },
       )
+
+  /** The seat, cut down to what one packet can carry if it does not already fit. */
+  private fun fitOnePacket(
+      flags: List<ScriptFlagEntry>,
+      vars: List<ScriptVarEntry>,
+      blocks: List<SaveBlockEntry>,
+  ): ScriptStatePacket {
+    val total =
+        SEAT_HEADER_BYTES +
+            blocks.sumOf { SEAT_BLOCK_ROW_BYTES + it.data.size } +
+            flags.size * SEAT_FLAG_ROW_BYTES +
+            vars.size * SEAT_VAR_ROW_BYTES
+    if (total <= SEAT_BYTES_MAX) return ScriptStatePacket(flags, vars, blocks)
+
+    var left = SEAT_BYTES_MAX - SEAT_HEADER_BYTES
+    val keptBlocks = mutableListOf<SaveBlockEntry>()
+    for (block in blocks) {
+      val cost = SEAT_BLOCK_ROW_BYTES + block.data.size
+      if (cost > left) continue
+      left -= cost
+      keptBlocks += block
+    }
+    val keptFlags = flags.take(left / SEAT_FLAG_ROW_BYTES)
+    left -= keptFlags.size * SEAT_FLAG_ROW_BYTES
+    val keptVars = vars.take(left / SEAT_VAR_ROW_BYTES)
+    log.error {
+      "a script seat came to $total bytes, past the $SEAT_BYTES_MAX one packet carries:" +
+          " sending ${keptBlocks.size} of ${blocks.size} save block(s)," +
+          " ${keptFlags.size} of ${flags.size} flag(s) and ${keptVars.size} of ${vars.size}" +
+          " variable(s). A block left off is seated from the game's own defaults and reported back" +
+          " over the stored one, so this is a character to look at rather than a line to watch"
+    }
+    return ScriptStatePacket(keptFlags, keptVars, keptBlocks)
+  }
 
   private fun flagId(regionId: Byte, key: String): Int? =
       when (regionId.toInt()) {
@@ -96,6 +135,16 @@ internal object StoryClientState {
         HOENN_REGION -> HoennVars.numericId(key)
         else -> null
       }
+
+  private const val SEAT_BYTES_MAX = 60_000
+  /** The two list counts and the block count, which every seat pays whatever it carries. */
+  private const val SEAT_HEADER_BYTES = 5
+  /** An id and a bool. */
+  private const val SEAT_FLAG_ROW_BYTES = 3
+  /** An id and a value. */
+  private const val SEAT_VAR_ROW_BYTES = 4
+  /** An id and the length in front of the bytes. */
+  private const val SEAT_BLOCK_ROW_BYTES = 3
 
   private const val KANTO_REGION = 0
   private const val HOENN_REGION = 1

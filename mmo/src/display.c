@@ -142,7 +142,7 @@ static const char *NO_STRING =
     "string: id is not in the official client overlay and is not a ROM-bank slot "
     "this table fills";
 static const char *NO_ABILITY =
-    "ability: id has no name in the engine's 124 or the official client overlay";
+    "ability: id has no name in the engine's 165 or the official client overlay";
 static const char *NO_MOVE =
     "move: id has no name in the engine's 467 or the official client overlay";
 static const char *NO_MOVE_TYPE =

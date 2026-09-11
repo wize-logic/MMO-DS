@@ -10,6 +10,7 @@ import de.fiereu.openmmo.common.enums.IVs
 import de.fiereu.openmmo.common.enums.PokemonContainer
 import de.fiereu.openmmo.common.enums.Region
 import de.fiereu.openmmo.common.enums.TileBehavior
+import de.fiereu.openmmo.items.ItemRegistry
 import de.fiereu.openmmo.maps.MapManager
 import de.fiereu.openmmo.net.game.packets.EntityTransportationPacket
 import de.fiereu.openmmo.net.game.packets.MovementPacket
@@ -17,14 +18,18 @@ import de.fiereu.openmmo.net.game.packets.NpcUpdatePacket
 import de.fiereu.openmmo.net.game.packets.TRANSPORTATION_SURFING
 import de.fiereu.openmmo.net.game.packets.TileInteractPacket
 import de.fiereu.openmmo.net.game.packets.dialog.DialogActionPacket
+import de.fiereu.openmmo.server.game.script.Badge
 import de.fiereu.openmmo.server.game.script.ScriptRegistry
 import de.fiereu.openmmo.server.game.session.SCRIPT_SCOPE
 import de.fiereu.openmmo.server.game.storage.CharacterStore
 import de.fiereu.openmmo.server.game.storage.EntityIdService
+import de.fiereu.openmmo.server.game.storage.InMemoryOfflineItemRepository
 import de.fiereu.openmmo.server.game.testsupport.FakeCharacterRepository
 import de.fiereu.openmmo.server.game.testsupport.FakeSession
+import de.fiereu.openmmo.server.game.testsupport.fieldMoveService
 import de.fiereu.openmmo.server.game.testsupport.movementService
 import de.fiereu.openmmo.server.game.testsupport.scriptRunner
+import de.fiereu.openmmo.server.game.testsupport.staticEncounterService
 import de.fiereu.openmmo.server.game.testsupport.trainerSightService
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.ints.shouldBeGreaterThan
@@ -69,27 +74,38 @@ class FieldMoveWallTest :
         // Sinnoh is 270 terrain planes, and a map is a stretch of one, so count each plane
         // once.
         val seen = java.util.IdentityHashMap<Any, Boolean>()
-        var northSouth = 0
-        var eastWest = 0
-        var waterfall = 0
+        var planes = intArrayOf(0, 0)
+        var northSouth = intArrayOf(0, 0)
+        var eastWest = intArrayOf(0, 0)
+        var waterfall = intArrayOf(0, 0)
         for (bank in 0 until 60) for (id in 0 until 256) {
           val map = maps.getMap(3, bank, id) ?: continue
           val plane = map.terrain ?: continue
           if (seen.put(plane, true) != null) continue
+          // 594 is the first header a port may answer to; anything under it is this game's own.
+          val side = if (((bank shl 8) or id) < 594) 0 else 1
+          planes[side]++
           for (y in 0 until plane.height) for (x in 0 until plane.width) {
             when (map.tileAt(x, y)?.behavior) {
-              TileBehavior.ROCK_CLIMB_NORTH_SOUTH -> northSouth++
-              TileBehavior.ROCK_CLIMB_EAST_WEST -> eastWest++
-              TileBehavior.WATERFALL -> waterfall++
+              TileBehavior.ROCK_CLIMB_NORTH_SOUTH -> northSouth[side]++
+              TileBehavior.ROCK_CLIMB_EAST_WEST -> eastWest[side]++
+              TileBehavior.WATERFALL -> waterfall[side]++
               else -> {}
             }
           }
         }
-        seen.size shouldBe 272
-        northSouth shouldBe 200
-        eastWest shouldBe 47
-        northSouth + eastWest shouldBe 247
-        waterfall shouldBe 55
+        planes[0] shouldBe 270
+        northSouth[0] shouldBe 200
+        eastWest[0] shouldBe 47
+        northSouth[0] + eastWest[0] shouldBe 247
+        waterfall[0] shouldBe 55
+
+        // Johto and Kanto, ported whole: one plane each for the two outdoor regions and 279
+        // that belong to a room or a cave. Their waterfalls are Tohjo Falls, Mt.
+        planes[1] shouldBe 281
+        northSouth[1] shouldBe 87
+        eastWest[1] shouldBe 80
+        waterfall[1] shouldBe 62
 
         TileBehavior.ROCK_CLIMB_NORTH_SOUTH.rockClimbAllows(Direction.UP) shouldBe true
         TileBehavior.ROCK_CLIMB_NORTH_SOUTH.rockClimbAllows(Direction.DOWN) shouldBe true
@@ -175,6 +191,9 @@ class FieldMoveWallTest :
                   scriptRunner(store, maps, scripts = scripts),
                   trainerSightService(store, maps, scripts = scripts),
                   ViolationLog(),
+                  ShopService(store, ItemRegistry(), InMemoryOfflineItemRepository()),
+                  ItemRegistry(),
+                  staticEncounterService(store, maps),
               )
           store.updatePosition(charId, 112, 890, 1, (155 and 0xFF).toByte(), Direction.DOWN)
           val session = FakeSession(characterId = charId, regionId = 3, bankId = 1, mapId = 155)
@@ -205,6 +224,70 @@ class FieldMoveWallTest :
         val floor2 = checkNotNull(maps.getMap(3, 0, 245))
         room2.npcs.count { it.script == "10002" } shouldBe 10
         floor2.npcs.count { it.script == "10002" } shouldBe 16
+      }
+
+      /** The badge and the move, not a flag the server is never told about. */
+      test("a boulder slides for the badge and the move, and stands for anyone without them") {
+        runTest {
+          val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+          val charId =
+              store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+          val maps = MapManager()
+          // Victory Road 2F, the boulder at (9, 16). Stand west of it and walk east.
+          val floor2 = checkNotNull(maps.getMap(3, 0, 245))
+          floor2.npcs.any { it.script == "10002" && it.x == 9 && it.y == 16 } shouldBe true
+
+          val movement = movementService(store, maps)
+          store.updatePosition(charId, 8, 16, 0, (245 and 0xFF).toByte())
+          val session = FakeSession(characterId = charId, regionId = 3, bankId = 0, mapId = 245)
+          session.state().x = 8
+          session.state().y = 16
+
+          // A party that knows Strength is half of it; the badge is the other half.
+          store.addPokemon(charId, pusher(charId))
+          movement.onMovement(PacketEvent(MovementPacket(8, 16, Direction.RIGHT), session))
+          session.state().boulderTiles shouldBe emptyMap()
+
+          store.setStoryFlag(charId, Badge.MINE.keyIn("sinnoh"))
+          movement.onMovement(PacketEvent(MovementPacket(8, 16, Direction.RIGHT), session))
+          session.state().strengthActive shouldBe false
+          session.state().boulderTiles[12] shouldBe (10 to 16)
+          store.getCharacter(charId)!!.info.positionX.toInt() shouldBe 8
+        }
+      }
+
+      /**
+       * A field move runs on the client, so the only thing the server hears about a ride onto the
+       * water is the tile the scene finished on.
+       */
+      test("the tile a scene lands on decides the mount, both ways") {
+        runTest {
+          val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+          val charId =
+              store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+          val maps = MapManager()
+          // Victory Road B1F: the shore at (13, 17) and the water one tile north of it.
+          val b1f = checkNotNull(maps.getMap(3, 0, 246))
+          b1f.tileAt(13, 17)?.behavior shouldBe TileBehavior.NORMAL
+          b1f.tileAt(13, 16)?.behavior shouldBe TileBehavior.SURFABLE_WATER
+
+          val moves = fieldMoveService(store, maps)
+          val session = FakeSession(characterId = charId, regionId = 3, bankId = 0, mapId = 246)
+          store.updatePosition(charId, 13, 16, 0, (246 and 0xFF).toByte())
+          session.state().x = 13
+          session.state().y = 16
+          moves.syncMountToTile(session, session.state())
+          session.state().transportation shouldBe TRANSPORTATION_SURFING
+
+          store.updatePosition(charId, 13, 17, 0, (246 and 0xFF).toByte())
+          session.state().x = 13
+          session.state().y = 17
+          moves.syncMountToTile(session, session.state())
+          session.state().transportation shouldBe 0.toByte()
+          session.sent.filterIsInstance<EntityTransportationPacket>().map {
+            it.transportation
+          } shouldBe listOf(TRANSPORTATION_SURFING, 0.toByte())
+        }
       }
 
       test("a Strength boulder is a wall until the move is on, and then it slides") {

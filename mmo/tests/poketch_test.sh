@@ -8,7 +8,10 @@
 #   2. no mod source seats an app on it, and no hook patch exists to;
 #   3. the window hides the second screen whenever the guest says the
 #      Poketch would be on it, draws nothing there, stops growing the
-#      band for its pen, and publishes no touch onto the hidden screen;
+#      band for its pen, and publishes no touch onto the hidden screen, 
+#      Unless the player has opened it from the bar (K), which is the one
+#      thing that puts the device back on screen and is remembered across
+#      a bag, a battle and a map change;
 #   4. and the guest says so from the field, not from the device: asking
 #      whether a PoketchSystem was live is what made the enable load-bearing.
 set -eu
@@ -18,7 +21,9 @@ ROOT=${1:?usage: poketch_test.sh <mmo-root> [build-dir] [engine-dir]}
 POK="$ROOT/mods/openmmo/src/openmmo_poketch.c"
 HUD="$ROOT/mods/openmmo/src/openmmo_hud.c"
 SCR="$ROOT/mods/openmmo/patches/src/scrcmd.c.patch"
+BLK="$ROOT/mods/openmmo/src/openmmo_save_blocks.c"
 VIEW="$ROOT/viewer/viewer.c"
+BAR="$ROOT/viewer/view_ui_bar.c"
 
 fail=0
 ok()  { echo "  ok   $1"; }
@@ -46,6 +51,20 @@ if [ -f "$SCR" ] && grep -q 'FieldSystem_GetPoketchSystem() != NULL' "$SCR"; the
 else
     bad "the switch-on command stands down on a running device" \
         "scrcmd.c.patch must guard ScrCmd_131; it Heap_Destroys HEAP_ID_POKETCH_APP"
+fi
+
+if [ -f "$BLK" ] && grep -q 'SAVE_TABLE_ENTRY_POKETCH' "$BLK"; then
+    ok "the app registry crosses a session"
+else
+    bad "the app registry crosses a session" \
+        "without the block on kBlocks[], every gift app is re-offered on the next join"
+fi
+
+if [ -f "$BLK" ] && grep -q 'openmmo_poketch_seat(save, st)' "$BLK"; then
+    ok "a block older than the gift never switches the device back off"
+else
+    bad "a block older than the gift never switches the device back off" \
+        "seat_apply must ask openmmo_poketch.c again after writing the block"
 fi
 
 if [ -f "$HUD" ] && ! grep -q 'FieldSystem_GetPoketchSystem' "$HUD"; then
@@ -90,6 +109,22 @@ if grep -q 'touch_wanted && !viewer_hides_second' "$VIEW"; then
 else
     bad "a hidden screen never grows the band for its pen" \
         "the sec ramp must gate touch_wanted on the screen being visible"
+fi
+
+if grep -A 6 'static int viewer_hides_second' "$VIEW" \
+        | grep -q '!view_ui_bar_poketch'; then
+    ok "the player can ask for the device back"
+else
+    bad "the player can ask for the device back" \
+        "viewer_hides_second must stand down on the bar's Poketch toggle"
+fi
+
+if grep -A 8 'case VIEW_UI_ACT_POKETCH:' "$BAR" | grep -q 'b->poketch = !b->poketch' \
+        && ! grep -A 8 'case VIEW_UI_ACT_POKETCH:' "$BAR" | grep -q 'view_hud_push'; then
+    ok "the toggle asks the guest for nothing"
+else
+    bad "the toggle asks the guest for nothing" \
+        "the Poketch button must flip the window's own state, not push a command"
 fi
 
 [ "$fail" -eq 0 ] && echo "poketch: ok" || echo "poketch: FAIL"

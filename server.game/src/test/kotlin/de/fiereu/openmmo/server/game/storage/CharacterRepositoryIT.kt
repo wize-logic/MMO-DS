@@ -69,6 +69,12 @@ class CharacterRepositoryIT :
               isFatefulEncounter = true,
               isRaidEncounter = false,
               caughtAt = now(),
+              // Origin Forme, so the round-trip below is what proves a forme outlives the session
+              // that set it: the Distortion World's script turns Giratina and nothing else does.
+              form = 1,
+              // Marked, so the round-trip below is what proves the column exists and carries. A
+              // monster that came out of a save file is the only kind that ever sets this.
+              offlineOrigin = true,
           )
 
       // Each test uses its own userId. User 1 belongs to the seeded dev character. The name carries
@@ -138,6 +144,40 @@ class CharacterRepositoryIT :
         loaded.pcStorage shouldBe stored.pcStorage
         loaded.items shouldBe stored.items
         (loaded.info.id and 0xFFFF) shouldBe CHARACTER_ID_TAG
+      }
+
+      test("a boarder at the day care survives the flush and loads back into the day care") {
+        val stored = aggregate(userId = 61)
+        repository.insertAggregate(stored)
+
+        // Handed over the counter: the row leaves the party for the day care, and the party is
+        // still what battles are decided from, so the two must not come back as one list.
+        val boarding = monster(stored.info.id, PokemonContainer.DAYCARE, 0)
+        val current = stored.copy(daycare = mutableListOf(boarding))
+        repository.saveChanges(stored, current)
+
+        val loaded = repository.loadById(stored.info.id).shouldNotBeNull()
+        loaded.daycare.map { it.id } shouldBe listOf(boarding.id)
+        loaded.daycare.single().container shouldBe PokemonContainer.DAYCARE
+        loaded.pokemon.map { it.id } shouldBe stored.pokemon.map { it.id }
+        loaded.pcStorage.map { it.id } shouldBe stored.pcStorage.map { it.id }
+
+        // And taking it back is a re-owning, not a delete-and-mint: the same id comes home.
+        val back =
+            current.copy(
+                pokemon =
+                    (current.pokemon +
+                            boarding.copy(
+                                container = PokemonContainer.PARTY,
+                                containerSlot = current.pokemon.size.toShort()))
+                        .toMutableList(),
+                daycare = mutableListOf(),
+            )
+        repository.saveChanges(current, back)
+
+        val home = repository.loadById(stored.info.id).shouldNotBeNull()
+        home.daycare.shouldBeEmpty()
+        home.pokemon.map { it.id } shouldBe back.pokemon.map { it.id }
       }
 
       test("loadByUser returns only that user's characters") {

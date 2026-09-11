@@ -7,8 +7,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "status_channel.h"
-
 /* How long the official client's own popup message stays up. Long enough to read a
  * sentence, short enough that it is gone before the next thing is clicked. */
 #define NOTICE_MS 4000u
@@ -27,13 +25,19 @@ int view_ui_bar_quit(const struct view_ui_bar *b)
     return b != NULL && b->quit;
 }
 
-/* Up while the session is in the world, and never in the lobby: the buttons
- * name screens that need a character standing on a map. */
+int view_ui_bar_poketch(const struct view_ui_bar *b)
+{
+    return b != NULL && b->poketch;
+}
+
+/* Up while the session is in the world, and never in the lobby; offline, up
+ * on a settled field. The rule itself is view_ui_game.c's, which is the half
+ * the suite can run; this is the page it reads. */
 static int bar_live(const struct view_ui_bar *b)
 {
     if (b == NULL || b->hud == NULL || !b->hud->any)
         return 0;
-    return b->hud->snap.net.state == OPENMMO_ST_IN_GAME;
+    return view_ui_bar_live(&b->hud->snap);
 }
 
 static void say(struct view_ui_bar *b, const struct view_ui_item *it)
@@ -50,14 +54,31 @@ static void say(struct view_ui_bar *b, const struct view_ui_item *it)
 static int item_disabled(const struct view_ui_bar *b,
                          const struct view_ui_item *it)
 {
+    /* Offline there is nobody to answer one of the window's own panels, and
+     * the two that survive the bar's own cull (Instance Info) would open on
+     * an empty session. The bar's greyed art plus act()'s sentence is the
+     * same answer official gives a button it cannot serve. */
+    if (it != NULL && it->act == VIEW_UI_ACT_WINDOW && view_ui_offline())
+        return 1;
+    /* Carrying a session out to the offline row needs a session to carry and a
+     * position the offline game can be resumed on. Offline there is neither;
+     * in the Underground the tile is a cavern the server never hears about and
+     * a save taken there resumes into one with no server behind it. */
+    if (it != NULL && it->act == VIEW_UI_ACT_EXPORT)
+        return view_ui_offline() || b->hud->snap.underground;
     if (it == NULL || it->act != VIEW_UI_ACT_SCREEN)
         return 0;
     if (b->hud->snap.underground)
         return 1;
     if (it->arg == OPENMMO_HUD_SCREEN_DEX)
         return !b->hud->snap.has_dex;
+    /*
+     * party_n is what the server sent, so offline it is zero however many the save holds,
+     * the guest counts the engine's own party before it opens that screen and says so when
+     * there is nobody in it, which is the right answer here.
+     */
     if (it->arg == OPENMMO_HUD_SCREEN_PARTY)
-        return b->hud->snap.party_n == 0;
+        return !view_ui_offline() && b->hud->snap.party_n == 0;
     return 0;
 }
 
@@ -103,10 +124,22 @@ static int act(struct view_ui_bar *b, const struct view_ui_item *it,
         break;
     case VIEW_UI_ACT_LOGOUT:
         /* The official client asks first (string 1160); the send happens on Yes. */
-        b->confirm_logout = 1;
+        b->confirm = OPENMMO_HUD_CMD_LOGOUT;
+        break;
+    case VIEW_UI_ACT_EXPORT:
+        /* The same box: this one ends the session for good and writes the
+         * save, so it is asked about at least as carefully as a logout. */
+        b->confirm = OPENMMO_HUD_CMD_EXPORT;
         break;
     case VIEW_UI_ACT_QUIT:
         b->quit = 1;
+        break;
+    case VIEW_UI_ACT_POKETCH:
+        /*
+         * Nothing is asked of the guest: the device is already running down there and this is
+         * only whether the window draws it.
+         */
+        b->poketch = !b->poketch;
         break;
     case VIEW_UI_ACT_NOTICE:
     default:
@@ -152,16 +185,28 @@ static void draw_button(SDL_Renderer *ren, struct view_ui_gpu *g,
      * Community, PvP, Mail or Gift Shop) centres its label rather than keeping an empty icon
      * gap.
      */
-    if (it->key != 0) {
-        view_ui_text_in(ren, g, r, view_ui_scale(7, g->px), 1, label,
+    key[0] = '\0';
+    if (it->key != 0 && !dis) {
+        int pad = view_ui_scale(7, g->px);
+
+        snprintf(key, sizeof key, "%c", it->key - 'a' + 'A');
+        /*
+         * The hint has to earn its place, because the label is drawn against the opposite edge
+         * of the same box and neither one clips the other.
+         */
+        if (view_ui_text_width(g, label) + view_ui_text_width(g, key)
+                + 3 * pad > r->w)
+            key[0] = '\0';
+    }
+    if (key[0] != '\0') {
+        int pad = view_ui_scale(7, g->px);
+
+        view_ui_text_in(ren, g, r, pad, 1, label,
                         dis ? 0x999999u : VIEW_UI_COL_TEXT);
-        if (!dis) {
-            snprintf(key, sizeof key, "%c", it->key - 'a' + 'A');
-            /* Clear of the button art's own 4px edge, so the letter sits
-             * on the face rather than on the bevel. */
-            view_ui_text_in(ren, g, r, view_ui_scale(7, g->px), 0, key,
-                            hot ? VIEW_UI_COL_ACCENT : VIEW_UI_COL_DIM);
-        }
+        /* Clear of the button art's own 4px edge, so the letter sits
+         * on the face rather than on the bevel. */
+        view_ui_text_in(ren, g, r, pad, 0, key,
+                        hot ? VIEW_UI_COL_ACCENT : VIEW_UI_COL_DIM);
     } else {
         int tw = view_ui_text_width(g, label);
         int x = r->x + (r->w - tw) / 2;
@@ -253,21 +298,33 @@ static void draw_notice(struct view_ui_bar *b, SDL_Renderer *ren,
     view_ui_text_in(ren, g, &N.box, N.pad, 0, b->notice, VIEW_UI_COL_TEXT);
 }
 
-/* The official client's logout confirm (string 1160) over the warning art, the same box
- * the frames use for a removal. */
-static void draw_logout_confirm(struct view_ui_bar *b, SDL_Renderer *ren,
-                                struct view_ui_gpu *g,
-                                const struct view_ui_frame *f,
-                                int mx, int my)
+/* What the box asks, per command it is standing in front of. The official client's logout
+ * sentence is string 1160; the other is ours, and says the two things a player
+ * needs to know before answering, that the session ends, and that what they
+ * are standing in is what gets written down. */
+static const char *confirm_text(unsigned cmd)
 {
-    static const char *const text = "Are you sure you want to logout?";
+    if (cmd == OPENMMO_HUD_CMD_EXPORT)
+        return "Save and continue offline? This ends the session.";
+    return "Are you sure you want to logout?";
+}
+
+/* The official client's confirm over the warning art, the same box the frames use for a
+ * removal. */
+static void draw_confirm(struct view_ui_bar *b, SDL_Renderer *ren,
+                         struct view_ui_gpu *g,
+                         const struct view_ui_frame *f,
+                         int mx, int my)
+{
+    const char *const text = confirm_text(b->confirm);
     struct view_ui_confirm_layout C;
     int i;
 
-    if (!b->confirm_logout)
+    if (!b->confirm)
         return;
     view_ui_alpha(255);
     view_ui_confirm_place(&f->canvas, view_ui_text_width(g, text) / 2, &C);
+    b->laid_confirm = C;
     if (!view_ui_th(ren, g, VIEW_UI_TH_WARN, &C.box))
         view_ui_panel(ren, &C.box, VIEW_UI_COL_GROUND, VIEW_UI_COL_ACCENT);
     {
@@ -332,16 +389,22 @@ static void bar_draw(void *state, SDL_Renderer *ren, struct view_ui_gpu *g,
         view_ui_panel(ren, &L.bar, VIEW_UI_COL_GROUND, VIEW_UI_COL_LINE);
     for (i = 0; i < VIEW_UI_BAR_N; i++) {
         const struct view_ui_item *it = view_ui_bar_item(i);
-        int down = it->act == VIEW_UI_ACT_MENU && b->menu == it->arg;
+        /* The official client's pressed art is for a button whose popup is open; the
+         * Poketch has no popup, and "the screen it names is up" is the same
+         * thing to look at, so it holds the button down while it is on. */
+        int down = (it->act == VIEW_UI_ACT_MENU && b->menu == it->arg)
+                || (it->act == VIEW_UI_ACT_POKETCH && b->poketch);
         int hot = view_ui_hit(&L.btn[i], mx, my) || down;
 
+        if (!view_ui_bar_shown(i))
+            continue;
         draw_button(ren, g, &L.btn[i], it, view_ui_bar_label(i, L.shortened),
                     hot, down, item_disabled(b, it));
     }
     if (b->menu != VIEW_UI_MENU_NONE)
         draw_menu(b, ren, g, f, mx, my);
     draw_notice(b, ren, g, f);
-    draw_logout_confirm(b, ren, g, f, mx, my);
+    draw_confirm(b, ren, g, f, mx, my);
     b->laid_bar = L;
     b->laid = 1;
 
@@ -364,6 +427,10 @@ static const struct view_ui_item *by_key(char k, struct openmmo_rect *anchor,
     for (i = 0; i < VIEW_UI_BAR_N; i++) {
         const struct view_ui_item *it = view_ui_bar_item(i);
 
+        /* A hidden button has no key either: the letter would otherwise open
+         * a screen the bar just said this run does not have. */
+        if (!view_ui_bar_shown(i))
+            continue;
         if (it->key == k) {
             if (anchor != NULL && L != NULL)
                 *anchor = L->btn[i];
@@ -411,34 +478,39 @@ static int bar_event(void *state, const SDL_Event *ev,
     if (!bar_live(b) || ev == NULL)
         return 0;
 
-    /* The logout confirm is modal, the official client's way: Yes sends, No or Esc or a
-     * click outside puts it away, and nothing underneath hears the press. */
-    if (b->confirm_logout) {
+    /* The confirm is modal, the official client's way: Yes sends whichever command raised
+     * it, No or Esc or a click outside puts it away, and nothing underneath
+     * hears the press. */
+    if (b->confirm) {
         if (ev->type == SDL_KEYDOWN && !ev->key.repeat) {
             SDL_Keycode k = ev->key.keysym.sym;
 
             if (k == SDLK_y || k == SDLK_RETURN) {
-                view_hud_push(b->hud, OPENMMO_HUD_CMD_LOGOUT, 0);
-                b->confirm_logout = 0;
+                view_hud_push(b->hud, b->confirm, 0);
+                b->confirm = 0;
                 return 1;
             }
             if (k == SDLK_ESCAPE || k == SDLK_n) {
-                b->confirm_logout = 0;
+                b->confirm = 0;
                 return 1;
             }
             return 1;
         }
         if (ev->type == SDL_MOUSEBUTTONDOWN &&
             ev->button.button == SDL_BUTTON_LEFT) {
-            struct view_ui_confirm_layout C;
+            struct view_ui_confirm_layout C = b->laid_confirm;
 
-            view_ui_confirm_place(&f->canvas, 0, &C);
+            /* The frame between raising the box and drawing it has no laid
+             * layout yet, so fall back to the smallest one rather than to a
+             * zeroed rectangle nothing can hit. */
+            if (C.box.w <= 0)
+                view_ui_confirm_place(&f->canvas, 0, &C);
             if (view_ui_hit(&C.yes, ev->button.x, ev->button.y))
-                view_hud_push(b->hud, OPENMMO_HUD_CMD_LOGOUT, 0);
+                view_hud_push(b->hud, b->confirm, 0);
             if (view_ui_hit(&C.yes, ev->button.x, ev->button.y) ||
                 view_ui_hit(&C.no, ev->button.x, ev->button.y) ||
                 !view_ui_hit(&C.box, ev->button.x, ev->button.y))
-                b->confirm_logout = 0;
+                b->confirm = 0;
             return 1;
         }
         return ev->type == SDL_MOUSEBUTTONUP || ev->type == SDL_MOUSEWHEEL;
@@ -522,7 +594,7 @@ static int bar_owns_pointer(void *state, const struct view_ui_frame *f,
 
     if (!bar_live(b))
         return 0;
-    if (b->confirm_logout)
+    if (b->confirm)
         return 1;
     laid_out(b, f, &L, &M);
     if (b->menu != VIEW_UI_MENU_NONE && view_ui_hit(&M.box, mx, my))

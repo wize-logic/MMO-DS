@@ -14,20 +14,29 @@ private fun parseRegionSource(spec: String): RegionSource {
 }
 
 /**
- * The terrain of maps that reached the client out of another cartridge, which have no region of
- * their own here: `ported|<decomp dir>|<mmo dir>|<name>,<name>`.
+ * A whole region that reached the client out of another cartridge: `ported|<decomp dir>|<mmo
+ * dir>|<region>|<header base>|<wire region id>`.
  */
-private data class PortedSource(val dir: File, val mmoDir: File, val names: List<String>)
+private data class PortedSource(
+    val dir: File,
+    val mmoDir: File,
+    val regions: List<String>,
+    val headerBase: Int,
+    val regionId: Int,
+)
 
 private fun parsePortedSource(spec: String): PortedSource {
   val parts = spec.split("|")
-  require(parts.size == 4) {
-    "Invalid ported spec '$spec', expected ported|<decomp dir>|<mmo dir>|<name>,<name>"
+  require(parts.size == 6) {
+    "Invalid ported spec '$spec', expected " +
+        "ported|<decomp dir>|<mmo dir>|<region>,...|<header base>|<wire region id>"
   }
   return PortedSource(
       dir = File(parts[1]),
       mmoDir = File(parts[2]),
-      names = parts[3].split(",").map { it.trim() }.filter { it.isNotEmpty() },
+      regions = parts[3].split(",").map { it.trim() }.filter { it.isNotEmpty() },
+      headerBase = parts[4].toInt(),
+      regionId = parts[5].toInt(),
   )
 }
 
@@ -58,9 +67,9 @@ fun main(args: Array<String>) {
   val behaviors = parsed.firstOrNull { it.tileBehaviors.isNotEmpty() }?.tileBehaviors ?: emptyList()
   val all =
       parsed +
-          ported.map { (dir, mmoDir, names) ->
-            println("[maps] parsing ported map(s) ${names.joinToString(", ")} from $dir")
-            PortedTerrainParser(dir, mmoDir, names, behaviors).parse()
+          ported.map { (dir, mmoDir, regions, headerBase, regionId) ->
+            println("[maps] parsing ported region(s) ${regions.joinToString(", ")} from $dir")
+            PortedTerrainParser(dir, mmoDir, regions, headerBase, regionId, behaviors).parse()
           }
   val maps = all.flatMap { it.maps }
   println("[maps] parsed ${maps.size} maps. writing to $outputDir")

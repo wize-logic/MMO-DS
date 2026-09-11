@@ -15,8 +15,6 @@ class MapManager @Inject constructor() {
 
   init {
     GeneratedMaps.loadInto(this)
-    // Maps that came from another cartridge and have no generated source yet; see PortedMaps.
-    PortedMaps.loadInto(this)
   }
 
   fun register(map: MapDef) {

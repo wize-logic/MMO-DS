@@ -24,6 +24,9 @@ private const val NIDORINO = 33
 private const val HAPPINY = 440
 private const val SEA_INCENSE = 5254
 
+/** Genesect, the last species in the table now that Black's 156 have joined Platinum's 493. */
+private const val NATIONAL_DEX = 649
+
 private const val ALICE = 1L
 private const val BOB = 2L
 
@@ -38,14 +41,16 @@ class BreedingRegistryTest :
     FunSpec({
       val breeding = BreedingRegistry()
 
-      test("every species in the national dex has a breeding row") { breeding.size() shouldBe 493 }
+      test("every species in the national dex has a breeding row") {
+        breeding.size() shouldBe NATIONAL_DEX
+      }
 
       // Both tables are read out of the same decomp now, so this is no longer two sources
       // checking each other, it is the two readers of one source, which still catches a
       // parser that takes the wrong field.
       test("the breeding table agrees with the species table on every species") {
         val species = SpeciesRegistry()
-        species.size() shouldBe 493
+        species.size() shouldBe NATIONAL_DEX
         for (def in species.all()) {
           val row = breeding.get(def.id).shouldNotBeNull()
           withClue(def.name) {

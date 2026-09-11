@@ -12,9 +12,8 @@
 #define MMO_REPO_ROOT "."
 #endif
 
-#define FEEDS MMO_REPO_ROOT "/launcher/src/test/resources/fixtures/feeds/"
-#define KEYS  MMO_REPO_ROOT \
-    "/launcher/src/main/kotlin/de/fiereu/openmmo/launcher/client/FeedKeys.kt"
+#define FEEDS MMO_REPO_ROOT "/mmo/tests/fixtures/feeds/"
+#define KEYS  FEEDS "pokemmo_keys.txt"
 
 static int failures;
 
@@ -55,37 +54,31 @@ static char *slurp(const char *path, size_t *len)
 }
 
 /*
- * The two feed public keys, read out of the Kotlin module that already holds them rather than
- * copied into a fixture of our own.
+ * The two feed public keys, read out of the fixture beside the feeds rather than compiled in,
+ * so a key this project has stopped trusting cannot be pinned in one place and corrected in
+ * another. One key per line, `#` starts a comment, and `which` is 0 or 1.
  */
 static int shipped_key(int which, mmo_rsa_pubkey *key, char *err, size_t errcap)
 {
     char *text = slurp(KEYS, NULL);
-    const char *p;
-    int i, rc = -1;
+    char *line, *save;
+    int seen = 0, rc = -1;
 
     if (text == NULL) {
         snprintf(err, errcap, "%s is not readable", KEYS);
         return -1;
     }
-    p = text;
-    for (i = 0; i <= which; i++) {
-        p = strstr(p, "\"MII");
-        if (p == NULL) {
-            snprintf(err, errcap, "no key %d in %s", which, KEYS);
-            free(text);
-            return -1;
-        }
-        p++;
+    for (line = strtok_r(text, "\r\n", &save); line != NULL;
+         line = strtok_r(NULL, "\r\n", &save)) {
+        if (line[0] == '#' || line[0] == '\0')
+            continue;
+        if (seen++ != which)
+            continue;
+        rc = mmo_rsa_pubkey_text(line, strlen(line), key, err, errcap);
+        break;
     }
-    {
-        const char *e = strchr(p, '"');
-
-        if (e != NULL)
-            rc = mmo_rsa_pubkey_text(p, (size_t)(e - p), key, err, errcap);
-        else
-            snprintf(err, errcap, "unterminated key literal");
-    }
+    if (seen <= which)
+        snprintf(err, errcap, "no key %d in %s", which, KEYS);
     free(text);
     return rc;
 }
@@ -325,6 +318,15 @@ static void test_sanitize(void)
           "a path that climbs out of the root is refused");
     CHECK(mmo_feed_sanitize("a/../b", out, sizeof out) != 0,
           "and so is one that climbs and comes back");
+    CHECK(mmo_feed_sanitize("save/platinum.sav", out, sizeof out) != 0,
+          "save/ is refused: an update never writes the player's own game");
+    CHECK(mmo_feed_sanitize("SAVE/sessions/1.inp", out, sizeof out) != 0,
+          "and case-blind, because the same feed installs on Windows");
+    CHECK(mmo_feed_sanitize("saves/x", out, sizeof out) == 0 &&
+          strcmp(out, "saves/x") == 0,
+          "by whole segment, so a folder that merely starts with it is fine");
+    CHECK(mmo_feed_sanitize("bin/save/x", out, sizeof out) == 0,
+          "and only at the top: save/ deeper down is an ordinary name");
     CHECK(mmo_feed_sanitize("trailing./x", out, sizeof out) != 0,
           "a segment ending in a dot is refused");
     CHECK(mmo_feed_sanitize("trailing /x", out, sizeof out) != 0,

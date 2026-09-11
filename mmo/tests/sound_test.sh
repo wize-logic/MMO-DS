@@ -145,17 +145,13 @@ else
 fi
 
 FUSED=
-ROM=
 if [ -n "$BUILD" ] && [ -x "$BUILD/fused/pokeplatinum" ]; then
     FUSED="$BUILD/fused/pokeplatinum"
 fi
-if [ -n "$ENGINE" ] && [ ! -f "${ENGINE}/build/rom/pokeplatinum.us.nds" ]; then
-    :
-elif [ -n "$ENGINE" ]; then
-    ROM="$ENGINE/build/rom/pokeplatinum.us.nds"
-elif [ -n "${PC_ROM:-}" ] && [ -f "${PC_ROM}" ]; then
-    ROM=$PC_ROM
-fi
+# $PC_ROM first and the engine's build second, which is the order name_test
+# and sprite_oracle_test read them in.
+ROM="${PC_ROM:-${ENGINE:+$ENGINE/build/rom/pokeplatinum.us.nds}}"
+[ -n "$ROM" ] && [ -f "$ROM" ] || ROM=
 
 echo "the audio lab still pins title against silence:"
 

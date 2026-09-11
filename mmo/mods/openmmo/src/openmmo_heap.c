@@ -11,6 +11,8 @@
 #include "constants/heap.h"
 #include "heap.h"
 
+#include "../../../include/endpoint.h"
+
 /* How much bigger than the engine's own each field heap is built, in bytes. */
 #define OPENMMO_HEAP_FIELD1_EXTRA_DEFAULT 0x14000
 #define OPENMMO_HEAP_FIELD2_EXTRA_DEFAULT 0x4000
@@ -34,9 +36,13 @@
 
 int openmmo_heap_report_enabled(void);
 
+/* An adjustment out of the environment. Every caller of this is a door: a heap
+ * sized from outside is one a player could shrink until a map load fails, so
+ * the read goes through openmmo_dev_env (endpoint.h) and a release keeps the
+ * defaults above. */
 static long env_delta(const char *name, long fallback)
 {
-    const char *v = getenv(name);
+    const char *v = openmmo_dev_env(name);
     char *end;
     long n;
 
@@ -213,4 +219,38 @@ int openmmo_heap_report_enabled(void)
     }
 
     return on;
+}
+
+/* ---- the communication heap -------------------------------------------- * */
+
+/* The command dispatcher's own teardown, which is the only
+ * thing that puts `sCommCmdManager` back to NULL. */
+extern void sub_020327E0(void);
+
+static int s_comm_heap_users;
+
+int openmmo_comm_heap_take(u32 size)
+{
+    if (s_comm_heap_users > 0) {
+        s_comm_heap_users++;
+        return 1;
+    }
+    if (!Heap_CreateAtEnd(HEAP_ID_APPLICATION, HEAP_ID_COMMUNICATION, size)) {
+        printf("openmmo: no room for the communication heap (%#x wanted,"
+               " APPLICATION had %#x)\n", (unsigned)size,
+               (unsigned)HeapExp_FndGetTotalFreeSize(HEAP_ID_APPLICATION));
+        return 0;
+    }
+    s_comm_heap_users = 1;
+    return 1;
+}
+
+void openmmo_comm_heap_put(void)
+{
+    if (s_comm_heap_users <= 0)
+        return;
+    if (--s_comm_heap_users > 0)
+        return;
+    sub_020327E0();
+    Heap_Destroy(HEAP_ID_COMMUNICATION);
 }

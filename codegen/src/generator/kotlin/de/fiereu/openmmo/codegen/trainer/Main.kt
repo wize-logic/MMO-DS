@@ -7,6 +7,9 @@ import java.io.File
 /** Regions whose trainers are one JSON file each rather than two C tables. */
 private val NDS_REGIONS = setOf("sinnoh")
 
+/** Regions whose trainers are one JSON array in the cartridge they were ported out of. */
+private val PORTED_REGIONS = setOf("johto")
+
 fun main(args: Array<String>) {
   require(args.size >= 4) {
     "Usage: <output-dir> <templates-dir> <class-cache-dir> <region|decomp>... got ${args.toList()}"
@@ -18,10 +21,10 @@ fun main(args: Array<String>) {
   for (spec in args.drop(3)) {
     val (region, decomp) = spec.split("|")
     val trainers =
-        if (region in NDS_REGIONS) {
-          PlatinumTrainerParser(File(decomp)).parseAll()
-        } else {
-          TrainerParser(File(decomp)).parseAll()
+        when (region) {
+          in PORTED_REGIONS -> HeartGoldTrainerParser(File(decomp)).parseAll()
+          in NDS_REGIONS -> PlatinumTrainerParser(File(decomp)).parseAll()
+          else -> TrainerParser(File(decomp)).parseAll()
         }
     println("[trainer] $region: parsed ${trainers.size} trainers from $decomp")
     TrainerRenderer(region, templatesDir, outputDir, classCacheDir).render(trainers)

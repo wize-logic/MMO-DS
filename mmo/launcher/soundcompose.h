@@ -11,6 +11,13 @@ int mmo_soundcompose(int track, int font, const char *pt_rom,
                      const char *hg_rom, const char *bw_rom,
                      const char *out_path, char *err, size_t errcap);
 
+/*
+ * The 156 cries a Gen 5 cartridge adds, decoded to host PCM and packed into one file for the
+ * imports package (mods/openmmo/src/openmmo_cries.c reads it).
+ */
+int mmo_soundcompose_cries(const char *bw_rom, const char *out_path,
+                           char *err, size_t errcap);
+
 #include "launch_plan.h"
 
 /* The pair the settings name (font follows the soundtrack unless pinned);

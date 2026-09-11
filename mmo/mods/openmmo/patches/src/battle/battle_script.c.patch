@@ -1,0 +1,89 @@
+--- a/src/battle/battle_script.c
++++ b/src/battle/battle_script.c
+@@ -2127,7 +2127,14 @@
+         battleCtx->commandNext = BATTLE_CONTROL_UPDATE_MOVE_BUFFERS;
+         BattleScript_Jump(battleCtx, NARC_INDEX_BATTLE__SKILL__SUB_SEQ, subscript_no_target);
+     } else {
+-        BattleScript_Jump(battleCtx, NARC_INDEX_BATTLE__SKILL__WAZA_SEQ, battleCtx->moveCur);
++        /* openmmo: a move past Shadow Force has a stub here only when a fill put one
++         * in; otherwise this game's own placeholder is read rather than the member
++         * past the end (mods/openmmo/src/openmmo_moves.c). */
++        {
++            extern int openmmo_move_script_id(int move);
++
++            BattleScript_Jump(battleCtx, NARC_INDEX_BATTLE__SKILL__WAZA_SEQ, openmmo_move_script_id(battleCtx->moveCur));
++        }
+     }
+ 
+     return FALSE;
+@@ -2892,8 +2899,13 @@
+                     }
+ 
+                     result = 1;
++                // openmmo: Big Pecks is the third of these and the engine has no name
++                // for it (mods/openmmo/src/openmmo_ability.c). The message below reads
++                // the ability off the monster, so it names itself once the ability name
++                // bank is filled (tools/portabilities.py) with nothing to add here.
+                 } else if (AbilityBlocksSpecificStatReduction(battleCtx, statOffset, ABILITY_KEEN_EYE, BATTLE_STAT_ACCURACY)
+-                    || AbilityBlocksSpecificStatReduction(battleCtx, statOffset, ABILITY_HYPER_CUTTER, BATTLE_STAT_ATTACK)) {
++                    || AbilityBlocksSpecificStatReduction(battleCtx, statOffset, ABILITY_HYPER_CUTTER, BATTLE_STAT_ATTACK)
++                    || openmmo_ability_blocks_stat_drop(battleCtx->battleMons[battleCtx->sideEffectMon].ability, statOffset)) {
+                     if (battleCtx->sideEffectType == SIDE_EFFECT_TYPE_ABILITY) {
+                         SetupNicknameAbilityNicknameAbilityMsg(battleCtx, BattleStrings_Text_PokemonsAbilitySuppressedPokemonsAbility_AllyAlly); // "{0}'s {1} suppressed {2}'s {3}!"
+                     } else {
+@@ -3515,7 +3527,14 @@
+             BattleScript_Jump(battleCtx, NARC_INDEX_BATTLE__SKILL__SUB_SEQ, subscript_no_target);
+         } else {
+             ATTACKER_ACTION[BATTLE_ACTION_CHOOSE_TARGET] = battleCtx->defender;
+-            BattleScript_Jump(battleCtx, NARC_INDEX_BATTLE__SKILL__WAZA_SEQ, move);
++            /* openmmo: a move past Shadow Force has a stub here only when a fill put one
++             * in; otherwise this game's own placeholder is read rather than the member
++             * past the end (mods/openmmo/src/openmmo_moves.c). */
++            {
++                extern int openmmo_move_script_id(int move);
++
++                BattleScript_Jump(battleCtx, NARC_INDEX_BATTLE__SKILL__WAZA_SEQ, openmmo_move_script_id(move));
++            }
+         }
+     } else {
+         battleCtx->selfTurnFlags[battleCtx->attacker].skipPressureCheck = TRUE;
+@@ -3679,13 +3698,19 @@
+     }
+     }
+ 
++    // openmmo: a class the package appended pays what its own game paid
++    // (mods/openmmo/src/openmmo_trainerclass.c); the table answers for every
++    // class of this game's, exactly as before.
++    extern unsigned int openmmo_trainer_class_prize(int trclass, const unsigned char *table, int count);
++    u32 classMul = openmmo_trainer_class_prize(trainer.header.trainerType, sTrainerClassPrizeMul, (int)(sizeof(sTrainerClassPrizeMul) / sizeof(sTrainerClassPrizeMul[0])));
++
+     u32 prize;
+     if ((battleSys->battleType & BATTLE_TYPE_TAG) || battleSys->battleType == BATTLE_TYPE_TRAINER_WITH_AI_PARTNER) {
+-        prize = lastLevel * 4 * battleCtx->prizeMoneyMul * sTrainerClassPrizeMul[trainer.header.trainerType];
++        prize = lastLevel * 4 * battleCtx->prizeMoneyMul * classMul;
+     } else if (battleSys->battleType & BATTLE_TYPE_DOUBLES) {
+-        prize = lastLevel * 4 * battleCtx->prizeMoneyMul * 2 * sTrainerClassPrizeMul[trainer.header.trainerType];
++        prize = lastLevel * 4 * battleCtx->prizeMoneyMul * 2 * classMul;
+     } else {
+-        prize = lastLevel * 4 * battleCtx->prizeMoneyMul * sTrainerClassPrizeMul[trainer.header.trainerType];
++        prize = lastLevel * 4 * battleCtx->prizeMoneyMul * classMul;
+     }
+ 
+     Heap_Free(rawParty);
+@@ -8365,6 +8390,16 @@
+     BattleScript_Iter(battleCtx, 1);
+     int jumpNoEffect = BattleScript_Read(battleCtx);
+ 
++    // openmmo: Sheer Force has already been paid 30% more power for this move's
++    // rider (mods/openmmo/src/openmmo_ability.c), so the rider does not land. It is
++    // refused here rather than rolled against zero, because the assert below reads
++    // a chance of zero as a script that should never have asked.
++    if (openmmo_ability_spends_secondary(Battler_Ability(battleCtx, battleCtx->attacker))
++        && CURRENT_MOVE_DATA.effectChance != 0) {
++        BattleScript_Iter(battleCtx, jumpNoEffect);
++        return FALSE;
++    }
++
+     u16 effectChance;
+     if (Battler_Ability(battleCtx, battleCtx->attacker) == ABILITY_SERENE_GRACE) {
+         effectChance = CURRENT_MOVE_DATA.effectChance * 2;

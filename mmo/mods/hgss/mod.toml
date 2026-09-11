@@ -1,0 +1,6 @@
+id = "hgss"
+name = "Johto and Kanto"
+version = "1.0.0"
+authors = ["openmmo"]
+requires = []
+load_after = []

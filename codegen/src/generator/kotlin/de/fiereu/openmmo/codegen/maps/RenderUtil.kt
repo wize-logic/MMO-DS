@@ -46,7 +46,8 @@ object RenderUtil {
           " movementRangeY = ${it.movementRangeY}, trainerType = ${it.trainerType}," +
           " facing = ${it.facing}, script = ${escapeString(it.script)}," +
           " hideFlag = ${escapeString(it.hideFlag)}, rawMovementId = ${it.rawMovementId}," +
-          " sightRange = ${it.sightRange}, trainerId = ${it.trainerId})"
+          " sightRange = ${it.sightRange}, trainerId = ${it.trainerId}," +
+          " martShelf = ${it.martShelf})"
     }
   }
 
@@ -108,6 +109,19 @@ object RenderUtil {
     return "WildEncounterForms(shellosForm = ${forms.shellosForm}," +
         " gastrodonForm = ${forms.gastrodonForm}, unownTableId = ${forms.unownTableId}," +
         " unusedFormWords = ${intList(forms.unusedFormWords)})"
+  }
+
+  fun headbuttTrees(trees: List<ParsedHeadbuttTree>): String {
+    if (trees.isEmpty()) return EMPTY_LIST
+    return trees.joinToString(LIST_SEP, LIST_OPEN, LIST_CLOSE) {
+      "HeadbuttTree(x = ${it.x}, y = ${it.y}, tree = ${it.tree}, secret = ${it.secret})"
+    }
+  }
+
+  fun rubble(rubble: ParsedRubble?): String {
+    if (rubble == null) return "null"
+    val items = rubble.items.joinToString(", ", INLINE_OPEN, ")")
+    return "RockSmashRubble(odds = ${rubble.odds}, items = $items)"
   }
 
   private fun intList(values: List<Int>): String =

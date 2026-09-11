@@ -37,13 +37,12 @@ class GameServerCatalogTest :
         entry.localHostname shouldBe "game.example.test"
       }
 
-      test(
-          "a public node address leaves the local pair on loopback, as the official client sends it") {
-            val endpoint = GameServerEndpointConfig(ipv4Address = IPv4Address.of("203.0.113.5"))
+      test("a public node address leaves the local pair on loopback, as the official client does") {
+        val endpoint = GameServerEndpointConfig(ipv4Address = IPv4Address.of("203.0.113.5"))
 
-            endpoint.localAddress shouldBe IPAddress.of("127.0.0.1")
-            endpoint.localHostname shouldBe "localhost"
-          }
+        endpoint.localAddress shouldBe IPAddress.of("127.0.0.1")
+        endpoint.localHostname shouldBe "localhost"
+      }
 
       test("a port off the wire's range is refused rather than truncated") {
         shouldThrow<IllegalArgumentException> { GameServerEndpointConfig(port = 70000) }

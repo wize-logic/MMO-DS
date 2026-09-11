@@ -1,0 +1,20 @@
+--- a/src/battle_anim/script_funcs_2.c
++++ b/src/battle_anim/script_funcs_2.c
+@@ -26,6 +26,17 @@
+ #include "sprite_system.h"
+ #include "sys_task_manager.h"
+ 
++/* openmmo: the frame a mon sprite is drawn through follows the battle's page
++ * layout (mods/openmmo/src/openmmo_spriteframe.c): the cartridge's 80x80, or
++ * 128x88 for the two sprites of a single battle. Set here, in the translation
++ * unit, because a patched header is only seen by the units that open it first. */
++#undef MON_SPRITE_FRAME_WIDTH
++#undef MON_SPRITE_FRAME_HEIGHT
++int openmmo_mon_frame_w(void);
++int openmmo_mon_frame_h(void);
++#define MON_SPRITE_FRAME_WIDTH  (openmmo_mon_frame_w())
++#define MON_SPRITE_FRAME_HEIGHT (openmmo_mon_frame_h())
++
+ // -------------------------------------------------------------------
+ // Quick Attack
+ // -------------------------------------------------------------------

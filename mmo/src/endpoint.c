@@ -124,3 +124,7 @@ int openmmo_endpoint_is_pinned(void)
     return 1;
 #endif
 }
+
+/* openmmo_dev_features() and openmmo_dev_env() were here and are now
+ * src/devenv.c: the window and the front door need the gate and must not
+ * carry the address. */

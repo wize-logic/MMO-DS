@@ -1,5 +1,5 @@
 /* One stylesheet for the whole site, including the pages server.web renders itself.
-   Sky-blue daytime theme in the style of pokemmo.com: Dosis, white text, a 930px
+   Sky-blue daytime theme: Dosis, white text, a 930px
    column, blue and yellow buttons, and one orange feature panel.
 
    Dosis is self-hosted: the CSP is style-src 'self', so Google Fonts is blocked. */
@@ -58,11 +58,163 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: url("/sky.svg") repeat-x top center, linear-gradient(180deg, var(--sky-top), var(--sky) 420px);
+  background: linear-gradient(180deg, var(--sky-top), var(--sky) 420px);
   background-color: var(--sky);
   color: var(--ink);
   font: 17px/1.55 Dosis, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- sky ----------
+
+   Three bands of clouds behind the page, drifting sideways and sliding up as
+   you scroll. `<div class="sky">` sits directly after <body> on every page
+   that wears this stylesheet, the generated ones included.
+
+   Two elements to a band, and that split is the whole trick: the band slides
+   up with the scroll, its ::before drifts sideways, and neither carries more
+   than one transform animation. Both motions are transforms of the same box
+   otherwise, and an engine that hands only one of them to the compositor
+   leaves the other on the main thread, stuttering against the neighbour it is
+   meant to move with. The drift measures composited -- it keeps running while
+   the main thread is jammed solid -- and the scroll-driven half is the one
+   that must not be made to share.
+
+   Nothing but `transform` animates, so no band relayouts or repaints: each is
+   one image the compositor slides about, and a background tab stops all six.
+   The drift walks a band left by exactly one tile and starts again, which is
+   why each is a tile wider than the viewport -- the restart lands on identical
+   pixels and never shows.
+
+   The cloud art has deliberately soft edges, and that is a smoothness fix
+   rather than a style choice: a band is rasterised once and then slid about by
+   the compositor, so a fractional offset resamples it and a hard edge would
+   pulse between crisp and blurred once per pixel travelled. clouds-back.svg
+   carries the measurements.
+
+   The parallax is a scroll-driven animation, so there is no scroll listener
+   and no JS at all. It is pinned to the first 900px of scrolling rather than
+   to the whole document, so a front page and a two-screen news page part their
+   clouds at the same rate. A browser without scroll timelines keeps the drift
+   and loses only the rise.
+
+   Three tile widths (900, 1100, 1300) at three speeds (240s, 170s, 115s), so
+   the bands only line up the same way again about once a day. The
+   reduced-motion block further down stops the lot. */
+
+.sky {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* The band. Carries the parallax and nothing else. */
+.sky div {
+  position: absolute;
+  left: 0;
+  right: 0;
+  will-change: transform;
+}
+
+/* The clouds in it, a tile wider than the band so the loop has somewhere to
+   come from. Carries the drift and nothing else. */
+.sky div::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: calc(100% + var(--tile));
+  background-repeat: repeat-x;
+  animation: cloud-drift var(--drift) linear infinite;
+  will-change: transform;
+}
+
+.sky div:nth-child(1) {
+  top: 4px;
+  height: 60px;
+  --tile: 900px;
+  --drift: 240s;
+  --rise: -70px;
+}
+
+.sky div:nth-child(1)::before {
+  background-image: url("/clouds-back.svg?v=2");
+}
+
+.sky div:nth-child(2) {
+  top: 48px;
+  height: 100px;
+  --tile: 1100px;
+  --drift: 170s;
+  --rise: -150px;
+}
+
+.sky div:nth-child(2)::before {
+  background-image: url("/clouds-mid.svg?v=2");
+}
+
+.sky div:nth-child(3) {
+  top: 96px;
+  height: 150px;
+  --tile: 1300px;
+  --drift: 115s;
+  --rise: -260px;
+}
+
+.sky div:nth-child(3)::before {
+  background-image: url("/clouds-front.svg?v=2");
+}
+
+@keyframes cloud-drift {
+  to {
+    transform: translate3d(calc(var(--tile) * -1), 0, 0);
+  }
+}
+
+@keyframes cloud-rise {
+  to {
+    transform: translate3d(0, var(--rise), 0);
+  }
+}
+
+@supports (animation-timeline: scroll()) {
+  .sky div {
+    /* A scroll timeline takes its progress from the scroller, so that 1s is
+       ignored. `both` holds the risen position once you are past the range. */
+    animation: cloud-rise 1s linear both;
+    animation-timeline: scroll(root block);
+    animation-range: 0 900px;
+  }
+}
+
+/* Two bands are enough on a phone: fewer composited layers, and the middle one
+   is the one the other two hide behind anyway. */
+@media (max-width: 40rem) {
+  .sky div:nth-child(2) {
+    display: none;
+  }
+
+  .sky div:nth-child(3) {
+    top: 64px;
+  }
+}
+
+/* The downloads page is a snapshot in /updates/, and deploying the site
+   deliberately leaves that folder alone (web/deploy.sh), so it can be older
+   than this stylesheet and carry no .sky at all. That is how it lost its sky
+   the day the element arrived. It gets one anyway, painted straight onto the
+   page: the same three bands at the same heights, still, and anchored to the
+   document rather than the viewport. mmo/downloadpage.sh writes the element,
+   so the page from any release after this one takes the rules above instead. */
+body:not(:has(.sky)) {
+  background:
+    url("/clouds-back.svg?v=2") repeat-x 0 4px,
+    url("/clouds-mid.svg?v=2") repeat-x 0 48px,
+    url("/clouds-front.svg?v=2") repeat-x 0 96px,
+    linear-gradient(180deg, var(--sky-top), var(--sky) 420px);
 }
 
 a {
@@ -661,4 +813,105 @@ code {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* ---------- downloads ----------
+   These live here and not in a <style> on the generated page because
+   openmmo-body.conf sends style-src 'self': an inline block is dropped, so the
+   page it styles would arrive naked. mmo/downloadpage.sh writes the markup and
+   this is the only thing that dresses it. */
+.dl-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+}
+
+.dl-row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  color: var(--ink);
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.dl-row:hover,
+.dl-row:focus-visible {
+  background: var(--panel-strong);
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+/* A white disc behind every mark: Tux is black, Windows is blue, and against
+   the panel one of them always lost. */
+.dl-mark {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.dl-mark svg {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+.dl-name {
+  flex: 1 1 auto;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.dl-name small {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.dl-go {
+  flex: none;
+  padding: 0.35rem 0.95rem;
+  border-radius: 6px;
+  background: var(--yellow);
+  color: #000;
+  font-weight: 700;
+  font-size: 0.9rem;
+  text-shadow: none;
+}
+
+.dl-row:hover .dl-go,
+.dl-row:focus-visible .dl-go {
+  background: var(--yellow-hover);
+}
+
+.dl-note {
+  margin: 0 0 1rem;
+}
+
+.dl-sums summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.dl-sums .sha {
+  font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+  color: rgba(255, 255, 255, 0.85);
+  margin: 0.35rem 0 0.7rem;
+}
+
+.dl-sums .sha b {
+  display: block;
+  font-weight: 700;
 }

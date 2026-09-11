@@ -21,6 +21,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 
@@ -97,6 +98,33 @@ class CoroutineProtocolHandlerTest :
             }
           }
         }
+        scope.cancel()
+      }
+
+      test("a packet queued when the channel closes is still handled") {
+        // The claim the parting report rests on: what a session sends in the same breath as
+        // its disconnect is received, queued, and then has to survive the pipeline teardown
+        // that follows it by microseconds.
+        val scope = CoroutineScope(Dispatchers.Default + Job())
+        val started = CompletableDeferred<Unit>()
+        val finished = CompletableDeferred<Int>()
+        val handler =
+            object : CoroutineProtocolHandler<MixedProtocol>(MixedProtocol, Side.SERVER, scope) {
+              init {
+                onSuspend<Slow> { event ->
+                  started.complete(Unit)
+                  // Long enough that the teardown below is certainly inside it.
+                  delay(200)
+                  finished.complete(event.packet.id)
+                }
+              }
+            }
+        val channel = channelWithHandler(handler)
+        channel.writeInbound(Unpooled.wrappedBuffer(byteArrayOf(0xC0.toByte(), 7, 0x00)))
+        runBlocking { withTimeout(2000) { started.await() } }
+        channel.close()
+        channel.checkException()
+        runBlocking { withTimeout(2000) { finished.await() } shouldBe 7 }
         scope.cancel()
       }
 

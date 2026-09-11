@@ -8,6 +8,10 @@ BUILD=${2:?usage: settings_test.sh <mmo-root> <build-dir> <engine-dir>}
 ENGINE=${3:?usage: settings_test.sh <mmo-root> <build-dir> <engine-dir>}
 
 PAGE="$ROOT/SETTINGS.md"
+if [ ! -f "$PAGE" ]; then
+    echo "settings: SKIP (no $PAGE)"
+    exit 0
+fi
 PLAN="$ROOT/launcher/launch_plan.c"
 INPUT="$ROOT/viewer/view_input.c"
 MOD="$ROOT/mods/openmmo/src/openmmo_input.c"
@@ -258,6 +262,238 @@ else
         bad "the client offers no way to be pointed at another server"
     else
         ok "the client offers no way to be pointed at another server"
+    fi
+fi
+
+# ---------------------------------------------------------------- the doors
+# The other things on this page that stop being settings in a shipped build.
+echo "and a development build's doors are shut in a release:"
+
+DOORSRC=$(echo "$ROOT"/mods/openmmo/src/*.c)
+PLAIN='OPENMMO_SESSION|OPENMMO_OFFLINE|OPENMMO_USER|OPENMMO_PASS|OPENMMO_CHARACTER|OPENMMO_EXPORT|OPENMMO_EXPORT_MONEY|OPENMMO_IMPORT|OPENMMO_IMPORT_CHAIN|OPENMMO_REVISION|OPENMMO_BUTTON_MODE|OPENMMO_MUSIC|OPENMMO_SFX|OPENMMO_DISCORD|OPENMMO_CAMERA_DISTANCE|OPENMMO_HUD|OPENMMO_APPEARANCE_DUMP|OPENMMO_INTERACT_REPORT|OPENMMO_PEER_REPORT|OPENMMO_SETTLE_TRACE|OPENMMO_BATTLE_TRACE|OPENMMO_HEAP_REPORT|OPENMMO_INPUT_REPORT|OPENMMO_CLOCK_REPORT|OPENMMO_NAME_REPORT|OPENMMO_LABEL_REPORT|OPENMMO_FONT_REPORT|OPENMMO_SPRITE_DUMP'
+
+names() { grep -ho "$1(\"OPENMMO_[A-Z_0-9]*\"" $DOORSRC | sed 's/.*"\(.*\)"/\1/' | sort -u; }
+
+hidden=$(grep -Hn 'getenv( *[A-Za-z_]' $DOORSRC || true)
+if [ -n "$hidden" ]; then
+    bad "every environment read in a mod source names the variable at the read"
+    echo "$hidden" | sed "s|^$ROOT/|       |"
+else
+    ok "every environment read in a mod source names the variable at the read"
+fi
+
+# Non-OPENMMO reads are the port's own host settings (PC_SAVE, PC_VIEW and the
+# rest), which belong to the engine and are not this project's to gate.
+foreign=$(grep -ho 'getenv("[A-Za-z_0-9]*"' $DOORSRC | sed 's/.*"\(.*\)"/\1/' \
+              | sort -u | grep -Ev '^(OPENMMO|PC)_' || true)
+if [ -n "$foreign" ]; then
+    bad "a mod source reads only its own variables and the engine's PC_ ones"
+    echo "       neither: $(echo $foreign)"
+else
+    ok "a mod source reads only its own variables and the engine's PC_ ones"
+fi
+
+stray=$(names getenv | grep -Ev "^($PLAIN)\$" || true)
+if [ -n "$stray" ]; then
+    bad "every variable a mod source reads is plumbing, a report, or a dev door"
+    echo "       still at plain getenv: $(echo $stray)"
+else
+    ok "every variable a mod source reads is plumbing, a report, or a dev door"
+fi
+
+# A name on the list that nothing reads any more is the list rotting: the next
+# person to add a door reads it as precedent for leaving one open.
+gone=
+for v in $(echo "$PLAIN" | tr '|' ' '); do
+    names getenv | grep -q "^$v\$" || gone="$gone $v"
+done
+if [ -z "$gone" ]; then
+    ok "each of the $(echo "$PLAIN" | tr '|' '\n' | wc -l | tr -d ' ') on that list is still read"
+else
+    bad "each name on that list is still read (nothing reads:$gone)"
+fi
+
+doors=$(names openmmo_dev_env)
+ndoors=$(printf '%s\n' "$doors" | grep -c . || true)
+both=$(printf '%s\n' "$doors" | grep -E "^($PLAIN)\$" || true)
+if [ "$ndoors" -lt 43 ]; then
+    bad "the doors are still gated ($ndoors found, and there were 43)"
+elif [ -n "$both" ]; then
+    bad "no variable is both a door and not one ($(echo $both) is both)"
+else
+    ok "$ndoors of them are doors, and none of them is also on the plain list"
+fi
+
+# The rest: a name that reaches neither call because a helper in its own file
+# reads it. That is allowed only where the helper reads a door, so the file
+# holding the name has to have openmmo_dev_env in it somewhere.
+ungated=
+for v in $(grep -rho '"OPENMMO_[A-Z_0-9]*"' $DOORSRC | tr -d '"' | sort -u); do
+    if printf '%s\n' "$doors" | grep -q "^$v\$"; then continue; fi
+    if echo "$v" | grep -qE "^($PLAIN)\$"; then continue; fi
+    for f in $(grep -l "\"$v\"" $DOORSRC); do
+        grep -q 'openmmo_dev_env(' "$f" || ungated="$ungated $v"
+    done
+done
+if [ -z "$ungated" ]; then
+    ok "a name read through a helper is read through one that gates it"
+else
+    bad "a name read through a helper is read through one that gates it"
+    echo "       ungated:$(echo $ungated)"
+fi
+
+# And the part the source cannot assert: that the gate answers NULL when the
+# build is a release.
+if [ ! -f "$PINHDR" ]; then
+    echo "  SKIP (no pin header: run \`make -C mmo\`)"
+else
+    mkdir -p "$tmp/gen"
+    sed 's/\(OPENMMO_PIN_DEV_FEATURES\) *1/\1 0/' "$PINHDR" >"$tmp/gen/endpoint_pin.h"
+    cat >"$tmp/doors.c" <<'EOF'
+#include <stdio.h>
+#include <stdlib.h>
+#include "endpoint.h"
+
+int main(void)
+{
+    setenv("OPENMMO_DEBUG_MENU", "1", 1);
+    printf("dev_features %d dev_env %s getenv %s\n",
+           openmmo_dev_features(),
+           openmmo_dev_env("OPENMMO_DEBUG_MENU") == NULL ? "null" : "set",
+           getenv("OPENMMO_DEBUG_MENU") == NULL ? "null" : "set");
+    return 0;
+}
+EOF
+    if ${CC:-cc} -o "$tmp/doors" "$tmp/doors.c" "$ROOT/src/devenv.c" \
+         -I"$tmp/gen" -I"$ROOT/include" >"$tmp/doors.log" 2>&1; then
+        # The notice the gate prints comes first; the verdict is the last line.
+        got=$("$tmp/doors" | sed -n '$p')
+        if [ "$got" = "dev_features 0 dev_env null getenv set" ]; then
+            ok "a release build reads a door as unset with the variable plainly set"
+        else
+            bad "a release build reads a door as unset with the variable plainly set"
+            echo "       said: $got"
+        fi
+    else
+        bad "the release-side probe compiles"
+        sed -n '1,5p' "$tmp/doors.log"
+    fi
+fi
+
+# ------------------------------------------------- the doors outside the game
+# The same three kinds again, for the three programs that are not the game:
+# the client (src/), the front door (launcher/) and the window (viewer/).
+echo "and the same holds outside the game:"
+
+DOORSRC2=$(echo "$ROOT"/src/*.c "$ROOT"/launcher/*.c "$ROOT"/viewer/*.c)
+PLAIN2='OPENMMO_ROOT|OPENMMO_ROMS|OPENMMO_PORT|OPENMMO_VIEWER|OPENMMO_LOGS|OPENMMO_THEME|OPENMMO_UI_FONT|OPENMMO_VIEW_LOG_DIR|OPENMMO_VIEW_TRACE|OPENMMO_VIEW_FRAMES|OPENMMO_VIEW_PACE_REPORT|OPENMMO_VIEW_NO_AUDIO|OPENMMO_REVISION'
+
+names2() { grep -ho "$1(\"OPENMMO_[A-Z_0-9]*\"" $DOORSRC2 | sed 's/.*"\(.*\)"/\1/' | sort -u; }
+
+# The hidden-name rule the mod sources keep verbatim cannot hold here: three
+# reads take a name that arrives in a variable on purpose, and each of the three
+# is handed a name that is not one of ours. So they are named instead, and a
+# Fourth is the failure, that one would be a door no grep on this page finds.
+grep -Hn 'getenv( *[A-Za-z_]' $DOORSRC2 \
+    | sed "s|^$ROOT/||; s/:[0-9][0-9]*:[[:space:]]*/ /" | sort > "$tmp/var.code"
+cat > "$tmp/var.want" <<'EOF'
+src/devenv.c const char *v = getenv(name);
+src/platform.c const char *had = getenv(name);
+src/presence.c base = kIpcDirEnv[dir] != NULL ? getenv(kIpcDirEnv[dir]) : kIpcDirs[dir];
+EOF
+if diff -q "$tmp/var.code" "$tmp/var.want" > /dev/null 2>&1; then
+    ok "the three reads that take a name in a variable are the three that may"
+else
+    bad "the three reads that take a name in a variable are the three that may"
+    diff "$tmp/var.want" "$tmp/var.code" | sed 's/^/       /'
+fi
+
+# The two address overrides are read with a plain getenv and are neither
+# plumbing nor a door: `#if OPENMMO_PIN_SETTABLE` takes them out of a release
+# entirely, which is measured at the end of this section rather than listed.
+stray2=$(names2 getenv | grep -Ev "^($PLAIN2|OPENMMO_SERVER|OPENMMO_GAMEPORT)\$" || true)
+if [ -z "$stray2" ]; then
+    ok "every variable these three read plainly is the install's, the window's or a report"
+else
+    bad "every variable these three read plainly is the install's, the window's or a report"
+    echo "       still at plain getenv: $(echo $stray2)"
+fi
+
+gone2=
+for v in $(echo "$PLAIN2" | tr '|' ' '); do
+    names2 getenv | grep -q "^$v\$" || gone2="$gone2 $v"
+done
+if [ -z "$gone2" ]; then
+    ok "each of the $(echo "$PLAIN2" | tr '|' '\n' | wc -l | tr -d ' ') on that list is still read"
+else
+    bad "each name on that list is still read (nothing reads:$gone2)"
+fi
+
+doors2=$(names2 openmmo_dev_env)
+ndoors2=$(printf '%s\n' "$doors2" | grep -c . || true)
+both2=$(printf '%s\n' "$doors2" | grep -E "^($PLAIN2)\$" || true)
+if [ "$ndoors2" -lt 5 ]; then
+    bad "the doors outside the game are still gated ($ndoors2 found, and there were 5)"
+elif [ -n "$both2" ]; then
+    bad "no variable is both a door and not one ($(echo $both2) is both)"
+else
+    ok "$ndoors2 of them are doors, and none of them is also on the plain list"
+fi
+
+# Everything else spelled OPENMMO_ in those three: the front door writes most of
+# the game's plumbing into the child's environment, and a name it only writes is
+# not a door of its own. A name that is neither read nor written is one this
+# check has lost track of.
+wrote=$(grep -ho 'setenv("OPENMMO_[A-Z_0-9]*"\|push_env(p, "OPENMMO_[A-Z_0-9]*"' $DOORSRC2 \
+            | sed 's/.*"\(.*\)"/\1/' | sort -u)
+lost=
+for v in $(grep -rho '"OPENMMO_[A-Z_0-9]*"' $DOORSRC2 | tr -d '"' | sort -u); do
+    if printf '%s\n' "$doors2" | grep -q "^$v\$"; then continue; fi
+    if echo "$v" | grep -qE "^($PLAIN2)\$"; then continue; fi
+    if printf '%s\n' "$wrote" | grep -q "^$v\$"; then continue; fi
+    # The two the build compiles out entirely; measured below rather than listed.
+    case $v in OPENMMO_SERVER|OPENMMO_GAMEPORT) continue;; esac
+    lost="$lost $v"
+done
+if [ -z "$lost" ]; then
+    ok "every other OPENMMO_ name in them is one the front door writes for the game"
+else
+    bad "every other OPENMMO_ name in them is one the front door writes for the game"
+    echo "       neither read nor written:$lost"
+fi
+
+# And the two that are not gated at run time because they are not COMPILED IN:
+# the address overrides.
+if [ ! -f "$PINHDR" ]; then
+    echo "  SKIP the address overrides (no pin header: run \`make -C mmo\`)"
+else
+    mkdir -p "$tmp/gen2"
+    settable_obj() { # 0|1 -> object path, or empty
+        sed "s/\(OPENMMO_PIN_SETTABLE\) *[01]/\1 $1/" "$PINHDR" > "$tmp/gen2/endpoint_pin.h"
+        ${CC:-cc} -c -o "$tmp/ep-$1.o" "$ROOT/src/endpoint.c" \
+            -I"$tmp/gen2" -I"$ROOT/include" >"$tmp/ep-$1.log" 2>&1 || return 1
+        echo "$tmp/ep-$1.o"
+    }
+    on=$(settable_obj 1) && off=$(settable_obj 0) || on=
+    if [ -z "$on" ]; then
+        bad "the address overrides compile both ways"
+        sed -n '1,5p' "$tmp/ep-1.log" "$tmp/ep-0.log" 2>/dev/null
+    else
+        got=
+        for v in OPENMMO_SERVER OPENMMO_GAMEPORT; do
+            if ! strings "$on" | grep -q "$v"; then
+                got="$got $v-missing-from-a-dev-build"
+            fi
+            if strings "$off" | grep -q "$v"; then
+                got="$got $v-still-in-a-release"
+            fi
+        done
+        if [ -z "$got" ]; then
+            ok "the address overrides are in a build from this tree and in no release"
+        else
+            bad "the address overrides are in a build from this tree and in no release"
+            echo "      $got"
+        fi
     fi
 fi
 

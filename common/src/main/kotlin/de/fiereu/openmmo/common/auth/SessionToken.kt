@@ -8,13 +8,7 @@ import java.time.Instant
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
-/**
- * Opaque token issued by the login server and validated by the game server.
- *
- * It carries the account's roles as well as its id. The login server owns accounts, so it is the
- * one that knows what an account may do; the game server holds no user table to look it up in.
- * Signing them in makes them as forgeable as the id beside them, which is to say not at all.
- */
+/** Opaque token issued by the login server and validated by the game server. */
 data class SessionToken(
     val userId: Long,
     val roles: AccountRoles,

@@ -12,7 +12,10 @@ import kotlinx.coroutines.Dispatchers
 import org.jooq.impl.DSL
 import org.testcontainers.containers.PostgreSQLContainer
 
-/** The clean slate behind reset-db.sh. What matters is that a server can still start against it. */
+/**
+ * The clean slate behind `reset-db.sh`. It is the one operation here that cannot be undone, so what
+ * matters is that it leaves a database a server can start against rather than an empty one.
+ */
 @EnabledIf(DockerAvailable::class)
 class DatabaseResetIT :
     FunSpec({

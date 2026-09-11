@@ -18,15 +18,13 @@ constructor(
   /**
    * Creates the configured account on a database that holds no user at all. It never touches an
    * existing one, so a changed password in the config does not reset the account it created.
-   *
-   * Being first is what makes it a developer. An operator who would rather do it by hand can leave
-   * the config unset and run `server.login create-user` instead.
    */
   suspend fun ensureAdmin() {
     val admin = config.admin
     if (admin == null) {
       // The web server takes registrations, so on an empty database the next person through any
-      // door is the first account and gets the developer role.
+      // door is the first account and gets the developer role. That is the point of it, but an
+      // operator who has not made their account yet should hear about it before a stranger does.
       if (!users.hasAnyUser()) {
         log.warn {
           "No account exists yet, so the next one created anywhere becomes a" +

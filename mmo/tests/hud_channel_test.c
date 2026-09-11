@@ -52,43 +52,49 @@ static void test_layout(void)
     struct openmmo_hud_snap s;
     struct openmmo_hud_font f;
 
-    CHECK(sizeof(struct openmmo_hud_chat) == 164u,
-          "a chat row is type + 24-byte sender + 136-byte text");
-    CHECK(sizeof(struct openmmo_hud_party) == 48u,
-          "a party row is a 24-byte name and six words");
-    CHECK(sizeof(struct openmmo_hud_person) == 28u,
-          "a person row is a 24-byte name and the online bit");
-    CHECK(sizeof(struct openmmo_hud_guild) == 1956u,
+    /* Every text field here is three UTF-8 bytes per code unit of its cap
+     * plus a terminator, because that is how many bytes a name of full-width
+     * characters takes: a 97-byte name, a 385-byte chat line, a 121-byte
+     * subject and a 6001-byte letter. */
+    CHECK(sizeof(struct openmmo_hud_chat) == 488u,
+          "a chat row is type + 97-byte sender + 385-byte text");
+    CHECK(sizeof(struct openmmo_hud_party) == 124u,
+          "a party row is a 97-byte name and six words");
+    CHECK(sizeof(struct openmmo_hud_person) == 104u,
+          "a person row is a 97-byte name and the online bit");
+    CHECK(sizeof(struct openmmo_hud_guild) == 7168u,
           "the guild block is name, tag, motd and 64 members");
-    CHECK(sizeof(struct openmmo_hud_map) == 444u,
+    CHECK(sizeof(struct openmmo_hud_map) == 1760u,
           "the map block is region, name, tile and 16 peers");
     CHECK(sizeof(struct openmmo_hud_net) == 200u,
           "the net block is state, latency, reason and battle");
-    CHECK(sizeof(struct openmmo_hud_plate) == 32u,
-          "a plate row is an anchor and a 24-byte name");
+    CHECK(sizeof(struct openmmo_hud_plate) == 108u,
+          "a plate row is an anchor and a 97-byte name");
     CHECK(sizeof(struct openmmo_hud_objective) == 12u,
           "an objective row is the wire's id, value and count");
-    CHECK(sizeof(struct openmmo_hud_mail_row) == 88u,
-          "a mail row is a split id, a 24-byte name, a 48-byte subject, "
+    CHECK(sizeof(struct openmmo_hud_gtl_row) == 164u,
+          "a shelf row leads with a split listing id");
+    CHECK(sizeof(struct openmmo_hud_mail_row) == 236u,
+          "a mail row is a split id, a 97-byte name, a 121-byte subject, "
           "the date and the unread bit");
-    CHECK(sizeof(struct openmmo_hud_mail) == 3052u,
+    CHECK(sizeof(struct openmmo_hud_mail) == 8632u,
           "the mail block is the counts, ten rows and the open letter");
-    CHECK(sizeof(struct openmmo_hud_mail_send) == 2120u,
-          "a compose is a name, a 48-byte subject and a 2048-byte body");
-    CHECK(sizeof s == 23564u, "the snapshot is 23564 bytes, with no padding");
+    CHECK(sizeof(struct openmmo_hud_mail_send) == 6219u,
+          "a compose is a name, a 121-byte subject and a 6001-byte body");
+    CHECK(sizeof s == 72012u, "the snapshot is 72012 bytes, with no padding");
     CHECK(sizeof f == 65672u, "the atlas is 509 glyphs of 16x16 4bpp plus advances");
-    CHECK(sizeof h == 93228u,
-          "the page is header, snapshot, atlas, a 64-slot ring, its names "
-          "and the GTL's and the mailbox's wide arguments");
+    CHECK(sizeof h == 151036u,
+          "the page is header, snapshot, atlas, a 64-slot ring, its names, "
+          "its row ids and the GTL's and the mailbox's wide arguments");
     CHECK(OFF(magic) == 0 && OFF(version) == 4 && OFF(writer) == 8 &&
           OFF(seq) == 12 && OFF(snap) == 16,
           "header words sit at 0, 4, 8, 12 and the snapshot at 16");
-    CHECK(OFF(font) == 23580u, "the atlas follows the snapshot");
-    CHECK(OFF(cmd_head) == 89252u && OFF(cmd) == 89260u &&
-              OFF(cmd_name) == 89516u && OFF(cmd_gtl) == 91052u &&
-              OFF(cmd_mail) == 91108u,
-          "the command ring follows the atlas, its names and the two sets "
-          "of wide arguments behind it");
+    CHECK(OFF(font) == 72028u, "the atlas follows the snapshot");
+    CHECK(OFF(cmd_head) == 137700u && OFF(cmd) == 137708u &&
+              OFF(cmd_name) == 137964u && OFF(cmd_id) == 144172u &&
+              OFF(cmd_gtl) == 144684u && OFF(cmd_mail) == 144816u,
+          "the command ring follows the atlas, its names, its row ids and "
+          "the two sets of wide arguments behind it");
     CHECK((OPENMMO_HUD_CMD_SLOTS & (OPENMMO_HUD_CMD_SLOTS - 1u)) == 0,
           "the ring is a power of two");
     CHECK(sizeof h.cmd[0] == 4 && sizeof h.cmd_head == 4 && sizeof h.seq == 4,
@@ -99,10 +105,11 @@ static void test_layout(void)
     /* The HUD bar's five engine-screen buttons ride one command kind. A
      * screen id that collided with another kind would open the bag from a
      * scroll, so both halves of the word are pinned here. */
-    CHECK(OPENMMO_HUD_CMD_SCREEN == 5u && OPENMMO_HUD_SCREEN_N == 8u &&
+    CHECK(OPENMMO_HUD_CMD_SCREEN == 5u && OPENMMO_HUD_SCREEN_N == 9u &&
           OPENMMO_HUD_SCREEN_BAG == 0 && OPENMMO_HUD_SCREEN_START == 5 &&
-          OPENMMO_HUD_SCREEN_SUMMARY == 6 && OPENMMO_HUD_SCREEN_GTL == 7,
-          "the screen command is kind 5 and names eight screens, one ours");
+          OPENMMO_HUD_SCREEN_SUMMARY == 6 && OPENMMO_HUD_SCREEN_GTL == 7 &&
+          OPENMMO_HUD_SCREEN_POKEGEAR == 8,
+          "the screen command is kind 5 and names nine screens, two ours");
     /* The mailbox's verbs share a word with a row index, so a verb that
      * collided with another kind would delete a letter on a page ask. */
     CHECK(OPENMMO_HUD_CMD_MAIL == 11u && OPENMMO_HUD_CMD_MAIL !=
@@ -220,6 +227,65 @@ static void test_player_cmd(void)
           "and two in a row keep their own names apart");
 }
 
+/* A row verb names the listing, not the row. */
+static void test_row_ids(void)
+{
+    struct openmmo_hud_shm h;
+    uint32_t out[4] = { 0, 0, 0, 0 }, tail = 0, lo = 0, hi = 0;
+    unsigned i, n;
+    int32_t arg;
+
+    page_init(&h);
+    openmmo_hud_push_id(&h, OPENMMO_HUD_CMD_GTL,
+                        (int32_t)(OPENMMO_HUD_GTL_BUY | (3u << 8)),
+                        0xFEEDFACEu, 5u);
+    openmmo_hud_push_id(&h, OPENMMO_HUD_CMD_MAIL,
+                        (int32_t)(OPENMMO_HUD_MAIL_DELETE | (0u << 8)),
+                        7u, 0u);
+    n = openmmo_hud_read_cmds(&h, &tail, out, 4, NULL);
+    arg = openmmo_hud_cmd_arg(out[0]);
+    openmmo_hud_cmd_id(&h, arg, &lo, &hi);
+    CHECK(n == 2 && openmmo_hud_cmd_kind(out[0]) == OPENMMO_HUD_CMD_GTL &&
+          (arg & 0xFF) == OPENMMO_HUD_GTL_BUY &&
+          ((arg >> 8) & 0xFF) == 3 && lo == 0xFEEDFACEu && hi == 5u,
+          "a shelf verb carries the whole 64-bit listing id and its row label");
+    arg = openmmo_hud_cmd_arg(out[1]);
+    openmmo_hud_cmd_id(&h, arg, &lo, &hi);
+    CHECK(openmmo_hud_cmd_kind(out[1]) == OPENMMO_HUD_CMD_MAIL &&
+          (arg & 0xFF) == OPENMMO_HUD_MAIL_DELETE && lo == 7u && hi == 0u,
+          "and a second click in flight keeps its own, not the first's");
+
+    /* The slot rides the argument, so a full ring's worth of verbs each come
+     * back with the id they were pushed with. */
+    page_init(&h);
+    tail = 0;
+    for (i = 0; i < OPENMMO_HUD_CMD_SLOTS; i++)
+        openmmo_hud_push_id(&h, OPENMMO_HUD_CMD_GTL,
+                            (int32_t)OPENMMO_HUD_GTL_BACK, 1000u + i, 0u);
+    for (i = 0; i < OPENMMO_HUD_CMD_SLOTS; i++) {
+        uint32_t one[1];
+
+        if (openmmo_hud_read_cmds(&h, &tail, one, 1, NULL) != 1)
+            break;
+        openmmo_hud_cmd_id(&h, openmmo_hud_cmd_arg(one[0]), &lo, &hi);
+        if (lo != 1000u + i || hi != 0u)
+            break;
+    }
+    CHECK(i == OPENMMO_HUD_CMD_SLOTS,
+          "a whole ring of verbs each keep the listing they named");
+
+    /* Nothing written is nothing named, which the guest refuses on rather
+     * than falling back to the row index. */
+    page_init(&h);
+    tail = 0;
+    openmmo_hud_push(&h, OPENMMO_HUD_CMD_GTL,
+                     (int32_t)(OPENMMO_HUD_GTL_BUY | (2u << 8)));
+    n = openmmo_hud_read_cmds(&h, &tail, out, 4, NULL);
+    openmmo_hud_cmd_id(&h, openmmo_hud_cmd_arg(out[0]), &lo, &hi);
+    CHECK(n == 1 && lo == 0 && hi == 0,
+          "a verb pushed without one names nothing at all");
+}
+
 static void test_font_once(void)
 {
     struct openmmo_hud_shm h;
@@ -274,6 +340,7 @@ int hud_channel_tests_run(void)
     test_publish_read();
     test_ring();
     test_player_cmd();
+    test_row_ids();
     test_font_once();
     test_chat_format();
     return failures;

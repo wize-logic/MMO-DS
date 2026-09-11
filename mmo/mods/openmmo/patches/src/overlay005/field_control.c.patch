@@ -1,14 +1,27 @@
---- a/src/overlay005/field_control.c	2026-08-17 15:16:56.033808446 -0400
-+++ b/src/overlay005/field_control.c	2026-08-17 15:16:56.048475108 -0400
-@@ -185,9 +185,15 @@
+--- a/src/overlay005/field_control.c
++++ b/src/overlay005/field_control.c
+@@ -70,6 +70,12 @@
+ #include "vars_flags.h"
+ #include "wireless_manager.h"
+ 
++/* openmmo: a warp walked into northward: whether the tile is one, and
++ * whether this map may take it (mods/openmmo/src/openmmo_boot.c). Declared out
++ * here because the places that ask are arms of an else-if chain. */
++extern int openmmo_warp_north_tile(u8 tileBehavior);
++extern int openmmo_warp_north_taken(u8 tileBehavior);
++
+ static BOOL Field_CheckMapTransition(FieldSystem *fieldSystem, const FieldInput *input);
+ static u16 Field_TileBehaviorToScript(FieldSystem *fieldSystem, u8 behavior);
+ static BOOL Field_CheckWildEncounter(FieldSystem *fieldSystem);
+@@ -185,9 +191,15 @@
              hasTwoAliveMons = TRUE;
          }
  
 -        if (FieldSystem_CheckForTrainersWantingBattle(fieldSystem, hasTwoAliveMons) == TRUE
-+        /* The scene is the engine's now, but the fight is not: a party is the
-+         * server's and this one would be fought with a party the save does not
-+         * hold. Its own predicate, so turning local scripts on does not turn a
-+         * local battle on with them. */
++        /* openmmo: the scene is the engine's, but the fight is not. A party
++         * is the server's, and this one would be fought with a party the save
++         * does not hold. Its own predicate, so turning local scripts on does
++         * not turn a local battle on with them. */
 +        extern int openmmo_local_trainer_battles_enabled(void);
 +        if (openmmo_local_trainer_battles_enabled()
 +            && (FieldSystem_CheckForTrainersWantingBattle(fieldSystem, hasTwoAliveMons) == TRUE
@@ -18,37 +31,60 @@
  
              PlayerAvatar_ClearMoveState(fieldSystem->playerAvatar);
              MapObjectMan_PauseAllMovement(fieldSystem->mapObjMan);
-@@ -222,4 +228,6 @@
+@@ -220,6 +232,11 @@
+         }
+ 
          if (ov5_021DFDE0(fieldSystem, fieldSystem->playerAvatar, direction, playerEvent) == TRUE) {
-+            extern void openmmo_maybe_strength_push(void *playerAvatar, int dir, int playerEvent);
-+            openmmo_maybe_strength_push(fieldSystem->playerAvatar, (int)direction, playerEvent);
++            /* openmmo: a move the field made rather than one the player walked
++             * (mods/openmmo/src/openmmo_boot.c). */
++            extern void openmmo_forced_move_taken(void *playerAvatar, int dir, int playerEvent);
++
++            openmmo_forced_move_taken(fieldSystem->playerAvatar, (int)direction, playerEvent);
              return TRUE;
          }
      }
-@@ -253,6 +261,18 @@
+@@ -253,6 +270,15 @@
      }
  
      if (input->interact) {
-+        /* A over a remote player opens this client's own menu, whichever half
-+         * is running scripts, a person is not a script. */
-+        extern int openmmo_field_interact_peer(void);
-+        extern int openmmo_local_field_scripts_enabled(void);
-+        extern void openmmo_on_field_interact(void);
-+        if (openmmo_field_interact_peer()) {
++        /* openmmo: who takes an A press over the field: a peer's menu, the
++         * server, or the engine's own interaction with a report in front of it
++         * (mods/openmmo/src/openmmo_boot.c). */
++        extern int openmmo_field_interact_taken(FieldSystem *fs);
++
++        if (openmmo_field_interact_taken(fieldSystem)) {
 +            return TRUE;
 +        }
-+        if (!openmmo_local_field_scripts_enabled()) {
-+            openmmo_on_field_interact();
-+            return TRUE;
-+        }
++
          int validInteraction;
          MapObject *object;
  
-@@ -555,6 +575,12 @@
+@@ -294,6 +320,18 @@
+                 ScriptManager_Set(fieldSystem, event, NULL);
+                 return TRUE;
+             }
++
++            /* openmmo: a ported map's headbutt tree: HeartGold's own tile
++             * behaviour, or its all-trees land member, in front of the player
++             * (mods/openmmo/src/openmmo_fieldmove.c). */
++            {
++                extern int openmmo_fieldmove_tree_try(FieldSystem *fs, int *event);
++
++                if (openmmo_fieldmove_tree_try(fieldSystem, &event)) {
++                    ScriptManager_Set(fieldSystem, event, NULL);
++                    return TRUE;
++                }
++            }
+         }
+ 
+         int distortionDir = PlayerAvatar_GetDistortionDir(fieldSystem->playerAvatar);
+@@ -555,6 +593,14 @@
          }
      }
  
-+    /* The server owns whether a wild encounter happens; the client no longer rolls one, so with local encounters off this returns before the engine's own random roll is reached. */
++    /* openmmo: who decides a wild encounter: the server while there is a
++     * session, the engine itself when there is not
++     * (mods/openmmo/src/openmmo_boot.c). */
 +    extern int openmmo_local_encounters_enabled(void);
 +    if (!openmmo_local_encounters_enabled()) {
 +        return FALSE;
@@ -57,11 +93,33 @@
      return MapHeader_HasWildEncounters(fieldSystem->location->mapHeaderID) && WildEncounters_TryWildEncounter(fieldSystem) == TRUE;
  }
  
-@@ -1016,6 +1042,12 @@
+@@ -618,6 +664,10 @@
+         if (input->transitionDir != DIR_WEST) {
+             return FALSE;
+         }
++    } else if (openmmo_warp_north_tile(tileBehavior)) {
++        if (input->transitionDir != DIR_NORTH) {
++            return FALSE;
++        }
+     }
+ 
+     if (Field_MapConnection(fieldSystem, playerX, playerZ, &nextMap) == FALSE) {
+@@ -637,6 +687,9 @@
+         || TileBehavior_IsWarpEntranceSouth(tileBehavior) || TileBehavior_IsWarpSouth(tileBehavior)) {
+         sub_02056C18(fieldSystem, nextMap.mapHeaderID, nextMap.warpId, 0, 0, input->transitionDir);
+         return TRUE;
++    } else if (openmmo_warp_north_taken(tileBehavior)) {
++        sub_02056C18(fieldSystem, nextMap.mapHeaderID, nextMap.warpId, 0, 0, input->transitionDir);
++        return TRUE;
+     } else {
+         return FALSE;
+     }
+@@ -1016,6 +1069,13 @@
      Location *entrance = FieldOverworldState_GetEntranceLocation(SaveData_GetFieldOverworldState(fieldSystem->saveData));
      Location_Set(entrance, fieldSystem->location->mapHeaderID, eventIndex, playerX, playerZ, PlayerAvatar_GetFacingDir(fieldSystem->playerAvatar));
  
-+    /* The server owns the destination. A local warp table would double-warp. */
++    /* openmmo: the server owns the destination. A local warp table would
++     * double-warp. */
 +    extern int openmmo_allow_local_warp(int header);
 +    if (!openmmo_allow_local_warp((int)nextMap->mapHeaderID)) {
 +        return FALSE;

@@ -98,10 +98,15 @@ class GameProtocolTest :
             ChatMessagePacket::class
       }
 
+      test("0x10 LoadMap is server to client only") {
+        GameProtocol.incomingRegistration(Side.CLIENT, 0x10u)?.type shouldBe LoadMapPacket::class
+        GameProtocol.incomingRegistration(Side.SERVER, 0x10u) shouldBe null
+        GameProtocol.outgoingRegistration(Side.CLIENT, LoadMapPacket::class) shouldBe null
+      }
+
       test("bidi packets are registered both directions") {
         val bidi =
             listOf(
-                LoadMapPacket::class,
                 KeepAlivePacket::class,
             )
         for (type in bidi) {

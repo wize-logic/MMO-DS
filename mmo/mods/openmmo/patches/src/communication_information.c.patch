@@ -112,7 +112,7 @@
      int netId;
  
      for (netId = 0; netId < MAX_CONNECTED_PLAYERS; netId++) {
-@@ -334,7 +387,24 @@
+@@ -334,7 +387,16 @@
  TrainerInfo *CommInfo_TrainerInfo(int netId)
  {
      if (!sCommInfo) {
@@ -122,23 +122,15 @@
 +         * greeting is the first line down there that does, and it hands the
 +         * answer straight to StringTemplate_SetPlayerName, which reads the
 +         * name off it. The block's local slot is a copy of the save's trainer
-+         * info (CommInfo_SendPlayerInfo above), so answer with the original. */
-+        extern TrainerInfo *openmmo_ug_trainer_info(int netId);
-+        extern TrainerInfo *openmmo_contest_trainer_info(int netId);
-+        TrainerInfo *contestant = openmmo_contest_trainer_info(netId);
++         * info (CommInfo_SendPlayerInfo above), so answer with the original
++         * (mods/openmmo/src/openmmo_underground.c). */
++        extern TrainerInfo *openmmo_comm_trainer_info(int netId);
 +
-+        /* A link contest asks for every seat's, before the contest starts, to
-+         * read whether that player has finished the story and holds the
-+         * National Dex, the two answers that pick the rival set. */
-+        if (contestant != NULL) {
-+            return contestant;
-+        }
-+
-+        return openmmo_ug_trainer_info(netId);
++        return openmmo_comm_trainer_info(netId);
      }
  
      switch (sCommInfo->infoState[netId]) {
-@@ -349,6 +419,13 @@
+@@ -349,6 +411,13 @@
  
  DWCFriendData *CommInfo_DWCFriendData(int netId)
  {
@@ -152,7 +144,7 @@
      if (sCommInfo->infoState[netId] != INFO_STATE_EMPTY) {
          return &sCommInfo->playerInfo[netId].friendData;
      }
-@@ -372,6 +449,12 @@
+@@ -372,6 +441,12 @@
  
  int CommInfo_PlayerCountry(int netId)
  {
@@ -165,7 +157,7 @@
      if (sCommInfo->infoState[netId] != 0) {
          return sCommInfo->playerInfo[netId].country;
      }
-@@ -381,6 +464,11 @@
+@@ -381,6 +456,11 @@
  
  int CommInfo_PlayerRegion(int netId)
  {
@@ -177,7 +169,7 @@
      if (sCommInfo->infoState[netId] != 0) {
          return sCommInfo->playerInfo[netId].region;
      }
-@@ -390,6 +478,14 @@
+@@ -390,6 +470,14 @@
  
  BOOL CommInfo_PlayerHasGiftPenalty(int netID)
  {
@@ -192,7 +184,7 @@
      if (sCommInfo->infoState[netID] != INFO_STATE_EMPTY) {
          return sCommInfo->playerInfo[netID].hasGiftPenalty;
      }
-@@ -483,6 +579,14 @@
+@@ -483,6 +571,14 @@
  
  void sub_020331B4(SaveData *saveData, int param1)
  {
@@ -207,7 +199,7 @@
      if (param1 == 1) {
          CommInfo_UpdatePlayerRecord(0, 1);
      } else if (param1 == -1) {
-@@ -494,6 +598,19 @@
+@@ -494,6 +590,19 @@
  
  void CommInfo_SetTradeResult(SaveData *saveData, int val)
  {

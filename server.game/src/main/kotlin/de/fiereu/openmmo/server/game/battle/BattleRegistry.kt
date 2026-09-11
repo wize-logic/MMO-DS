@@ -34,9 +34,9 @@ class BattleRegistry @Inject constructor() {
             rules.escapable,
             rules.trainer,
             pvp,
+            rules.safari,
         )
-    // Take both seats or neither. Every caller checks "already fighting" and then writes, with
-    // suspension points in between, so two starts could both pass and orphan one instance.
+    // Take both seats or neither.
     if (byChar.putIfAbsent(charId, battle) != null) return null
     if (battle.foeCharId != 0L && byChar.putIfAbsent(battle.foeCharId, battle) != null) {
       byChar.remove(charId, battle)

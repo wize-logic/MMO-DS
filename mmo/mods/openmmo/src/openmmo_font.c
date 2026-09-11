@@ -16,6 +16,7 @@
 #include "text.h"
 
 #include "../../../include/charcode.h"
+#include "../../../include/endpoint.h"
 
 typedef char openmmo_font_charcode_width_check[sizeof(mmo_charcode) == sizeof(charcode_t) ? 1 : -1];
 
@@ -52,9 +53,13 @@ static int sFatal = -1;
 static int sOwnColors = -1;
 static int sClobber = -1;
 
-static int EnvFlag(const char *name, const char *want)
+/*
+ * A variable's value against the word that turns it on, rather than its name:
+ * OPENMMO_FONT_REPORT only makes this file say more and is read in every build, while the
+ * three below change what is drawn and go through openmmo_dev_env (endpoint.h).
+ */
+static int EnvFlag(const char *v, const char *want)
 {
-    const char *v = getenv(name);
     return v != NULL && strcmp(v, want) == 0;
 }
 
@@ -123,8 +128,8 @@ static void NoteMissing(charcode_t c)
 charcode_t openmmo_glyph_index(charcode_t c, u32 numGlyphs)
 {
     if (sReport < 0) {
-        sReport = EnvFlag("OPENMMO_FONT_REPORT", "1");
-        sFatal = EnvFlag("OPENMMO_FONT", "fatal");
+        sReport = EnvFlag(getenv("OPENMMO_FONT_REPORT"), "1");
+        sFatal = EnvFlag(openmmo_dev_env("OPENMMO_FONT"), "fatal");
 
         if (sReport) {
             atexit(ReportAtExit);
@@ -166,7 +171,7 @@ unsigned long openmmo_font_missing_count(void)
 void openmmo_glyph_colors(void)
 {
     if (sOwnColors < 0) {
-        sOwnColors = !EnvFlag("OPENMMO_GLYPH_COLORS", "0");
+        sOwnColors = !EnvFlag(openmmo_dev_env("OPENMMO_GLYPH_COLORS"), "0");
     }
 
     if (sOwnColors) {
@@ -181,7 +186,7 @@ void openmmo_glyph_colors(void)
 void openmmo_glyph_clobber(void)
 {
     if (sClobber < 0) {
-        sClobber = EnvFlag("OPENMMO_GLYPH_CLOBBER", "1");
+        sClobber = EnvFlag(openmmo_dev_env("OPENMMO_GLYPH_CLOBBER"), "1");
     }
 
     if (sClobber) {
@@ -302,45 +307,6 @@ int openmmo_font_width_utf8(const char *s)
         return 0;
     }
     r = mmo_utf8_to_charcode(s, text, FONT_DRAW_MAX + 1);
-    return WidthCodes((const charcode_t *)text, (int)r.written);
-}
-
-int openmmo_font_draw_latin1(uint32_t *surf, int x, int y, const char *s,
-                             uint32_t fg)
-{
-    uint8_t utf16[FONT_DRAW_MAX * 2];
-    mmo_charcode text[FONT_DRAW_MAX + 1];
-    mmo_charcode_result r;
-    size_t n = 0;
-
-    if (s == NULL) {
-        return x;
-    }
-    while (s[n] != '\0' && n < FONT_DRAW_MAX) {
-        utf16[n * 2] = (uint8_t)s[n];
-        utf16[n * 2 + 1] = 0;
-        n++;
-    }
-    r = mmo_utf16le_to_charcode(utf16, n * 2, text, FONT_DRAW_MAX + 1);
-    return DrawCodes(surf, x, y, (const charcode_t *)text, (int)r.written, fg);
-}
-
-int openmmo_font_width_latin1(const char *s)
-{
-    uint8_t utf16[FONT_DRAW_MAX * 2];
-    mmo_charcode text[FONT_DRAW_MAX + 1];
-    mmo_charcode_result r;
-    size_t n = 0;
-
-    if (s == NULL) {
-        return 0;
-    }
-    while (s[n] != '\0' && n < FONT_DRAW_MAX) {
-        utf16[n * 2] = (uint8_t)s[n];
-        utf16[n * 2 + 1] = 0;
-        n++;
-    }
-    r = mmo_utf16le_to_charcode(utf16, n * 2, text, FONT_DRAW_MAX + 1);
     return WidthCodes((const charcode_t *)text, (int)r.written);
 }
 

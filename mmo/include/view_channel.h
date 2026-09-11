@@ -116,9 +116,7 @@ struct openmmo_view_shm {
      */
     volatile uint32_t in_turbo;
 
-    /* The ring above. Both fields are the publisher's; a reader's tail is its
-     * own. `audio_rate` is 0 until the game has published once, which is how a
-     * viewer learns whether this game process makes sound at all. */
+    /* The ring above. Both fields are the publisher's; a reader's tail is its own. */
     volatile uint32_t audio_rate;
     volatile uint32_t audio_head;                  /* stereo frames written */
     uint32_t audio[OPENMMO_VIEW_AUDIO_FRAMES];     /* left in the low half  */

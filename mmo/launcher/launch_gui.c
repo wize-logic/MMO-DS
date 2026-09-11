@@ -16,6 +16,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "endpoint.h" /* openmmo_dev_env, for the screenshot the suite takes */
 #include "platform.h"
 
 #include "raylib.h"
@@ -43,7 +44,8 @@ enum {
     VIEW_SETTINGS,
     VIEW_GRAPHICS,
     VIEW_CONTROLS,
-    VIEW_BROWSE
+    VIEW_BROWSE,
+    VIEW_RESTORE
 };
 
 static const char *const layout_opts = "smart;stacked;wide;fill";
@@ -53,9 +55,9 @@ static const char *const button_opts = "normal;start-is-x;l-is-a";
 /* The launch_plan soundtrack enum, in its order, spelled the way the
  * cartridges are named on the box (mmo/CARTRIDGES' slot names). */
 static const char *const soundtrack_opts = "Platinum;Heart Gold;Black & White";
-/* The two 3D resolutions, in step order from MMO_LAUNCH_HD3D_MIN up. The
+/* The three 3D resolutions, in step order from MMO_LAUNCH_HD3D_MIN up. The
  * multiplier behind each one is the plan's business, not the panel's. */
-static const char *const hd3d_opts   = "SD;HD";
+static const char *const hd3d_opts   = "SD;HD;ULTRA";
 static const char *const pace_opts   = "console rate (60 fps);unlimited";
 static const char *const scale_opts  = "auto;1x;2x;3x;4x;5x;6x;7x;8x";
 static const char *const viewport_names[] = {
@@ -278,18 +280,31 @@ static int game_rom_dir(char *out, size_t cap)
 static void browse_note(void)
 {
     char romfile[MMO_LAUNCH_PATH];
+    char other[MMO_LAUNCH_PATH];
 
     if (mmo_launch_rom_file(br.dir, romfile, sizeof romfile) == 0) {
         const char *base = mmo_plat_last_sep(romfile);
+        int hg = mmo_launch_cart_scan(br.dir, MMO_LAUNCH_CART_HEARTGOLD,
+                                      other, sizeof other);
+        int bw = mmo_launch_cart_scan(br.dir, MMO_LAUNCH_CART_BLACK,
+                                      other, sizeof other);
 
-        snprintf(br.note, sizeof br.note, "%s is here, Use this folder",
-                 base != NULL ? base + 1 : romfile);
+        /* The folder can be chosen on Platinum alone; the footer says what
+         * is still missing, in the check's own words. */
+        if (hg && bw)
+            snprintf(br.note, sizeof br.note,
+                     "Platinum, Heart Gold and Black are here, Use this folder");
+        else
+            snprintf(br.note, sizeof br.note,
+                     "%s is here, no %s beside it, Use this folder",
+                     base != NULL ? base + 1 : romfile,
+                     !hg && !bw ? "Heart Gold or Black"
+                                : !hg ? "Heart Gold" : "Black");
         br.note_ok = 1;
         return;
     }
     snprintf(br.note, sizeof br.note,
-             "no %s here, open a folder, or pick a .nds below",
-             MMO_LAUNCH_ROM_NAME);
+             "no Platinum image here, open a folder, or pick a .nds below");
     br.note_ok = 0;
 }
 
@@ -489,25 +504,28 @@ static void browse_pick(mmo_launch_settings *s, int idx)
  * words are mmo_launch_check's own, so this line, the browse window and a refused launch never
  * say three different things.
  */
+/* LOGIN was pressed with a cartridge missing; cleared once they are all
+ * there. */
+static int rom_warn;
+
 static int rom_status(const mmo_launch_settings *s, char *out, size_t cap)
 {
-    char romfile[MMO_LAUNCH_PATH];
+    mmo_launch_roms roms;
+    char err[220];
     const char *base;
-    struct stat st;
 
     if (s->rom[0] == '\0') {
-        snprintf(out, cap, "No ROM chosen yet");
+        snprintf(out, cap, "No cartridges chosen yet, Play needs Platinum,"
+                           " Heart Gold and Black");
         return 0;
     }
-    if (mmo_launch_rom_file(s->rom, romfile, sizeof romfile) != 0) {
-        if (stat(s->rom, &st) == 0 && S_ISDIR(st.st_mode))
-            snprintf(out, cap, "No %s in that folder", MMO_LAUNCH_ROM_NAME);
-        else
-            snprintf(out, cap, "That ROM cannot be read");
+    if (mmo_launch_roms_resolve(s, &roms, err, sizeof err) != 0) {
+        snprintf(out, cap, "%s", err);
         return 0;
     }
-    base = mmo_plat_last_sep(romfile);
-    snprintf(out, cap, "ROM ready: %s", base != NULL ? base + 1 : romfile);
+    base = mmo_plat_last_sep(roms.platinum);
+    snprintf(out, cap, "Platinum, Heart Gold and Black ready: %s",
+             base != NULL ? base + 1 : roms.platinum);
     return 1;
 }
 
@@ -754,6 +772,173 @@ static int do_play(struct launch_gui_host *host, int *playing)
     return 1;
 }
 
+/* The other row, the same handover. */
+static int do_play_offline(struct launch_gui_host *host, int *playing)
+{
+    if (host->play_offline == NULL || *playing)
+        return 0;
+    *playing = 1;
+    EndDrawing();
+    host->play_offline(host->ctx);
+    ClearWindowState(FLAG_WINDOW_HIDDEN);
+    SetWindowFocused();
+    *playing = 0;
+    return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* The saved games: which one is played, going back, and carrying one  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The offline row keeps the last few images it played, stamped. This is the list of them and
+ * the one press that puts one back, the whole of "restore an earlier save".
+ */
+static struct {
+    char  stamp[MMO_LAUNCH_SAVE_KEEP][MMO_LAUNCH_STAMP];
+    char  shown[MMO_LAUNCH_SAVE_KEEP][32];
+    char *ptr[MMO_LAUNCH_SAVE_KEEP];
+    int   n;
+    int   active;
+    int   focus;
+    int   scroll;
+    int   loaded;
+} rs;
+
+/* `20260904-113015` as `2026-09-04 11:30:15`: the stamp is a file name and
+ * this is a date, and a player is being asked to recognise an afternoon. */
+static void stamp_pretty(const char *st, char *out, size_t cap)
+{
+    snprintf(out, cap, "%.4s-%.2s-%.2s %.2s:%.2s:%.2s",
+             st, st + 4, st + 6, st + 9, st + 11, st + 13);
+}
+
+static void restore_load(struct launch_gui_host *host)
+{
+    int i;
+
+    rs.n = 0;
+    rs.active = -1;
+    rs.scroll = 0;
+    rs.loaded = 1;
+    if (host->saves != NULL)
+        rs.n = host->saves(host->ctx, rs.stamp, MMO_LAUNCH_SAVE_KEEP);
+    if (rs.n > MMO_LAUNCH_SAVE_KEEP)
+        rs.n = MMO_LAUNCH_SAVE_KEEP;
+    for (i = 0; i < rs.n; i++) {
+        stamp_pretty(rs.stamp[i], rs.shown[i], sizeof rs.shown[i]);
+        rs.ptr[i] = rs.shown[i];
+    }
+    if (rs.n > 0)
+        rs.active = 0;
+}
+
+/* `1;2;3;4`, built rather than written out, so the row is however many slots
+ * MMO_LAUNCH_SLOTS says there are. */
+static const char *slot_labels(void)
+{
+    static char text[MMO_LAUNCH_SLOTS * 2 + 1];
+    int i, at = 0;
+
+    for (i = 1; i <= MMO_LAUNCH_SLOTS; i++) {
+        if (i > 1)
+            text[at++] = ';';
+        text[at++] = (char)('0' + i);
+    }
+    text[at] = '\0';
+    return text;
+}
+
+static int draw_restore(struct launch_gui_host *host)
+{
+    int sw = GetScreenWidth();
+    int sh = GetScreenHeight();
+    float ww = 520.0f, wh = 392.0f;
+    float wx, wy, by, listy;
+    Rectangle panel, box;
+    int slot = host->slot != NULL ? host->slot(host->ctx) : 1;
+    int chosen;
+
+    if (!rs.loaded)
+        restore_load(host);
+    if (ww > (float)sw - 24.0f) ww = (float)sw - 24.0f;
+    if (wh > (float)sh - 24.0f) wh = (float)sh - 24.0f;
+    wx = ((float)sw - ww) * 0.5f;
+    wy = ((float)sh - wh) * 0.5f;
+    panel = (Rectangle){ wx, wy, ww, wh };
+    draw_frame(panel, "Saved games");
+
+    listy = wy + 74.0f;
+    if (host->slot != NULL && host->set_slot != NULL) {
+        Rectangle cell = { wx + 74.0f, wy + 44.0f, 34.0f, 24.0f };
+
+        text_at(0, "Slot", wx + 20.0f, wy + 48.0f, 15.0f,
+                (Color){ 206, 206, 206, 255 });
+        chosen = slot - 1;
+        GuiToggleGroup(cell, slot_labels(), &chosen);
+        /* A slot is a whole other saved game, so the list under it is a list
+         * of another game's copies: reloaded on the press rather than left
+         * showing the one that was there. */
+        if (chosen + 1 != slot && chosen >= 0 && chosen < MMO_LAUNCH_SLOTS) {
+            host->set_slot(host->ctx, chosen + 1);
+            rs.loaded = 0;
+        }
+        text_at(0, "each slot is a saved game of its own",
+                cell.x + (float)MMO_LAUNCH_SLOTS * 36.0f + 8.0f, wy + 48.0f,
+                14.0f, (Color){ 146, 154, 162, 255 });
+        listy = wy + 104.0f;
+    }
+
+    text_at(0, rs.n > 0 ? "The games this slot kept, newest first."
+                        : "Nothing has been saved offline in this slot yet.",
+            wx + 20.0f, listy - 26.0f, 15.0f, (Color){ 206, 206, 206, 255 });
+
+    box = (Rectangle){ wx + 20.0f, listy, ww - 40.0f,
+                       wy + wh - listy - 96.0f };
+    GuiListViewEx(box, rs.ptr, rs.n, &rs.scroll, &rs.active, &rs.focus);
+
+    /*
+     * Carrying the game to another machine, which is the row that needs the sentence: the file
+     * this writes holds the play behind the save as well as the save, and that is what lets
+     * the far machine's server still check it.
+     */
+    by = wy + wh - 76.0f;
+    if (host->save_export == NULL)
+        GuiDisable();
+    if (GuiButton((Rectangle){ wx + 20.0f, by, 190, 28 },
+                  "Carry out to a file...")) {
+        host->save_export(host->ctx);
+        rs.loaded = 0;
+    }
+    if (host->save_export == NULL)
+        GuiEnable();
+    if (host->save_import == NULL)
+        GuiDisable();
+    if (GuiButton((Rectangle){ wx + 220.0f, by, 190, 28 },
+                  "Bring one in from a file...")) {
+        host->save_import(host->ctx);
+        rs.loaded = 0;
+    }
+    if (host->save_import == NULL)
+        GuiEnable();
+
+    by = wy + wh - 40.0f;
+    if (rs.active < 0 || rs.active >= rs.n || host->restore == NULL)
+        GuiDisable();
+    if (GuiButton((Rectangle){ wx + 20.0f, by, 150, 28 }, "Restore this one")) {
+        host->restore(host->ctx, rs.stamp[rs.active]);
+        rs.loaded = 0;
+    }
+    if (rs.active < 0 || rs.active >= rs.n || host->restore == NULL)
+        GuiEnable();
+    if (GuiButton((Rectangle){ wx + ww - 110.0f, by, 90, 28 }, "Back")
+        || IsKeyPressed(KEY_ESCAPE)) {
+        rs.loaded = 0;
+        return VIEW_LOGIN;
+    }
+    return VIEW_RESTORE;
+}
+
 static void label_left(Rectangle r, const char *s)
 {
     GuiLabel(r, s);
@@ -812,6 +997,15 @@ static int launch_gui_logingui(struct launch_gui_host *host, Texture2D wordmark,
     float col_w, gap, pad, top;
     int submitted = 0;
     int browse = 0;
+    int offline = 0;
+    int restore = 0;
+    /* Latched across frames: the answer is a session's, so it survives a
+     * repaint, and the poll behind it opens files and must not run per frame. */
+    static mmo_launch_import offer;
+    static int offered;
+    static int offer_asked;
+    static double offer_at;
+    static bool take;
     char rom_why[220];
     int rom_ok = rom_status(s, rom_why, sizeof rom_why);
     /* Only when it is this account's: a token minted for somebody else is not
@@ -845,9 +1039,24 @@ static int launch_gui_logingui(struct launch_gui_host *host, Texture2D wordmark,
         text_over_art(1, t, ((float)sw - ts.x) * 0.5f, logo_y, 42.0f, WHITE);
     }
 
+    /*
+     * Is there an offline save newer than the copy the server was last given? Asked once a
+     * second rather than every frame: it opens files, and the answer only changes when a game
+     * ends.
+     */
+    if (host->offer != NULL &&
+        (!offer_asked || GetTime() - offer_at > 1.0)) {
+        offer_asked = 1;
+        offer_at = GetTime();
+        offered = host->offer(host->ctx, &offer);
+    }
+
     /* login-window: min 300x150, dialog padding 60,20,20,20, two columns. */
     ww = 440.0f;
-    wh = saved ? 268.0f : 214.0f;
+    /* Two rows on this door, so the panel carries the second one and the
+     * button that goes back to an earlier one of its saves. A save waiting to
+     * go online adds the line that says so and the box that answers it. */
+    wh = (saved ? 268.0f : 214.0f) + 44.0f + (offered ? 42.0f : 0.0f);
     if (ww > (float)sw - 40.0f)
         ww = (float)sw - 40.0f;
     wx = ((float)sw - ww) * 0.5f;
@@ -907,13 +1116,83 @@ static int launch_gui_logingui(struct launch_gui_host *host, Texture2D wordmark,
     /* The name only. The password used to be written beside it as plain text
      * and is not written anywhere now, so the box must not promise otherwise. */
     GuiCheckBox(rem_b, "Remember My Name", remember);
-    /* Nothing can start without a game to start, so the press that would
-     * have failed opens the picker instead: LOGIN with no ROM chosen is
-     * choosing a ROM, and Enter in the password field does the same. */
-    if (GuiButton(login_b, rom_ok ? "LOGIN" : "CHOOSE ROM..."))
+    /*
+     * Nothing can start without a game to start. The press used to open the file browser,
+     * under a button renamed for it; a button that keeps changing its name is what made the
+     * cartridges hard to understand.
+     */
+    if (GuiButton(login_b, "LOGIN"))
         submitted = 1;
-    if (submitted && !rom_ok)
-        return rom_browse(s, VIEW_LOGIN);
+    if (submitted && !rom_ok) {
+        submitted = 0;
+        rom_warn = 1;
+    }
+    if (rom_ok)
+        rom_warn = 0;
+    if (rom_warn)
+        text_at(0, "Choose your three cartridges first (button below).",
+                wx + pad, login_b.y + login_b.height + 10.0f, 15.0f,
+                (Color){ 240, 176, 150, 255 });
+
+    /*
+     * The second row. It asks for no account and reaches no server: the save file is the game.
+     */
+    if (offered) {
+        /*
+         * The one press on this door that overwrites something, so it says which side is newer
+         * in the numbers a player can check against their own trainer card, and it is off
+         * until they tick it.
+         */
+        Rectangle box = { wx + pad, wy + wh - 78.0f, 20.0f, 20.0f };
+        char line[192];
+        /* Whose save it is. */
+        const char *what = offer.from_elsewhere
+            ? "Take the save from another machine online"
+            : "Take your offline save online";
+
+        if (offer.server_seconds < 0)
+            snprintf(line, sizeof line, "%s (%ldh %02ldm played)", what,
+                     offer.save_seconds / 3600,
+                     (offer.save_seconds / 60) % 60);
+        else
+            snprintf(line, sizeof line,
+                     "%s (%ldh %02ldm, %ldh %02ldm newer)", what,
+                     offer.save_seconds / 3600, (offer.save_seconds / 60) % 60,
+                     (offer.save_seconds - offer.server_seconds) / 3600,
+                     ((offer.save_seconds - offer.server_seconds) / 60) % 60);
+        GuiCheckBox(box, line, &take);
+        if (host->take != NULL)
+            host->take(host->ctx, take);
+    }
+
+    {
+        Rectangle off_b = { wx + pad, wy + wh - 40.0f, col_w, 30.0f };
+        Rectangle res_b = { wx + pad + col_w + gap, wy + wh - 40.0f,
+                            col_w, 30.0f };
+        char play_off[32];
+        int slot = host->slot != NULL ? host->slot(host->ctx) : 1;
+
+        /* The slot only where it is not the one everybody has. A player who
+         * has never opened that window is not being asked to learn what a
+         * slot is; a player on slot 2 is being told which game PLAY OFFLINE
+         * is about to open. */
+        if (slot > 1)
+            snprintf(play_off, sizeof play_off, "PLAY OFFLINE (SLOT %d)", slot);
+        else
+            snprintf(play_off, sizeof play_off, "PLAY OFFLINE");
+        if (!rom_ok || host->play_offline == NULL)
+            GuiDisable();
+        if (GuiButton(off_b, play_off))
+            offline = 1;
+        if (!rom_ok || host->play_offline == NULL)
+            GuiEnable();
+        if (host->saves == NULL)
+            GuiDisable();
+        if (GuiButton(res_b, "Saved games..."))
+            restore = 1;
+        if (host->saves == NULL)
+            GuiEnable();
+    }
 
     /*
      * Why this is here at all. With a saved sign-in the player presses LOGIN on an empty
@@ -994,15 +1273,15 @@ static int launch_gui_logingui(struct launch_gui_host *host, Texture2D wordmark,
         float bh = 28.0f;
         float by = (float)sh - bh - 10.0f;
         Vector2 ts = text_dim(0, why, 15.0f);
-        float pill = ts.x + 24.0f + (ok ? 0.0f : 132.0f);
+        float pill = ts.x + 24.0f + (ok ? 0.0f : 172.0f);
 
         DrawRectangleRounded((Rectangle){ 10.0f, by - 4.0f, pill, bh + 8.0f },
                              0.35f, 6, (Color){ 20, 24, 28, 200 });
         text_at(0, why, 22.0f, by + (bh - ts.y) * 0.5f, 15.0f,
                 ok ? (Color){ 150, 222, 150, 255 }
                    : (Color){ 240, 176, 150, 255 });
-        if (!ok && GuiButton((Rectangle){ ts.x + 30.0f, by, 120.0f, bh },
-                             "Choose ROM..."))
+        if (!ok && GuiButton((Rectangle){ ts.x + 30.0f, by, 160.0f, bh },
+                             "Choose cartridges..."))
             browse = 1;
         {
             const char *cr = "Albert Bierstadt, Rocky Mountain Landscape, "
@@ -1015,8 +1294,12 @@ static int launch_gui_logingui(struct launch_gui_host *host, Texture2D wordmark,
 
     if (browse)
         return rom_browse(s, VIEW_LOGIN);
-    if (submitted)
+    if (offline)
+        do_play_offline(host, playing);
+    else if (submitted)
         do_play(host, playing);
+    if (restore)
+        return VIEW_RESTORE;
     return VIEW_LOGIN;
 }
 
@@ -1025,7 +1308,7 @@ static int draw_settings(struct launch_gui_host *host, bool *edit)
     mmo_launch_settings *s = host->set;
     int sw = GetScreenWidth();
     int sh = GetScreenHeight();
-    float ww = 640.0f, wh = 348.0f;
+    float ww = 640.0f, wh = 370.0f;
     float wx, wy, y, lx, fx, fw;
     Rectangle panel;
 
@@ -1048,6 +1331,9 @@ static int draw_settings(struct launch_gui_host *host, bool *edit)
      * it, and going there is what Play means. The row that used to ask, and the save-file row
      * that only meant anything with it answered "single player", are both gone.
      */
+    text_at(0, "Cartridges, your own backups of all three are needed to play:",
+            lx, y + 4.0f, 15.0f, (Color){ 232, 232, 232, 255 });
+    y += 22;
     label_left((Rectangle){ lx, y, 120, 26 }, "Platinum");
     hint_box((Rectangle){ fx, y, fw - 100, 26 }, s->rom, (int)sizeof s->rom,
              &edit[ED_ROM], "(a folder with " MMO_LAUNCH_ROM_NAME ")");
@@ -1056,8 +1342,17 @@ static int draw_settings(struct launch_gui_host *host, bool *edit)
     y += 24;
     {
         char why[220];
-        int ok = rom_status(s, why, sizeof why);
+        int ok;
 
+        /* Under its own row the line is about this slot; the heading above
+         * has already said three, and the footer's long form would run out
+         * past the panel's edge here. */
+        if (s->rom[0] == '\0') {
+            snprintf(why, sizeof why, "No Platinum cartridge chosen yet");
+            ok = 0;
+        } else {
+            ok = rom_status(s, why, sizeof why);
+        }
         text_at(0, why, fx + 2.0f, y, 15.0f,
                 ok ? (Color){ 150, 222, 150, 255 }
                    : (Color){ 236, 170, 150, 255 });
@@ -1065,7 +1360,7 @@ static int draw_settings(struct launch_gui_host *host, bool *edit)
     y += 22;
     label_left((Rectangle){ lx, y, 120, 26 }, "Heart Gold");
     hint_box((Rectangle){ fx, y, fw - 100, 26 }, s->rom_hg,
-             (int)sizeof s->rom_hg, &edit[ED_ROM_HG], "(optional)");
+             (int)sizeof s->rom_hg, &edit[ED_ROM_HG], "(beside Platinum, or name it here)");
     if (GuiButton((Rectangle){ fx + fw - 96, y, 96, 26 }, "Browse..."))
         slot_browse(s, 1);
     y += 24;
@@ -1080,7 +1375,7 @@ static int draw_settings(struct launch_gui_host *host, bool *edit)
     y += 22;
     label_left((Rectangle){ lx, y, 120, 26 }, "Black / White");
     hint_box((Rectangle){ fx, y, fw - 100, 26 }, s->rom_bw,
-             (int)sizeof s->rom_bw, &edit[ED_ROM_BW], "(optional)");
+             (int)sizeof s->rom_bw, &edit[ED_ROM_BW], "(beside Platinum, or name it here)");
     if (GuiButton((Rectangle){ fx + fw - 96, y, 96, 26 }, "Browse..."))
         slot_browse(s, 2);
     y += 24;
@@ -1114,7 +1409,8 @@ static int draw_settings(struct launch_gui_host *host, bool *edit)
      * package has not been composed into the install's mods folder.
      */
     label_left((Rectangle){ lx, y, 120, 26 }, "Soundtrack");
-    GuiComboBox((Rectangle){ fx, y, fw, 26 }, soundtrack_opts, &s->soundtrack);
+    GuiComboBox((Rectangle){ fx, y, fw, 26 }, soundtrack_opts,
+                &s->soundtrack);
 
     if (GuiButton((Rectangle){ wx + 24.0f, wy + wh - 44.0f, 120, 28 }, "Graphics"))
         return VIEW_GRAPHICS;
@@ -1460,9 +1756,17 @@ static int draw_browse(mmo_launch_settings *s)
     if (wh < 300.0f)
         wh = (float)sh - 16.0f, wy = 8.0f;
     panel = (Rectangle){ wx, wy, ww, wh };
-    draw_frame(panel, "Choose your ROM");
+    draw_frame(panel, "Choose your cartridges");
 
     y = wy + 48.0f;
+
+    /* Three, not one, said before the path: a window titled after a single
+     * ROM had players bringing Platinum alone and learning about the other
+     * two from the refusal. */
+    text_at(0, "Play needs all three cartridges in one folder: Platinum,"
+               " Heart Gold and Black.",
+            wx + 20.0f, y, 15.0f, (Color){ 232, 232, 232, 255 });
+    y += 22.0f;
 
     /* Where it is, in one line that ellipsises from the front: the end of a
      * path is the part that tells a person where they are. */
@@ -1650,9 +1954,9 @@ int launch_gui_run(struct launch_gui_host *host)
         SetTextureFilter(gui_bg, TEXTURE_FILTER_BILINEAR);
     if (wordmark.id != 0)
         SetTextureFilter(wordmark, TEXTURE_FILTER_BILINEAR);
-    shot_path = getenv("OPENMMO_LAUNCH_SHOT");
+    shot_path = openmmo_dev_env("OPENMMO_LAUNCH_SHOT");
     if (shot_path != NULL && shot_path[0] != '\0') {
-        const char *shot_view = getenv("OPENMMO_LAUNCH_SHOT_VIEW");
+        const char *shot_view = openmmo_dev_env("OPENMMO_LAUNCH_SHOT_VIEW");
 
         shot_left = 10;
         if (shot_view != NULL) {
@@ -1686,6 +1990,8 @@ int launch_gui_run(struct launch_gui_host *host)
             next = draw_browse(s);
         else if (view == VIEW_SETTINGS)
             next = draw_settings(host, edit);
+        else if (view == VIEW_RESTORE)
+            next = draw_restore(host);
         else if (view == VIEW_GRAPHICS)
             next = draw_graphics(host, gfx_from_settings);
         else if (view == VIEW_CONTROLS)

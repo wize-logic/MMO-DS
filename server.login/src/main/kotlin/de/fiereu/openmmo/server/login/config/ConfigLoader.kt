@@ -27,13 +27,7 @@ private val log = KotlinLogging.logger {}
  */
 private const val DEV_SESSION_SECRET = "dev-only-secret-do-not-use-in-production"
 
-/**
- * The one way to run with the shipped secret, for a checkout on a desk.
- *
- * Warning about it was not enough: a warning is a line that scrolls past at start, and the failure
- * it warns about is silent. So the default is a refusal, and development says so out loud instead.
- * start-server.sh sets this when no real secret is in the environment.
- */
+/** The one way to run with the shipped secret, for a checkout on a desk. */
 private const val ALLOW_DEV_SECRET_ENV = "OPENMMO_ALLOW_DEV_SECRET"
 
 private fun devSecretAllowed(): Boolean =
@@ -42,7 +36,7 @@ private fun devSecretAllowed(): Boolean =
 object ConfigLoader {
   /**
    * [allowDevSecret] is the seam the environment variable feeds, and the one a test names directly:
-   * a test that reads the shipped config is not a deployment facing a network.
+   * a test that wants to read the shipped config is not a deployment facing a network.
    */
   fun load(allowDevSecret: Boolean = devSecretAllowed()): LoginServerConfig {
     val config = ConfigFactory.load()
@@ -71,6 +65,7 @@ object ConfigLoader {
         rootKeyResource = config.getString("server.rootKeyResource"),
         rootKey = config.stringOrNull("server.rootKey"),
         rootKeyFile = config.stringOrNull("server.rootKeyFile"),
+        clientFeed = config.stringOrNull("server.clientFeed")?.trim()?.ifEmpty { null },
         sessionSecret = secret.toByteArray(Charsets.UTF_8),
         rememberMeMaxAge = rememberMeMaxAge,
         db =

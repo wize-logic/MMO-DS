@@ -14,7 +14,66 @@
      if (battleCtx->battleEndFlag == FALSE
          && BattleSystem_GetResultMask(battleSys)
          && (BattleSystem_GetResultMask(battleSys) & BATTLE_RESULT_TRY_FLEE_WAIT) == FALSE) {
-@@ -4049,7 +4056,17 @@
+@@ -2239,7 +2246,7 @@
+         if (battleCtx->moveTemp == MOVE_IMPRISON) {
+             ppCost += BattleSystem_CountAbility(battleSys, battleCtx, COUNT_ALIVE_BATTLERS_THEIR_SIDE, battleCtx->attacker, ABILITY_PRESSURE);
+         } else {
+-            switch (battleCtx->aiContext.moveTable[battleCtx->moveTemp].range) {
++            switch (MOVE_DATA(battleCtx->moveTemp).range) {
+             case RANGE_ALL_ADJACENT:
+             case RANGE_FIELD:
+                 // Number of mons on the field with Pressure
+@@ -2416,7 +2423,7 @@
+  */
+ static BOOL BattleControllerPlayer_CheckStatusDisruption(BattleSystem *battleSys, BattleContext *battleCtx)
+ {
+-    int moveEffect = battleCtx->aiContext.moveTable[battleCtx->moveCur].effect;
++    int moveEffect = CURRENT_MOVE_DATA.effect;
+     int result = CHECK_STATUS_LOOP_BACK;
+ 
+     do {
+@@ -2556,7 +2563,7 @@
+ 
+         case CHECK_STATUS_STATE_TAUNT:
+             if (ATTACKING_MON.moveEffectsData.tauntedTurns
+-                && battleCtx->aiContext.moveTable[battleCtx->moveCur].power == 0) {
++                && CURRENT_MOVE_DATA.power == 0) {
+                 battleCtx->moveFailFlags[battleCtx->attacker].taunted = TRUE;
+ 
+                 LOAD_SUBSEQ(subscript_move_fail_taunted);
+@@ -2941,6 +2948,15 @@
+         hitRate = hitRate * 80 / 100;
+     }
+ 
++    // openmmo: Victory Star raises what its holder throws and Wonder Skin drags a
++    // status move down to a coin flip; this game has a name for neither
++    // (mods/openmmo/src/openmmo_ability.c). Both are read where Compound Eyes and
++    // Hustle are, so all four round the same way.
++    hitRate = hitRate
++        * openmmo_ability_accuracy_percent(Battler_Ability(battleCtx, attacker),
++              Battler_Ability(battleCtx, defender), moveClass == CLASS_STATUS)
++        / 100;
++
+     if (Battler_IgnorableAbility(battleCtx, attacker, defender, ABILITY_TANGLED_FEET) == TRUE
+         && (battleCtx->battleMons[defender].statusVolatile & VOLATILE_CONDITION_CONFUSION)) {
+         hitRate = hitRate * 50 / 100;
+@@ -3211,7 +3227,14 @@
+     } else {
+         battleCtx->battleStatusMask2 |= SYSCTL_MOVE_SUCCEEDED;
+ 
+-        BattleSystem_LoadScript(battleCtx, NARC_INDEX_BATTLE__SKILL__WAZA_SEQ, battleCtx->moveCur);
++        /* openmmo: a move past Shadow Force has a stub here only when a fill put one
++         * in; otherwise this game's own placeholder is read rather than the member
++         * past the end (mods/openmmo/src/openmmo_moves.c). */
++        {
++            extern int openmmo_move_script_id(int move);
++
++            BattleSystem_LoadScript(battleCtx, NARC_INDEX_BATTLE__SKILL__WAZA_SEQ, openmmo_move_script_id(battleCtx->moveCur));
++        }
+         battleCtx->command = BATTLE_CONTROL_EXEC_SCRIPT;
+         battleCtx->commandNext = BATTLE_CONTROL_TRY_MOVE;
+ 
+@@ -4049,7 +4072,17 @@
      }
  
      if (battleType & BATTLE_TYPE_LINK) {

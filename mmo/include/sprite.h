@@ -44,6 +44,12 @@ int mmo_sprite_species_max(void);
 /* Cartridge pl_pokegra fat. The live count starts here and grows with an
  * overlay; it never shrinks below it. */
 #define MMO_SPRITE_POKEGRA_ROM_MEMBERS 2964
+/* Six of those a species; and height.narc seats each sheet with one byte per
+ * (face, gender), four a species over the same 494. sprite.c holds the six
+ * to sprite_index.gen.h's stride. */
+#define MMO_SPRITE_POKEGRA_PER_SPECIES 6
+#define MMO_SPRITE_HEIGHT_PER_SPECIES 4
+#define MMO_SPRITE_HEIGHT_ROM_MEMBERS 1976
 
 int mmo_sprite_pokegra_members(void);
 void mmo_sprite_set_pokegra_members(int members);

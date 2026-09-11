@@ -43,13 +43,14 @@ constructor(
     }
 
     // Answered by the account's roles, which arrived signed in the join ticket, not by anything
-    // the character carries.
+    // the character carries: a person is trusted, not one of their save files.
     val command = commands[name]
     if (command == null || !state.roles.allow(command)) {
       if (command != null) {
         log.info { "user=${state.userId} (${state.roles}) may not run /$name" }
       }
-      // The same answer either way, so nobody can map out the commands they do not have.
+      // The same answer either way, so a player cannot map out the commands they do not have by
+      // reading which ones are refused rather than unknown.
       session.send(notice("Unknown command: $name. Try /help."))
       return true
     }

@@ -14,8 +14,9 @@ Group=openmmo
 # from the repository .env, root readable only.
 EnvironmentFile=/etc/openmmo/login.env
 ExecStart=/opt/openmmo/login/bin/server.login
-# The JVM leaves on SIGTERM with 128+15, which systemd would otherwise record as a
-# failure, leaving the unit failed with nothing to bring it back.
+# The jvm leaves on SIGTERM with 128+15. Without this a plain `systemctl stop`
+# records the unit as failed, which is how the website came to be down for
+# hours with nothing to bring it back.
 SuccessExitStatus=143
 Restart=always
 RestartSec=5s

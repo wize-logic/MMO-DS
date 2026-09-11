@@ -160,6 +160,53 @@ static void test_malformed_frame(void)
     mmo_net_close(&n);
 }
 
+/* What a send does and does not do, and what a close does to what it did not. */
+static void test_send_needs_a_drain(void)
+{
+    printf("a queued send reaches the peer only if it is drained:\n");
+    static const u8 msg[] = "the last report";
+    u8 got[64];
+    mmo_net n;
+    int peer;
+    ssize_t r;
+
+    if (make_pair(&n, &peer) != 0) { CHECK(0, "socketpair"); return; }
+    CHECK(mmo_net_send(&n, msg, sizeof msg) == 0, "send accepts the bytes");
+    CHECK(mmo_net_pending(&n) == sizeof msg, "and they are queued, not sent");
+    mmo_net_close(&n);
+    r = recv(peer, got, sizeof got, MSG_DONTWAIT);
+    CHECK(r == 0, "closing without a drain loses them: the peer reads EOF");
+    close(peer);
+
+    if (make_pair(&n, &peer) != 0) { CHECK(0, "socketpair"); return; }
+    CHECK(mmo_net_send(&n, msg, sizeof msg) == 0, "send accepts them again");
+    CHECK(mmo_net_drain(&n, 250) == 0, "the drain empties the queue");
+    mmo_net_close(&n);
+    r = recv(peer, got, sizeof got, MSG_DONTWAIT);
+    CHECK(r == (ssize_t)sizeof msg && memcmp(got, msg, sizeof msg) == 0,
+          "and the peer reads exactly what was sent");
+    r = recv(peer, got, sizeof got, MSG_DONTWAIT);
+    CHECK(r == 0, "then end of stream, with nothing else invented");
+    close(peer);
+}
+
+/* A peer that has gone ends the wait rather than serving it out. */
+static void test_drain_gives_up_on_a_dead_peer(void)
+{
+    printf("a drain onto a dead peer gives up and says what is left:\n");
+    static const u8 msg[] = "the last report";
+    mmo_net n;
+    int peer;
+
+    if (make_pair(&n, &peer) != 0) { CHECK(0, "socketpair"); return; }
+    CHECK(mmo_net_send(&n, msg, sizeof msg) == 0, "queued while the link was live");
+    close(peer);
+    CHECK(mmo_net_drain(&n, 5000) == sizeof msg,
+          "the drain returns the bytes that could not go");
+    mmo_net_close(&n);
+    CHECK(mmo_net_pending(&n) == 0, "and a closed link has nothing queued");
+}
+
 int net_tests_run(void)
 {
     failures = 0;
@@ -168,6 +215,8 @@ int net_tests_run(void)
     test_dropped_before_frame();
     test_timeout_when_silent();
     test_malformed_frame();
+    test_send_needs_a_drain();
+    test_drain_gives_up_on_a_dead_peer();
     if (failures == 0)
         printf("net: all checks passed\n");
     return failures;

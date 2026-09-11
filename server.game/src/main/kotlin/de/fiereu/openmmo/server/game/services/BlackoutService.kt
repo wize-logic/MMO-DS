@@ -5,6 +5,7 @@ import de.fiereu.openmmo.common.enums.Direction
 import de.fiereu.openmmo.maps.MapDef
 import de.fiereu.openmmo.net.game.packets.LocalCharacterDeltaPacket
 import de.fiereu.openmmo.server.game.script.Script
+import de.fiereu.openmmo.server.game.script.ScriptContext
 import de.fiereu.openmmo.server.game.script.ScriptRunner
 import de.fiereu.openmmo.server.game.session.PlayerState
 import de.fiereu.openmmo.server.game.storage.CharacterStore
@@ -21,6 +22,7 @@ class BlackoutService
 @Inject
 constructor(
     private val characterStore: CharacterStore,
+    private val storyPlayer: StoryPlayerService,
     // Deferred: the script runner reaches back into the battle service that ends the battle here.
     private val scriptRunner: Provider<ScriptRunner>,
 ) {
@@ -40,11 +42,39 @@ constructor(
   fun blackOut(session: SessionContext, state: PlayerState) {
     val charId = state.characterId ?: return
     if (state.inDialog) {
-      // A story script is waiting on this battle's result and owns what happens next. Two scripts
-      // on one connection would interleave their writes and their rollbacks, so leave it alone.
-      log.warn { "char=$charId lost a scripted battle, there is no white out for that path yet" }
+      // The cartridge runs the white out inside the script task that staged the battle
+      // (`ScrCmd_BlackOutFromBattle` calls it on `ctx->task`), not beside it.
+      state.pendingBlackOut = true
       return
     }
+    if (!session.channel.isActive) {
+      // Nothing can be played to a connection that has gone, and a script launched on it would sit
+      // out the map load it waits for while the character is written and evicted underneath it.
+      blackOutOffline(charId)
+      return
+    }
+    scriptRunner.get().run(session, state, Script { ctx -> whiteOut(ctx, charId) }, entityId = -1)
+  }
+
+  /**
+   * The white out a scripted battle left owed, run by [ScriptRunner] on the coroutine that owned
+   * the connection, once its script has ended. It asks again whether the party is still wiped,
+   * because the script between the defeat and here may have healed it.
+   */
+  suspend fun runDeferred(ctx: ScriptContext, state: PlayerState) {
+    if (!state.pendingBlackOut) return
+    state.pendingBlackOut = false
+    val charId = state.characterId ?: return
+    val stored = characterStore.getCharacter(charId) ?: return
+    if (stored.pokemon.any { !it.isEgg && it.hp > 0 }) {
+      log.info { "char=$charId came out of its scene able to battle, no white out" }
+      return
+    }
+    whiteOut(ctx, charId)
+  }
+
+  /** The white out itself, on a script scope that is already claimed. */
+  private suspend fun whiteOut(ctx: ScriptContext, charId: Long) {
     val stored = characterStore.getCharacter(charId) ?: return
     val destination = stored.info.lastHealLocation
     if (destination == null) {
@@ -55,29 +85,46 @@ constructor(
     }
     val lost = stored.info.money - stored.info.money / 2
     log.info { "char=$charId blacked out, ${destination.bankId}:${destination.mapId}" }
-    scriptRunner
-        .get()
-        .run(
-            session,
-            state,
-            Script { ctx ->
-              if (lost > 0 && characterStore.addMoney(charId, -lost)) {
-                ctx.send(
-                    LocalCharacterDeltaPacket(
-                        money = characterStore.getCharacter(charId)?.info?.money ?: 0))
-              }
-              ctx.healParty()
-              ctx.warp(
-                  destination.regionId.toInt(),
-                  destination.bankId.toInt(),
-                  destination.mapId.toInt(),
-                  destination.x.toInt(),
-                  destination.y.toInt(),
-                  // The decomp resets the avatar to face south rather than reading a facing.
-                  Direction.DOWN,
-              )
-            },
-            entityId = -1,
-        )
+    if (lost > 0 && characterStore.addMoney(charId, -lost)) {
+      ctx.send(
+          LocalCharacterDeltaPacket(money = characterStore.getCharacter(charId)?.info?.money ?: 0))
+    }
+    ctx.healParty()
+    ctx.warp(
+        destination.regionId.toInt(),
+        destination.bankId.toInt(),
+        destination.mapId.toInt(),
+        destination.x.toInt(),
+        destination.y.toInt(),
+        // The decomp resets the avatar to face south rather than reading a facing.
+        Direction.DOWN,
+    )
+  }
+
+  /**
+   * The white out for a player whose connection has already gone: the same halved money, healed
+   * party and respawn, written straight into the character rather than played to nobody.
+   */
+  private fun blackOutOffline(charId: Long) {
+    val stored = characterStore.getCharacter(charId) ?: return
+    val destination = stored.info.lastHealLocation
+    if (destination == null) {
+      log.error { "char=$charId blacked out with no respawn set, it stays where it fell" }
+      return
+    }
+    log.info {
+      "char=$charId blacked out as its connection went, ${destination.bankId}:${destination.mapId}"
+    }
+    storyPlayer.healPartyStored(charId)
+    characterStore.updateCharacter(
+        stored.info.copy(
+            money = stored.info.money / 2,
+            positionRegionId = destination.regionId,
+            positionBankId = destination.bankId,
+            positionMapId = destination.mapId,
+            positionX = destination.x,
+            positionY = destination.y,
+            positionFacing = Direction.DOWN,
+        ))
   }
 }

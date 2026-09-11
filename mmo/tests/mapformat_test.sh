@@ -23,6 +23,11 @@ fi
 # checkout's measurement became a claim about another.
 PL=$("$ROOT/tools/decomp_dir.sh" pokeplatinum 2>/dev/null || echo "")
 HG=$("$ROOT/tools/decomp_dir.sh" pokeheartgold 2>/dev/null || echo "")
+# A checkout that is not here still names itself in every path built out of it,
+# so a skipped block says which tree it wanted rather than naming a file at the
+# root of the filesystem.
+PL=${PL:-no-pokeplatinum-checkout}
+HG=${HG:-no-pokeheartgold-checkout}
 
 PL_SCRCMD="$PL/include/data/scripts/scrcmd.h"
 HG_SCRCMD="$HG/src/data/fieldmap/script_cmd_table.h"
@@ -42,15 +47,27 @@ echo "  (heartgold $HG)"
 ok()  { echo "  ok   $1"; }
 bad() { echo "  FAIL $1"; fail=$((fail + 1)); }
 
+# have <file>..., every file named is readable, and $absent holds the first
+# that was not. A block reading a decomp tree guards on this and SKIPs alone.
+absent=
+have() {
+    for f in "$@"; do
+        if [ ! -f "$f" ]; then absent=$f; return 1; fi
+    done
+    return 0
+}
+
 # The terrain verdict on that page was wrong once because it was measured
 # against the frozen submodules while the repo read the maintained trees. The
 # guard against that happening again is that the enums the new verdict rests on
 # have to still be there, in the tree this run actually read.
 check_enum() {
-    if [ -f "$2" ] && grep -q "$3" "$2"; then
+    if [ ! -f "$2" ]; then
+        echo "  SKIP ($1; no $2)"
+    elif grep -q "$3" "$2"; then
         ok "$1"
     else
-        bad "$1 (looked in $2)"
+        bad "$1 (it is in $2 and does not say so)"
     fi
 }
 check_enum "platinum still names its tile behaviours" \
@@ -419,7 +436,7 @@ members = rom.narc_members("a/0/0/8")
 print("mapmembers=%d" % len(members))
 
 models = grids = tiles = 0
-bits = {0: 0, 15: 0, 16: 0, 23: 0}
+void = floor = flat = bit15 = 0
 for m in members:
     sec = struct.unpack_from("<4I", m, 4)
     if m[sec[0]:sec[0] + 4] == b"BMD0":
@@ -430,15 +447,20 @@ for m in members:
         continue
     grids += 1
     values = struct.unpack_from("<2048I", m, sec[1] + 4)
-    tiles += 2048
-    for bit in bits:
-        mask = 1 << bit
-        bits[bit] += sum(1 for v in values if v & mask)
+    tiles += 1024
+    for k in range(1024):
+        height, kind = values[2 * k], values[2 * k + 1]
+        void += kind == 0x00810001
+        floor += kind == 0x00800000
+        flat += height == 0
+        bit15 += (kind >> 15) & 1
 print("models=%d" % models)
 print("grids=%d" % grids)
 print("tiles=%d" % tiles)
-for bit in sorted(bits):
-    print("bit%d=%.1f" % (bit, 100.0 * bits[bit] / tiles))
+print("void=%.1f" % (100.0 * void / tiles))
+print("floor=%.1f" % (100.0 * floor / tiles))
+print("flat=%.1f" % (100.0 * flat / tiles))
+print("bit15=%.1f" % (100.0 * bit15 / tiles))
 PYEOF
 ) || probe=""
 
@@ -455,108 +477,146 @@ PYEOF
         same "members in a/0/0/8" "$(field mapmembers)" "649"
         same "members whose first section is a model" "$(field models)" "649"
         same "members with a readable 32x32 grid" "$(field grids)" "384"
-        same "tiles counted over them" "$(field tiles)" "786432"
+        same "tiles counted over them" "$(field tiles)" "393216"
 
-        # The whole point of the section: Gen 4's collision bit is dead here,
-        # and three others are live at a plausible density with nothing to
-        # choose between them.
-        same "Gen 4's collision bit, in Black" "$(field bit15)" "0.0"
-        same "Black tiles with bit 0 set" "$(field bit0)" "41.3"
-        same "Black tiles with bit 16 set" "$(field bit16)" "47.2"
-        same "Black tiles with bit 23 set" "$(field bit23)" "52.4"
+        # The whole point of the section: the record is two words per tile,
+        # the second word's low byte is the tile's kind, and the two values
+        # that dominate it are the void around interiors and plain floor.
+        same "Gen 4's collision bit, in Black's second word" "$(field bit15)" "0.0"
+        same "Black tiles that are void (0x00810001)" "$(field void)" "79.7"
+        same "Black tiles that are floor (0x00800000)" "$(field floor)" "10.6"
+        same "Black tiles at height zero" "$(field flat)" "81.9"
     fi
 fi
 
 
-for f in "$DOC" "$PL_SCRCMD" "$HG_SCRCMD" "$PL_HEADERS" "$HG_HEADERS" \
-         "$PL_ATTRS" "$HG_ATTRS" "$PL_MATRIX" "$HG_MATRIX" "$PL_LAND"; do
-    if [ ! -f "$f" ]; then
-        echo "mapformat: SKIP (no $f, the decomp half only)"
-        if [ "$fail" -eq 0 ]; then
-            echo "mapformat: all checks passed (decomp half skipped)"
-        else
-            echo "mapformat: $fail check(s) FAILED"
-        fi
-        exit "$fail"
-    fi
-done
+if [ ! -f "$DOC" ]; then
+    echo "mapformat: MAPFORMATS.md is missing; the page is what this checks"
+    exit 1
+fi
 
 # --- terrain attributes: the four-byte step that starts the whole comparison ---
-pl_off=$(awk '/define TERRAIN_ATTRIBUTES_OFFSET/ { print $3 }' "$PL_ATTRS")
-hg_off=$(awk '/define TERRAIN_ATTRIBUTES_OFFSET/ { print $3 }' "$HG_ATTRS")
-same "Platinum's terrain-attribute offset" "$pl_off" "0x10"
-same "HeartGold's terrain-attribute offset" "$hg_off" "0x14"
-pl_sz=$(awk '/define TERRAIN_ATTRIBUTES_SIZE/ { print $3 }' "$PL_ATTRS")
-hg_sz=$(awk '/define TERRAIN_ATTRIBUTES_SIZE/ { print $3 }' "$HG_ATTRS")
-same "Platinum's terrain-attribute block" "$pl_sz" "0x800"
-same "HeartGold's terrain-attribute block" "$hg_sz" "0x800"
+if have "$PL_ATTRS" "$HG_ATTRS"; then
+    pl_off=$(awk '/define TERRAIN_ATTRIBUTES_OFFSET/ { print $3 }' "$PL_ATTRS")
+    hg_off=$(awk '/define TERRAIN_ATTRIBUTES_OFFSET/ { print $3 }' "$HG_ATTRS")
+    same "Platinum's terrain-attribute offset" "$pl_off" "0x10"
+    same "HeartGold's terrain-attribute offset" "$hg_off" "0x14"
+    pl_sz=$(awk '/define TERRAIN_ATTRIBUTES_SIZE/ { print $3 }' "$PL_ATTRS")
+    hg_sz=$(awk '/define TERRAIN_ATTRIBUTES_SIZE/ { print $3 }' "$HG_ATTRS")
+    same "Platinum's terrain-attribute block" "$pl_sz" "0x800"
+    same "HeartGold's terrain-attribute block" "$hg_sz" "0x800"
+
+    # The behaviour/collision split the page calls free is Platinum's own.
+    grep -q 'define TERRAIN_ATTRIBUTES_COLLISION_SHIFT *15' "$PL_ATTRS" \
+        && ok "the collision bit is still 15" \
+        || bad "Platinum moved TERRAIN_ATTRIBUTES_COLLISION_SHIFT off 15"
+    grep -q 'define TERRAIN_ATTRIBUTES_TILE_BEHAVIOR_MASK *0xFF' "$PL_ATTRS" \
+        && ok "the behaviour mask is still the low byte" \
+        || bad "Platinum moved TERRAIN_ATTRIBUTES_TILE_BEHAVIOR_MASK off 0xFF"
+
+    # This used to be a tripwire waiting for a terrain-behaviour enum to appear,
+    # because while neither tree named a value the page's "no oracle" held. Both
+    # trees name them now, check_enum above is that fact, so what is left worth
+    # holding is where the names live: not beside the attribute layout, which is
+    # why the wall looked solid for as long as it did.
+    # A value name would be a bare TILE_BEHAVIOR_<something>; the one hit these
+    # headers do have is TERRAIN_ATTRIBUTES_TILE_BEHAVIOR_MASK, which is layout.
+    # Counted rather than grep -v'd: an inverted grep over an empty pipe exits 0
+    # here and would pass for the wrong reason.
+    strays=$(cat "$PL_ATTRS" "$HG_ATTRS" 2>/dev/null \
+             | grep -c 'TILE_BEHAVIOR_' || true)
+    masks=$(cat "$PL_ATTRS" "$HG_ATTRS" 2>/dev/null \
+            | grep -c 'TERRAIN_ATTRIBUTES_TILE_BEHAVIOR_MASK' || true)
+    same "behaviour names defined beside the attribute layout" \
+         "$((strays - masks))" "0"
+else
+    echo "  SKIP (terrain attributes; no $absent)"
+fi
+
 says "0x800 bytes, 32 × 32 \`u16\`" "the page still calls the block 32 by 32"
 
-# The behaviour/collision split the page calls free is Platinum's own.
-grep -q 'define TERRAIN_ATTRIBUTES_COLLISION_SHIFT *15' "$PL_ATTRS" \
-    && ok "the collision bit is still 15" \
-    || bad "Platinum moved TERRAIN_ATTRIBUTES_COLLISION_SHIFT off 15"
-grep -q 'define TERRAIN_ATTRIBUTES_TILE_BEHAVIOR_MASK *0xFF' "$PL_ATTRS" \
-    && ok "the behaviour mask is still the low byte" \
-    || bad "Platinum moved TERRAIN_ATTRIBUTES_TILE_BEHAVIOR_MASK off 0xFF"
-
-# This used to be a tripwire waiting for a terrain-behaviour enum to appear,
-# because while neither tree named a value the page's "no oracle" held.
-strays=$(cat "$PL_ATTRS" "$HG_ATTRS" 2>/dev/null \
-         | grep -c 'TILE_BEHAVIOR_' || true)
-masks=$(cat "$PL_ATTRS" "$HG_ATTRS" 2>/dev/null \
-        | grep -c 'TERRAIN_ATTRIBUTES_TILE_BEHAVIOR_MASK' || true)
-same "behaviour names defined beside the attribute layout" \
-     "$((strays - masks))" "0"
-
 # --- land data: the header order the page prints, read back out of the loader ---
-order=$(sed -n '/LandDataHeader_Load(NARC/,/^}/p' "$PL_LAND" \
-        | sed -n 's/.*landDataHeader->\([A-Za-z]*\)Size.*/\1/p' | tr '\n' ' ')
-same "Platinum's land-data header order" \
-     "$(echo $order)" "terrainAttributes mapProps mapModel bdhc"
+if have "$PL_LAND"; then
+    order=$(sed -n '/LandDataHeader_Load(NARC/,/^}/p' "$PL_LAND" \
+            | sed -n 's/.*landDataHeader->\([A-Za-z]*\)Size.*/\1/p' | tr '\n' ' ')
+    same "Platinum's land-data header order" \
+         "$(echo $order)" "terrainAttributes mapProps mapModel bdhc"
+else
+    echo "  SKIP (the land-data header order; no $absent)"
+fi
 
 # --- matrix: the one ceiling the page says is in the engine, not the data ---
-pl_w=$(awk '/define MAP_MATRIX_MAX_WIDTH/ { print $3 }' "$PL_MATRIX")
-hg_max=$(awk '/define MAP_MATRIX_MAX_SIZE/ { print $3 }' "$HG_MATRIX")
-same "Platinum's matrix width cap" "$pl_w" "30"
-same "HeartGold's matrix cell cap" "$hg_max" "799"
+if have "$PL_MATRIX" "$HG_MATRIX"; then
+    pl_w=$(awk '/define MAP_MATRIX_MAX_WIDTH/ { print $3 }' "$PL_MATRIX")
+    hg_max=$(awk '/define MAP_MATRIX_MAX_SIZE/ { print $3 }' "$HG_MATRIX")
+    same "Platinum's matrix width cap" "$pl_w" "30"
+    same "HeartGold's matrix cell cap" "$hg_max" "799"
+else
+    echo "  SKIP (the matrix caps; no $absent)"
+fi
+
 says "47 × 17 = 799 cells" "the page still names HeartGold's world matrix"
 
 # --- script commands: the count that says there is no conversion ---
-pl_cmds=$(grep -c '^ *ScriptCommand(' "$PL_SCRCMD")
-hg_cmds=$(sed 's,//.*,,' "$HG_SCRCMD" | grep -c '^ *[A-Za-z_][A-Za-z0-9_]*, *$')
-same "Platinum's script command count" "$pl_cmds" "840"
-same "HeartGold's script command count" "$hg_cmds" "853"
+if have "$PL_SCRCMD" "$HG_SCRCMD"; then
+    pl_cmds=$(grep -c '^ *ScriptCommand(' "$PL_SCRCMD")
+    hg_cmds=$(sed 's,//.*,,' "$HG_SCRCMD" | grep -c '^ *[A-Za-z_][A-Za-z0-9_]*, *$')
+    same "Platinum's script command count" "$pl_cmds" "840"
+    same "HeartGold's script command count" "$hg_cmds" "853"
 
-# Same handler name at the same opcode, compared position for position.
-sed -n 's/^ *ScriptCommand( *[A-Za-z0-9_]* *, *ScrCmd_\([A-Za-z0-9_]*\) *).*/\1/p' \
-    "$PL_SCRCMD" | tr 'A-Z' 'a-z' > "${TMPDIR:-/tmp}/mapfmt.pl.$$"
-sed 's,//.*,,' "$HG_SCRCMD" \
-    | sed -n 's/^ *ScrCmd_\([A-Za-z0-9_]*\), *$/\1/p' | tr 'A-Z' 'a-z' \
-    > "${TMPDIR:-/tmp}/mapfmt.hg.$$"
-agree=$(paste "${TMPDIR:-/tmp}/mapfmt.pl.$$" "${TMPDIR:-/tmp}/mapfmt.hg.$$" \
-        | awk -F'\t' '$1 != "" && $1 == $2' | wc -l | tr -d ' ')
-rm -f "${TMPDIR:-/tmp}/mapfmt.pl.$$" "${TMPDIR:-/tmp}/mapfmt.hg.$$"
-same "opcodes holding the same handler in both" "$agree" "26"
+    # Same handler name at the same opcode, compared position for position.
+    sed -n 's/^ *ScriptCommand( *[A-Za-z0-9_]* *, *ScrCmd_\([A-Za-z0-9_]*\) *).*/\1/p' \
+        "$PL_SCRCMD" | tr 'A-Z' 'a-z' > "${TMPDIR:-/tmp}/mapfmt.pl.$$"
+    sed 's,//.*,,' "$HG_SCRCMD" \
+        | sed -n 's/^ *ScrCmd_\([A-Za-z0-9_]*\), *$/\1/p' | tr 'A-Z' 'a-z' \
+        > "${TMPDIR:-/tmp}/mapfmt.hg.$$"
+    agree=$(paste "${TMPDIR:-/tmp}/mapfmt.pl.$$" "${TMPDIR:-/tmp}/mapfmt.hg.$$" \
+            | awk -F'\t' '$1 != "" && $1 == $2' | wc -l | tr -d ' ')
+    rm -f "${TMPDIR:-/tmp}/mapfmt.pl.$$" "${TMPDIR:-/tmp}/mapfmt.hg.$$"
+    same "opcodes holding the same handler in both" "$agree" "26"
+else
+    echo "  SKIP (the script command tables; no $absent)"
+fi
 
 # --- map headers: the counts the table publishes ---
-pl_maps=$(grep -c '^ *\[MAP_[A-Z0-9_]*\] *= *{' "$PL_HEADERS")
-hg_maps=$(grep -c '^ *\[MAP_[A-Z0-9_]*\] *= *{' "$HG_HEADERS")
-same "Platinum's map header count" "$pl_maps" "593"
-same "HeartGold's map header count" "$hg_maps" "540"
+if have "$PL_HEADERS" "$HG_HEADERS"; then
+    pl_maps=$(grep -c '^ *\[MAP_[A-Z0-9_]*\] *= *{' "$PL_HEADERS")
+    hg_maps=$(grep -c '^ *\[MAP_[A-Z0-9_]*\] *= *{' "$HG_HEADERS")
+    same "Platinum's map header count" "$pl_maps" "593"
+    same "HeartGold's map header count" "$hg_maps" "540"
+    # And the band the client will resolve a header in, which is those two
+    # counts plus the authored hub sitting in the slot between them. idmap.c
+    # refuses anything above it, so a header the porter grows past this bound
+    # would arrive and be turned away as if the map did not exist.
+    first=$(sed -n 's/^#define MMO_MAP_HEADER_PORTED_FIRST *\([0-9]*\).*/\1/p' \
+            "$ROOT/include/idmap.h")
+    count=$(sed -n 's/^#define MMO_MAP_HEADER_PORTED_COUNT *\([0-9]*\).*/\1/p' \
+            "$ROOT/include/idmap.h")
+    same "the ported band starts after the image and its hub" \
+        "$first" "$((pl_maps + 1))"
+    same "the ported band is HeartGold's whole header table" "$count" "$hg_maps"
+else
+    echo "  SKIP (the map header counts; no $absent)"
+fi
 
 # --- the one field at the same offset, which is the whole map-header claim ---
-grep -q 'u16 eventsArchiveID;' "$PL/include/map_header.h" \
-    && grep -q 'u16 eventsBank;' "$HG/include/map_header.h" \
-    && ok "both map headers still carry an events bank" \
-    || bad "a map header renamed its events bank; the 0x10 row is stale"
+if have "$PL/include/map_header.h" "$HG/include/map_header.h"; then
+    grep -q 'u16 eventsArchiveID;' "$PL/include/map_header.h" \
+        && grep -q 'u16 eventsBank;' "$HG/include/map_header.h" \
+        && ok "both map headers still carry an events bank" \
+        || bad "a map header renamed its events bank; the 0x10 row is stale"
+else
+    echo "  SKIP (the events bank field; no $absent)"
+fi
 
 # --- the three tables a map port reads besides TERRAIN_MAP ---
 #
 # Same gate, same reason: each is generated out of the HeartGold tree and read
 # by tools/portmap.py, and a checkout that renames a map, a sprite or a flag has
 # to show up here rather than in a ported map that spawns the wrong person.
-for table in MAPS:gen_maps.py SPRITES:gen_sprites.py MAPSCENES:gen_mapscenes.py
+for table in MAPS:gen_maps.py SPRITES:gen_sprites.py STORYEND:gen_storyend.py \
+             MAPSCENES:gen_mapscenes.py HIDDEN_ITEMS:gen_hidden_items.py \
+             CAMERAS:gen_cameras.py
 do
     name=${table%%:*}
     tool=${table##*:}
@@ -581,12 +641,77 @@ do
     fi
 done
 
+# The camera templates cross twice: mmo/CAMERAS for the porter and a C block
+# for the engine.
+if [ -n "$HG" ] && [ -d "$HG" ] && command -v python3 >/dev/null 2>&1; then
+    campatch="$ROOT/mods/openmmo/patches/src/overlay005/field_camera.c.patch"
+    camsrc="$ROOT/mods/openmmo/src/openmmo_camera.c"
+    camblock="${TMPDIR:-/tmp}/mapfmt.cameras.$$"
+    if python3 "$ROOT/tools/gen_cameras.py" "$HG" --c > "$camblock" 2>/dev/null; then
+        cammissing=0
+        while IFS= read -r camline; do
+            [ -z "$camline" ] && continue
+            if ! grep -qF -- "$camline" "$campatch" && ! grep -qF -- "$camline" "$camsrc"; then
+                cammissing=$((cammissing + 1))
+            fi
+        done < "$camblock"
+        if [ "$cammissing" -eq 0 ]; then
+            ok "the camera patch and mod source carry every line of the generated block"
+        else
+            bad "$cammissing line(s) of the generated camera block are in neither" \
+                "the field_camera patch nor openmmo_camera.c; rerun" \
+                "tools/gen_cameras.py --c and paste"
+        fi
+    else
+        bad "tools/gen_cameras.py --c refused"
+    fi
+    rm -f "$camblock"
+fi
+
+# --- MAPWALLS: the hand-written rows, checked against the same tree ---
+if [ ! -f "$ROOT/MAPWALLS" ]; then
+    bad "mmo/MAPWALLS is missing; a map port reads it"
+elif [ -z "$HG" ] || [ ! -d "$HG" ] || ! command -v python3 >/dev/null 2>&1; then
+    echo "  SKIP (MAPWALLS; no heartgold checkout or python3)"
+else
+    walls_bad=$(python3 - "$ROOT" "$HG" <<'PY'
+import re, sys
+root, hg = sys.argv[1], sys.argv[2]
+flags = {m.group(1): int(m.group(2), 0) for m in re.finditer(
+    r"#define\s+(FLAG_\w+)\s+(0x[0-9A-Fa-f]+|\d+)",
+    open(hg + "/include/constants/flags.h").read())}
+scenes = {m.group(1) for m in re.finditer(r"^hg\s+(\S+)", open(root + "/MAPSCENES").read(), re.M)}
+bad = 0
+for line in open(root + "/MAPWALLS"):
+    if not line.startswith("hg"):
+        continue
+    m = re.match(r"^hg\s+(\S+)\s+(set|clear)\s+(\w+)=(0x[0-9A-Fa-f]+|\d+)", line)
+    if not m:
+        print("unreadable row: " + line.strip()); bad += 1; continue
+    if m.group(1) not in scenes:
+        print("no such map in MAPSCENES: " + m.group(1)); bad += 1
+    if flags.get(m.group(3)) != int(m.group(4), 0):
+        print("%s is %s in flags.h, not %s" % (m.group(3), hex(flags.get(m.group(3), -1)), m.group(4))); bad += 1
+print(bad)
+PY
+)
+    if [ "$(echo "$walls_bad" | tail -1)" = "0" ]; then
+        ok "MAPWALLS names real maps and the flag numbers the tree has"
+    else
+        echo "$walls_bad" | sed '$d' | sed 's/^/    /'
+        bad "MAPWALLS has a row the tree contradicts"
+    fi
+fi
+
 # --- TERRAIN_MAP: the table that replaced "26 guesses" ---
 TMAP="$ROOT/TERRAIN_MAP"
 if [ ! -f "$TMAP" ]; then
     bad "mmo/TERRAIN_MAP is missing; the terrain verdict rests on it"
 elif ! command -v python3 >/dev/null 2>&1; then
     ok "TERRAIN_MAP left unchecked (no python3 to regenerate it with)"
+elif ! have "$PL/include/constants/field/map_tile_behaviors.h" \
+            "$HG/include/constants/metatile_behavior.h"; then
+    echo "  SKIP (TERRAIN_MAP; no $absent to regenerate it from)"
 else
     gen="${TMPDIR:-/tmp}/mapfmt.terrain.$$"
     if python3 "$ROOT/tools/gen_terrain_map.py" "$PL" "$HG" "$gen" >/dev/null 2>&1
@@ -644,6 +769,437 @@ print(len(used - have))
 EOF
 )
     same "Johto behaviour bytes with no row in TERRAIN_MAP" "$miss" "0"
+fi
+
+# --- the region port's one rule, written down twice ---
+echo "the header rule a ported region rests on is the same on both sides:"
+
+pybase=$(sed -n 's/^FIRST_FREE_HEADER = \([0-9]*\).*/\1/p' "$ROOT/tools/portmap.py")
+ktbase=$(sed -n 's/^val portedHeaderBase = \([0-9]*\).*/\1/p' \
+         "$ROOT/../codegen/build.gradle.kts")
+same "the first header id a port may answer to" "$pybase" "$ktbase"
+
+pykinds=$(sed -n '/^MAP_KINDS = {/,/}/p' "$ROOT/tools/portmap.py" \
+          | grep -o '"[a-z_]*":' | tr -d '":' | sort | tr '\n' ' ')
+ktkinds=$(sed -n '/private val MAP_TYPES =/,/^        )/p' \
+          "$ROOT/../codegen/src/generator/kotlin/de/fiereu/openmmo/codegen/maps/PortedTerrainParser.kt" \
+          | grep -o '"[a-z_]*" to' | sed 's/" to//;s/"//' | sort | tr '\n' ' ')
+same "the kinds a region port carries" "$(echo $pykinds)" "$(echo $ktkinds)"
+
+# The rule against what the PORTER actually wrote, when a filled package is
+# here. `base + the map's own source header` is a sentence in two languages and
+# neither reads the other; this is the third reader, and it checks the one
+# artifact that decides where a player ends up. SKIPs on a clean checkout,
+# where the package tracks a recipe and no bytes.
+COOKED="$ROOT/mods/hgss/.cooked/generated/cooked_maps.txt"
+if [ ! -f "$COOKED" ] || ! command -v python3 >/dev/null 2>&1; then
+    ok "the porter's own header ids left unchecked (no filled package here)"
+else
+    verdict=$(python3 - "$ROOT" "$COOKED" "$pybase" <<'EOF'
+import sys
+from pathlib import Path
+root, cooked, base = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
+kinds = {"city_town", "interior", "route", "cave"}
+want = set()
+for line in (root / "MAPS").read_text().splitlines():
+    f = line.split()
+    if len(f) > 12 and f[0] == "hg" and f[10] in ("johto", "kanto") and f[9] in kinds:
+        want.add(base + int(f[2]))
+got = {int(l.split()[0]) for l in cooked.read_text().splitlines()
+       if l and not l.startswith("#")}
+print("the rule" if got == want else
+      "%d written that the rule does not, %d the rule wants and it did not"
+      % (len(got - want), len(want - got)))
+EOF
+)
+    same "the header ids the porter wrote are" "$verdict" "the rule"
+fi
+
+# The field-move bank and the tree the headbutt shakes, when a filled package is
+# here: the porter writes the bank's row and the effect's members, and the client
+# reads both by name (openmmo_stdbank.c, openmmo_headbutt_effect.c). A package
+# missing either is one the client would open a tree on and find nothing.
+BANKS="$ROOT/mods/hgss/.cooked/generated/std_banks.txt"
+EFFECTS="$ROOT/mods/hgss/.cooked/generated/field_effects.txt"
+if [ ! -f "$BANKS" ] || [ ! -f "$EFFECTS" ]; then
+    ok "the field-move bank left unchecked (no filled package here)"
+else
+    fmbase=$(sed -n 's/^FIELDMOVE_BASE = \([0-9]*\).*/\1/p' "$ROOT/tools/portmap.py")
+    fmrow=$(awk -v b="$fmbase" '$1 == b { print $4 }' "$BANKS")
+    same "the field-move bank's entry count in std_banks.txt" "$fmrow" "2"
+    fxverdict=$(python3 - "$ROOT" "$EFFECTS" <<'EOF2'
+import sys
+from pathlib import Path
+root, effects = Path(sys.argv[1]), Path(sys.argv[2])
+rows = {l.split()[0]: l.split()[1:] for l in effects.read_text().splitlines() if l.strip()}
+narc = root / "mods/hgss/.cooked/narc/graphic/hiden_effect.narc"
+def magic(i):
+    f = narc / str(i)
+    return f.read_bytes()[:4] if f.is_file() else b"none"
+model = int(rows.get("headbutt_model", ["-1"])[0])
+anim, count = (int(x) for x in rows.get("headbutt_anim", ["-1", "0"])[:2])
+got = [magic(model)] + [magic(anim + i) for i in range(count)]
+print("the tree and its two animations" if got == [b"BMD0", b"BCA0", b"BMA0"]
+      else "members %s" % got)
+EOF2
+)
+    same "the headbutt effect's appended members" "$fxverdict" "the tree and its two animations"
+fi
+
+# The card's ported page: HeartGold's LEAGUE BADGES page and its badge sprites,
+# seven members copied as they are (portmap.card_page; openmmo_card.c reads
+# card_badges.txt), each the kind of file its key promises.
+CARD="$ROOT/mods/hgss/.cooked/generated/card_badges.txt"
+if [ ! -f "$CARD" ]; then
+    ok "the card's ported page left unchecked (no filled package here)"
+else
+    cardverdict=$(python3 - "$ROOT" "$CARD" <<'EOF2'
+import sys
+from pathlib import Path
+root, card = Path(sys.argv[1]), Path(sys.argv[2])
+narc = root / "mods/hgss/.cooked/narc/graphic/trainer_case.narc"
+want = {"page_tiles": b"RGCN", "page_screen": b"RCSN", "page_palette": b"RLCN",
+        "badge_char": b"RGCN", "badge_pal": b"RLCN", "badge_cell": b"RECN", "badge_anim": b"RNAN"}
+def magic(i):
+    f = narc / str(i)
+    return f.read_bytes()[:4] if f.is_file() else b"none"
+got = {}
+for line in card.read_text().splitlines():
+    f = line.split()
+    if len(f) == 2:
+        got[f[0]] = int(f[1])
+missing = [k for k in want if k not in got]
+bad = [k for k in want if k in got and magic(got[k]) != want[k]]
+print("the page, its palette and the four badge members"
+      if not missing and not bad and len(got) == len(want)
+      else "missing %s, wrong %s, %d rows" % (missing, bad, len(got)))
+EOF2
+)
+    same "the card's ported page members" "$cardverdict" "the page, its palette and the four badge members"
+fi
+
+# And the ceiling the porter checks its appended prop models against is the one
+# this client actually builds. The engine's own number is 768; the patch below
+# is the only reason a whole region fits, and a porter still believing 768 would
+# refuse a map that loads, while one believing more than the patch grants would
+# write past an array.
+pycap=$(sed -n 's/^MAX_MAP_PROP_MODEL_FILES = \([0-9]*\).*/\1/p' "$ROOT/tools/portmap.py")
+ktcap=$(sed -n 's/^+#define MAX_MAP_PROP_MODEL_FILES \([0-9]*\).*/\1/p' \
+        "$ROOT/mods/openmmo/patches/include/overlay005/area_data.h.patch")
+same "the loaded-model table this client builds" "$pycap" "$ktcap"
+
+# The rectangle a region is cut into has to fit the matrix the engine reads into
+# a fixed struct. Johto's is 24x14 and Kanto's would be its own; a bound moving
+# under either is what this catches, from the engine's own header.
+mw=$(sed -n 's/^#define MAP_MATRIX_MAX_WIDTH *\([0-9]*\).*/\1/p' \
+     "$ENGINE/include/constants/field/map_matrix.h" 2>/dev/null)
+pymw=$(sed -n 's/^MAP_MATRIX_MAX_WIDTH = \([0-9]*\).*/\1/p' "$ROOT/tools/portmap.py")
+if [ -n "$mw" ]; then
+    same "the matrix width the porter checks against" "$pymw" "$mw"
+else
+    ok "matrix width left unchecked (no engine checkout here)"
+fi
+
+# --- the wild encounters a ported map serves ---
+echo "a ported map's wild encounters rest on two trees agreeing:"
+
+# The species names are read against the source game's numbers, which is right
+# by construction for reading its data, and useless unless the destination
+# agrees about them, because the id that lands in a table is served to a client
+# that looks it up in its own. So: every species both headers name, at the same
+# number, or the count of disagreements says so.
+if ! command -v python3 >/dev/null 2>&1; then
+    ok "the species agreement left unchecked (no python3)"
+elif ! have "$HG/include/constants/species.h" "$PL/generated/species.txt"; then
+    echo "  SKIP (the species agreement; no $absent)"
+else
+    agree=$(python3 - "$HG" "$PL" <<'EOF'
+import re, sys
+from pathlib import Path
+def table(path, pattern):
+    text = Path(path).read_text(errors="replace")
+    return {m.group(1): int(m.group(2)) for m in re.finditer(pattern, text)}
+hg = table(sys.argv[1] + "/include/constants/species.h",
+           r"#define\s+(SPECIES_\w+)\s+(\d+)")
+pl = {}
+for i, line in enumerate(Path(sys.argv[2] + "/generated/species.txt").read_text().splitlines()):
+    line = line.strip()
+    if line:
+        pl[line] = i
+both = set(hg) & set(pl)
+bad = [n for n in both if hg[n] != pl[n]]
+print("%d of %d" % (len(both) - len(bad), len(both)))
+EOF
+)
+    same "species both games name, at the same number" \
+         "$(echo "$agree" | awk '{print ($1 == $3) ? "all" : "not all"}')" "all"
+fi
+
+# And the join. A map meets something when its header names an encounter bank,
+# and that name has to be one the source's own encounter file carries, a code
+# with no entry is a map that would silently meet nothing.
+ENCJSON="$HG/files/fielddata/encountdata/gs_enc_data.json"
+if [ ! -f "$ENCJSON" ] || ! command -v python3 >/dev/null 2>&1; then
+    ok "the encounter join left unchecked (no encounter data here)"
+else
+    missing=$(python3 - "$ROOT/MAPS" "$ENCJSON" <<'EOF'
+import json, sys
+from pathlib import Path
+want = set()
+for line in Path(sys.argv[1]).read_text().splitlines():
+    f = line.split()
+    if len(f) > 12 and f[0] == "hg" and f[8] != "-" and f[10] in ("johto", "kanto"):
+        want.add(f[8])
+have = {e["map"] for e in json.loads(Path(sys.argv[2]).read_text())["encounters"]}
+print(len(want - have))
+EOF
+)
+    same "encounter banks a ported map names and the source has no entry for" \
+         "$missing" "0"
+fi
+
+# --- the script table, and the two oracles under it ---
+echo "the script command table is what the two trees say:"
+SCRCMD="$ROOT/SCRCMD"
+if [ ! -f "$SCRCMD" ]; then
+    bad "mmo/SCRCMD is missing; a ported script rests on it"
+elif ! command -v python3 >/dev/null 2>&1; then
+    ok "SCRCMD left unchecked (no python3 to regenerate it with)"
+elif ! have "$HG/include/constants/std_script.h" \
+            "$PL/include/data/scripts/scrcmd.h"; then
+    echo "  SKIP (SCRCMD; no $absent to regenerate it from)"
+else
+    gen="${TMPDIR:-/tmp}/mapfmt.scrcmd.$$"
+    if python3 "$ROOT/tools/gen_scripts.py" "$HG" "$PL" "$gen" >/dev/null 2>&1
+    then
+        if cmp -s "$SCRCMD" "$gen"; then
+            ok "SCRCMD still matches the two trees it was generated from"
+        else
+            bad "SCRCMD is stale; rerun tools/gen_scripts.py"
+        fi
+    else
+        bad "tools/gen_scripts.py refused (a run lost its confirmations?)"
+    fi
+    rm -f "$gen"
+fi
+
+# The alignment is only as good as what falsifies it, and what falsifies it is
+# a macro name spelt the same in both trees. A run with none is a run of
+# matching operand widths and nothing else, which is exactly the state the
+# original refusal described, so no row of this table may come from one.
+runs=$(grep -c "^#   hg .*confirmed by" "$SCRCMD" 2>/dev/null || echo 0)
+same "runs the table was built from" "$(test "$runs" -ge 3 && echo many || echo few)" "many"
+unconfirmed=$(awk '/^#   hg .*confirmed by 0:/ { n++ } END { print n + 0 }'               "$SCRCMD" 2>/dev/null)
+same "runs kept with nothing confirming them" "$unconfirmed" "0"
+
+# The fold itself, on a script built here rather than read out of a cartridge.
+if command -v python3 >/dev/null 2>&1; then
+    same "a branch on a story that has not happened folds to, and the movement clamp" \
+         "$(python3 "$ROOT/tests/fold_probe.py" "$ROOT" 2>&1)" "folded [4] moves ok"
+else
+    ok "the fold left unchecked (no python3)"
+fi
+
+# The commands a talking person is made of, each by name on both sides. These
+# six are the whole of "somebody says a line", and a table that lost one would
+# still generate and would carry nobody.
+for pair in "45 Message" "53 CloseMessage" "96 LockAll" "97 ReleaseAll" \
+            "104 FacePlayer" "50 WaitButton"; do
+    set -- $pair
+    got=$(awk -v o="$1" '$1 == "hg" && $2 == o { print $NF }' "$SCRCMD")
+    same "heartgold command $1 lands on" "${got:-nothing}" "$2"
+done
+
+# --- a trainer, and the four numbers that let one cross ---------------------
+echo "a ported trainer crosses on numbers both games say:"
+
+TRC="$ROOT/TRAINER_CLASS"
+if [ ! -f "$TRC" ]; then
+    bad "mmo/TRAINER_CLASS is missing; a ported trainer's class rests on it"
+elif ! command -v python3 >/dev/null 2>&1; then
+    ok "TRAINER_CLASS left unchecked (no python3 to regenerate it with)"
+else
+    gen="${TMPDIR:-/tmp}/mapfmt.trclass.$$"
+    if python3 "$ROOT/tools/gen_trainer_class.py" "$gen" >/dev/null 2>&1; then
+        if cmp -s "$TRC" "$gen"; then
+            ok "TRAINER_CLASS still matches the two trees it came from"
+        else
+            bad "TRAINER_CLASS is stale; rerun tools/gen_trainer_class.py"
+        fi
+    else
+        bad "tools/gen_trainer_class.py refused"
+    fi
+    rm -f "$gen"
+fi
+
+# A class byte indexes three 105-entry tables of this game's, the gender its
+# party generator reads, the prize multiplier, and the name a battle prints,
+# so a row that sends a trainer past the end of them is an out-of-bounds read
+# in three places at once, and the fill would not notice.
+classes=$(grep -c '^hg ' "$TRC" 2>/dev/null || :)
+if have "$PL/build/rom/generated/trainer_classes.h"; then
+    plclasses=$(grep -c 'TRAINER_CLASS_[A-Z_0-9]* *= *[0-9]' \
+        "$PL/build/rom/generated/trainer_classes.h")
+    over=$(awk -v n="${plclasses:-0}" \
+           '$1 == "hg" && $4 != "appended" && $3 + 0 >= n { c++ }
+           END { print c + 0 }' "$TRC" 2>/dev/null)
+    same "rows sending a trainer past this game's ${plclasses:-?} classes unappended" \
+         "${over:-?}" "0"
+    runs=$(awk -v n="${plclasses:-0}" \
+           '$1 == "hg" && $4 == "appended" { seen[$3 + 0] = 1; k++ }
+           END { ok = (k > 0); for (i = n; i < n + k; i++) if (!seen[i]) ok = 0;
+                 print ok ? "contiguously" : "with a hole" }' "$TRC" 2>/dev/null)
+    same "the appended classes run from ${plclasses:-?}" "${runs:-?}" "contiguously"
+else
+    echo "  SKIP (the class ceiling; no $absent)"
+fi
+same "classes the table pairs or stands in for" \
+     "$(test "${classes:-0}" -ge 100 && echo many || echo few)" "many"
+
+# Both games' own constants for the two script-id bases. The whole address
+# rests on these being the same two numbers, and they are: `_std_npc_trainer`
+# 3000 and `_std_npc_trainer_2` 5000 there, SCRIPT_ID_OFFSET_SINGLE_BATTLES and
+# _DOUBLE_BATTLES here. A tree that moved one would silently send every ported
+# trainer to somebody else's fight.
+if ! have "$HG/include/constants/std_script.h" "$PL/include/script_manager.h"
+then
+    echo "  SKIP (the two script-id bases; no $absent)"
+fi
+for pair in "SINGLE _std_npc_trainer SCRIPT_ID_OFFSET_SINGLE_BATTLES" \
+            "DOUBLE _std_npc_trainer_2 SCRIPT_ID_OFFSET_DOUBLE_BATTLES"; do
+    have "$HG/include/constants/std_script.h" "$PL/include/script_manager.h" \
+        || continue
+    set -- $pair
+    hgv=$(sed -n "s/^#define $2  *\([0-9][0-9]*\).*/\1/p" \
+          "$HG/include/constants/std_script.h" 2>/dev/null | head -1)
+    plv=$(sed -n "s/^#define $3  *\([0-9][0-9]*\).*/\1/p" \
+          "$PL/include/script_manager.h" 2>/dev/null | head -1)
+    ours=$(sed -n "s/^SCRIPT_ID_$1 = \([0-9]*\).*/\1/p" \
+           "$ROOT/tools/porttrainers.py")
+    same "the $1-battle script base heartgold says" "${hgv:-?}" "${ours:-?}"
+    same "the $1-battle script base this game says" "${plv:-?}" "${ours:-?}"
+done
+
+# The defeated-flag remap, which is two halves that have to meet exactly. The
+# engine's own block is one flag per trainer it shipped; the patch sends every
+# number past that to a block of its own at the top of the array. If the
+# porter's idea of "how many this game shipped" and the block's width disagree,
+# the first ported trainer beaten sets a flag of this game's story.
+if have "$PL/build/rom/generated/vars_flags.h"; then
+shipped=$(python3 - "$PL" <<'EOS' 2>/dev/null
+import re, sys
+from pathlib import Path
+h = (Path(sys.argv[1]) / "build/rom/generated/vars_flags.h").read_text()
+def at(name):
+    m = re.search(r"^\s*%s\s*=\s*(\d+)," % name, h, re.M)
+    return int(m.group(1)) if m else None
+a, b = at("TRAINER_DEFEATED_FLAGS_START"), at("TRAINER_DEFEATED_FLAGS_END")
+print(b - a + 1 if a is not None and b is not None else "?")
+EOS
+)
+ours=$(sed -n 's/^PL_TRAINER_COUNT = \([0-9]*\).*/\1/p' "$ROOT/tools/porttrainers.py")
+    same "trainers this game ships a defeated flag for" "${shipped:-?}" "${ours:-?}"
+else
+    echo "  SKIP (the defeated-flag count; no $absent)"
+fi
+
+PATCH=$ROOT/mods/openmmo/patches/include/vars_flags.h.patch
+portmax=$(sed -n 's/^+#define OPENMMO_PORTED_TRAINERS_MAX  *\([0-9]*\).*/\1/p' \
+          "$PATCH" 2>/dev/null)
+synat=$(sed -n 's/^+#define OPENMMO_SYNTHETIC_FLAGS_START  *\([0-9]*\).*/\1/p' \
+        "$PATCH" 2>/dev/null)
+synmax=$(sed -n 's/^+#define OPENMMO_SYNTHETIC_FLAGS_MAX  *\([0-9]*\).*/\1/p' \
+         "$PATCH" 2>/dev/null)
+engineflags=$(sed -n 's/^-#define NUM_FLAGS \([0-9]*\).*/\1/p' "$PATCH" 2>/dev/null)
+same "the added bands start where this game's flags stopped" \
+     "${synat:-?}" "${engineflags:-?}"
+wire=$(sed -n 's/^#define MMO_SCRIPT_FLAG_MAX  *\([0-9]*\).*/\1/p' \
+       "$ROOT/include/game.h")
+itemat=$(sed -n 's/^+#define OPENMMO_PORTED_ITEM_FLAGS_MAX  *\([0-9]*\).*/\1/p' \
+        "$PATCH" 2>/dev/null)
+staticmax=$(sed -n 's/^+#define OPENMMO_PORTED_STATIC_FLAGS_MAX  *\([0-9]*\).*/\1/p' \
+          "$PATCH" 2>/dev/null)
+same "game.h's flag ceiling against the patched array" \
+     "${wire:-?}" "$(( ${synat:-0} + ${synmax:-0} + ${portmax:-0} + ${itemat:-0} + ${staticmax:-0} ))"
+# The static band, the fourth: a person whose script stages a wild fight
+# hides behind one of these once the server's fight is won. The porter
+# numbers them from where the item band ends, as wide as the patch says.
+portstatic=$(python3 -c 'import sys; sys.path.insert(0, "'"$ROOT"'/tools"); \
+             import portmap as pm; print(pm.PORTED_STATIC_FLAGS_START, pm.PORTED_STATIC_FLAGS_MAX)' 2>/dev/null)
+same "the porter's static band starts where the item band ends" \
+     "${portstatic%% *}" "$(( ${synat:-0} + ${synmax:-0} + ${portmax:-0} + ${itemat:-0} ))"
+same "the porter's static band is as wide as the patch's" \
+     "${portstatic##* }" "${staticmax:-?}"
+
+# The item band, which is two halves that have to meet the same way: the
+# porter writes a ported ball's flag as HeartGold's number moved onto the band,
+# and the patch says where the band is and how wide. The width is HeartGold's
+# own item band, from its hidden-item base to past its last item-ball flag, so
+# both ends of that are read out of its tree as well.
+portitem=$(sed -n 's/^PORTED_ITEM_FLAGS_START = \([0-9]*\).*/\1/p' \
+           "$ROOT/tools/portmap.py")
+same "the porter's item band starts where the trainers' band ends" \
+     "${portitem:-?}" "$(( ${synat:-0} + ${synmax:-0} + ${portmax:-0} ))"
+hgfirst=$(sed -n 's/^HG_ITEM_FLAG_FIRST = \(0x[0-9A-Fa-f]*\).*/\1/p' \
+          "$ROOT/tools/portmap.py")
+hgend=$(sed -n 's/^HG_ITEM_FLAG_END = \(0x[0-9A-Fa-f]*\).*/\1/p' \
+        "$ROOT/tools/portmap.py")
+same "the patched band is as wide as HeartGold's item band" \
+     "${itemat:-?}" "$(( ${hgend:-0} - ${hgfirst:-0} ))"
+if [ -n "$HG" ] && [ -d "$HG" ]; then
+    hgbase=$(sed -n 's/^#define HIDDEN_ITEMS_FLAG_BASE  *\([0-9]*\).*/\1/p' \
+             "$HG/include/constants/flags.h")
+    same "HeartGold's hidden-item flag base is the band's first" \
+         "${hgbase:-?}" "$(( ${hgfirst:-0} ))"
+    hglast=$(grep '^#define FLAG_HIDE_ITEMBALL_' "$HG/include/constants/flags.h" \
+             | awk '{print $3}' | python3 -c 'import sys; print(max(int(x,0) for x in sys.stdin))' 2>/dev/null)
+    if [ -n "$hglast" ] && [ "$hglast" -lt "$(( ${hgend:-0} ))" ]; then
+        ok "every HeartGold item-ball flag is on the band"
+    else
+        bad "a HeartGold item-ball flag (${hglast:-?}) is past the band's end"
+    fi
+else
+    echo "  SKIP (item band against heartgold's flags; no checkout)"
+fi
+
+# A synthetic id is engine state that lives outside VarsFlags and is diverted
+# BY ID on the way in, so one that fell inside the ported block would be swapped
+# for a trainer's defeated flag with nothing to report it. The band exists so
+# that cannot happen; this is the band holding.
+shoes=$(sed -n 's/^#define MMO_SCRIPT_FLAG_RUNNING_SHOES *\([0-9]*\).*/\1/p' \
+        "$ROOT/include/client.h")
+if [ -n "$shoes" ] && [ "$shoes" -ge "${synat:-0}" ] \
+        && [ "$shoes" -lt "$(( ${synat:-0} + ${synmax:-0} ))" ]; then
+    ok "the synthetic flag ids sit in the band reserved for them"
+else
+    bad "synthetic flag id ${shoes:-?} is outside ${synat:-?}..$(( ${synat:-0} + ${synmax:-0} - 1 ))"
+fi
+
+# The ceiling has to cover every trainer the cartridge has, not just the ones
+# a run happens to place, or the day somebody ports an interior full of them
+# the fill lands past the block and says nothing.
+hgtrainers=$(grep -c '^#define TRAINER_[A-Z_0-9]*  *[0-9]' \
+    "$HG/include/constants/trainers.h" 2>/dev/null || :)
+if ! have "$HG/include/constants/trainers.h"; then
+    echo "  SKIP (the ported flag block's ceiling; no $absent)"
+elif [ "${portmax:-0}" -ge "${hgtrainers:-99999}" ]; then
+    ok "the ported flag block holds all ${hgtrainers} of heartgold's trainers"
+else
+    bad "the ported flag block is ${portmax} and heartgold has ${hgtrainers}"
+fi
+
+# mmo/MAPS has gained a column twice and this index did not follow it twice,
+# and both times the region check read the kind column and refused every region
+# there is. The porter's own reader is the authority on which field is which.
+mapsreg=$(sed -n "s/.*'\$1 == \"hg\" \&\& \$\([0-9]*\) == r.*/\1/p" \
+          "$ROOT/tools/modport.sh" 2>/dev/null | head -1)
+if [ -n "$mapsreg" ] && awk -v f="$mapsreg" \
+        '$1 == "hg" && $f == "johto" { found = 1; exit }
+         END { exit !found }' "$ROOT/MAPS" 2>/dev/null; then
+    ok "modport reads mmo/MAPS field $mapsreg for the region and finds johto"
+else
+    bad "modport reads mmo/MAPS field ${mapsreg:-?} for the region and no row" \
+        "of it says johto"
 fi
 
 if [ "$fail" -eq 0 ]; then

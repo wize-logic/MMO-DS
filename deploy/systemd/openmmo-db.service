@@ -6,13 +6,17 @@ Requires=docker.service
 PartOf=openmmo.target
 
 [Service]
-# Starts the two containers by name rather than running compose from a checkout: a
-# compose file read from the wrong directory would quietly create a second empty pair
-# and every account would look lost.
+# The containers are named in docker-compose.yml, so this starts THOSE two by
+# name rather than running `docker compose up` from a checkout. A compose file
+# read from the wrong directory, or under a different project name, would
+# quietly create a second empty pair and every account would look lost; naming
+# the containers cannot do that, and it is a no-op when they are already up.
 #
-# No ExecStop on purpose. The containers hold the accounts and the world, and bringing
-# them up is the slow part of a restart, so stopping the target leaves the data running.
-# Take them down with `docker compose stop login-db game-db`.
+# There is deliberately no ExecStop. The containers hold the accounts and the
+# world, `restart: unless-stopped` brings them back after a reboot on their own,
+# and bringing them up again is the slow part of a restart, so stopping the
+# target stops the three servers and leaves the data running. Take them down
+# deliberately with `docker compose stop login-db game-db`.
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/bin/docker start login-db game-db

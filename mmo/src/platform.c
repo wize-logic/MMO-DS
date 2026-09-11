@@ -9,6 +9,9 @@
 
 #include "platform.h"
 
+#include "endpoint.h" /* openmmo_dev_env, for the one-process page */
+#include "vsync_channel.h" /* the window's refreshes, across processes */
+
 #include <dirent.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -94,7 +97,7 @@ void mmo_shm_one_process(int on)
 int mmo_shm_is_one_process(void)
 {
     if (g_one_process < 0) {
-        const char *e = getenv("OPENMMO_ONE_PROCESS");
+        const char *e = openmmo_dev_env("OPENMMO_ONE_PROCESS");
 
 #if defined(__ANDROID__)
         /* Not a default so much as the only thing there is: an app is one
@@ -347,6 +350,7 @@ void mmo_shm_unlink(const char *name)
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <io.h>
 #include <process.h>
 #include <signal.h>
 
@@ -1119,6 +1123,63 @@ int mmo_plat_rename_over(const char *from, const char *to)
     return MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING) ? 0 : -1;
 }
 
+struct mmo_plat_lock {
+    HANDLE h;
+};
+
+/* _commit is the crt's FlushFileBuffers, and it is the one that knows about
+ * the FILE's own buffer having just been flushed into the handle. */
+int mmo_plat_fsync(FILE *f)
+{
+    int fd;
+
+    if (f == NULL || fflush(f) != 0)
+        return -1;
+    fd = _fileno(f);
+    if (fd < 0)
+        return -1;
+    return _commit(fd) == 0 ? 0 : -1;
+}
+
+/*
+ * A share mode of 0: no other process may open this file at all while the handle is up, which
+ * is what makes a second launcher's take fail rather than quietly succeed.
+ */
+int mmo_plat_lock_take(const char *path, mmo_plat_lock **out)
+{
+    HANDLE h;
+
+    if (out == NULL)
+        return -1;
+    *out = NULL;
+    if (path == NULL || path[0] == '\0')
+        return -1;
+    h = CreateFileA(path, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_ALWAYS,
+                    FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) {
+        DWORD e = GetLastError();
+
+        fail("CreateFile");
+        return (e == ERROR_SHARING_VIOLATION || e == ERROR_ACCESS_DENIED)
+                   ? 1 : -1;
+    }
+    *out = (mmo_plat_lock *)calloc(1, sizeof **out);
+    if (*out == NULL) {
+        CloseHandle(h);
+        return -1;
+    }
+    (*out)->h = h;
+    return 0;
+}
+
+void mmo_plat_lock_drop(mmo_plat_lock *l)
+{
+    if (l == NULL)
+        return;
+    CloseHandle(l->h);
+    free(l);
+}
+
 /* The profile is already the owner's here, so there is no mode to set: this
  * only has to leave an empty file behind for the caller to write. */
 int mmo_plat_private_file(const char *path)
@@ -1252,6 +1313,26 @@ long mmo_plat_seconds(void)
     }
     QueryPerformanceCounter(&n);
     return (long)(n.QuadPart / freq);
+}
+
+long long mmo_plat_mono_ns(void)
+{
+    static LONGLONG freq;
+    LARGE_INTEGER n;
+
+    if (freq == 0) {
+        LARGE_INTEGER f;
+
+        QueryPerformanceFrequency(&f);
+        freq = f.QuadPart != 0 ? f.QuadPart : 1;
+    }
+    QueryPerformanceCounter(&n);
+    /* Whole seconds and remainder rather than the counter times a billion:
+     * the frequency here is typically 10 MHz, and one multiplication of the
+     * raw count overflows a signed 64-bit after about 29 years of uptime.
+     * The split never does. */
+    return (long long)(n.QuadPart / freq) * 1000000000LL
+           + (long long)((n.QuadPart % freq) * 1000000000LL / freq);
 }
 
 /* The ebp chain, walked here rather than by ntdll. */
@@ -1408,6 +1489,19 @@ void mmo_plat_stamp(char *out, size_t cap)
              (unsigned)t.wHour, (unsigned)t.wMinute, (unsigned)t.wSecond);
 }
 
+long long mmo_plat_unix_time(void)
+{
+    FILETIME ft;
+    ULARGE_INTEGER u;
+
+    /* kernel32 on every Windows since 2000, so the XP exe still loads. */
+    GetSystemTimeAsFileTime(&ft);
+    u.LowPart = ft.dwLowDateTime;
+    u.HighPart = ft.dwHighDateTime;
+    /* 100 ns ticks since 1601-01-01, to seconds since 1970-01-01. */
+    return (long long)(u.QuadPart / 10000000ULL) - 11644473600LL;
+}
+
 /* Appended and closed each time: the file is opened for the first time by the
  * crash that writes it, so a run that ends well leaves nothing behind. */
 static void crash_emit(const char *buf, size_t n)
@@ -1536,6 +1630,7 @@ static int crash_arm(void)
 #include <fcntl.h>
 #include <link.h>
 #include <signal.h>
+#include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -1907,6 +2002,68 @@ int mmo_plat_rename_over(const char *from, const char *to)
     return rename(from, to) == 0 ? 0 : -1;
 }
 
+struct mmo_plat_lock {
+    int fd;
+};
+
+int mmo_plat_fsync(FILE *f)
+{
+    int fd;
+
+    if (f == NULL || fflush(f) != 0)
+        return -1;
+    fd = fileno(f);
+    if (fd < 0)
+        return -1;
+    return fsync(fd) == 0 ? 0 : -1;
+}
+
+/*
+ * flock rather than fcntl: an fcntl lock belongs to the PROCESS, so a second open in the same
+ * program takes it again without noticing, and closing any descriptor on the file drops it.
+ */
+int mmo_plat_lock_take(const char *path, mmo_plat_lock **out)
+{
+    int fd;
+
+    if (out == NULL)
+        return -1;
+    *out = NULL;
+    if (path == NULL || path[0] == '\0')
+        return -1;
+    fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    if (fd < 0) {
+        snprintf(plat_err, sizeof plat_err, "open %s failed: %s", path,
+                 strerror(errno));
+        return -1;
+    }
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
+        int held = (errno == EWOULDBLOCK || errno == EAGAIN);
+
+        snprintf(plat_err, sizeof plat_err, "lock %s failed: %s", path,
+                 strerror(errno));
+        close(fd);
+        return held ? 1 : -1;
+    }
+    *out = (mmo_plat_lock *)calloc(1, sizeof **out);
+    if (*out == NULL) {
+        close(fd);
+        return -1;
+    }
+    (*out)->fd = fd;
+    return 0;
+}
+
+void mmo_plat_lock_drop(mmo_plat_lock *l)
+{
+    if (l == NULL)
+        return;
+    /* The close is the unlock: the last descriptor on the open file releases
+     * it, and this is the only one there is. */
+    close(l->fd);
+    free(l);
+}
+
 /* 0600 at creation rather than a chmod afterwards, so there is no moment when
  * the file exists and anyone else can read it. */
 int mmo_plat_private_file(const char *path)
@@ -1999,6 +2156,15 @@ long mmo_plat_seconds(void)
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
         return 0;
     return (long)ts.tv_sec;
+}
+
+long long mmo_plat_mono_ns(void)
+{
+    struct timespec ts;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+        return 0;
+    return (long long)ts.tv_sec * 1000000000LL + (long long)ts.tv_nsec;
 }
 
 /* One frame deeper than glibc reports, so both hosts agree that frame 0 is
@@ -2227,6 +2393,16 @@ void mmo_plat_stamp(char *out, size_t cap)
              tm.tm_hour, tm.tm_min, tm.tm_sec);
 }
 
+long long mmo_plat_unix_time(void)
+{
+    struct timespec ts;
+
+    /* CLOCK_REALTIME and not time(), as above. */
+    if (clock_gettime(CLOCK_REALTIME, &ts) != 0)
+        return 0;
+    return (long long)ts.tv_sec;
+}
+
 /* open/write/close and nothing else: every call here is on the list of what a
  * signal handler may do, which stdio is not. */
 static void crash_emit(const char *buf, size_t n)
@@ -2371,6 +2547,15 @@ static unsigned long crash_image_base(void)
     return base;
 }
 
+/* Somebody other than us is handling this signal. SIG_DFL and SIG_IGN both
+ * read as a null handler through either arm of the union. */
+static int sig_is_taken(const struct sigaction *sa)
+{
+    if ((sa->sa_flags & SA_SIGINFO) != 0)
+        return sa->sa_sigaction != NULL && sa->sa_sigaction != crash_signal;
+    return sa->sa_handler != SIG_DFL && sa->sa_handler != SIG_IGN;
+}
+
 static int crash_arm(void)
 {
     /* A stack overflow is the one crash a handler on the overflowed stack
@@ -2396,6 +2581,14 @@ static int crash_arm(void)
         struct sigaction old;
         int slot;
 
+        memset(&old, 0, sizeof old);
+        /*
+         * SIGFPE is not always a crash in this program, and whoever already holds it is the
+         * one who knows.
+         */
+        if (sigs[i] == SIGFPE && sigaction(SIGFPE, NULL, &old) == 0 &&
+            sig_is_taken(&old))
+            continue;
         memset(&old, 0, sizeof old);
         if (sigaction(sigs[i], &sa, &old) != 0)
             continue;
@@ -2531,6 +2724,435 @@ int mmo_plat_log_path(const char *name, char *out, size_t cap)
         return -1;
     snprintf(out, cap, "%s%s%s", dir, mmo_plat_sep(), name);
     return 0;
+}
+
+/* ------------------------------------------------------------------ vsync */
+static struct {
+    volatile uint32_t seq;       /* odd while the fields are being written */
+    long long last_ns;           /* when the most recent refresh landed */
+    long long period_ns;         /* the interval, once it has been measured */
+    uint32_t marks;              /* refreshes seen since the clock last woke */
+} vsync;
+
+/* Believed only between these: a 25 Hz panel and a 250 Hz one are both real,
+ * and anything outside is a gap that did not come from a refresh. */
+#define VSYNC_MIN_NS 4000000LL
+#define VSYNC_MAX_NS 40000000LL
+/* A gap wider than this is the window going away, not a slow frame, so the
+ * clock forgets rather than predicting from a mark that is minutes old. */
+#define VSYNC_STALE_NS 200000000LL
+/* Gaps thrown away before any are believed, and gaps measured after that. The
+ * first is a settling window: a window whose surface has just come back
+ * presents irregularly for about a second, and the second is long enough that
+ * a steady display fills it in one go. */
+#define VSYNC_SETTLE 30u
+#define VSYNC_SEED   64u
+
+/*
+ * The seeding state, which only the marking thread ever touches, so it sits
+ * outside the seqlock above rather than being carried through it.
+ */
+static struct {
+    long long gap[VSYNC_SEED];
+    uint32_t n;                  /* gaps collected in this window */
+    uint32_t settle;             /* gaps thrown away before collecting */
+} vseed;
+
+/*
+ * The same record, on A PAGE, so that the pacer can read it from another process.
+ * vsync_channel.h says why it is a page of its own rather than a word in the frame channel.
+ */
+static mmo_shm vsync_page = MMO_SHM_INIT;
+static struct openmmo_vsync_shm *vsync_out;      /* the window's end */
+static char vsync_page_name[160];
+
+static mmo_shm vsync_follow_page = MMO_SHM_INIT;
+static const struct openmmo_vsync_shm *vsync_in; /* the game's end */
+static unsigned vsync_follow_try;
+
+/*
+ * The console'S own frame: 560,190 system cycles at 33,513,982 Hz, which is 59.8261 frames a
+ * second.
+ */
+#define VSYNC_GUEST_FRAME_NS 16715113LL
+/*
+ * How far a display may sit from the console'S rate and STILL be paced against, in parts per
+ * Ten thousand.
+ */
+#define VSYNC_LOCK_TOL_PPTT 35
+
+void mmo_plat_vsync_publish(const char *channel)
+{
+    struct openmmo_vsync_shm *v;
+
+    if (vsync_out != NULL || channel == NULL || channel[0] == '\0') {
+        return;
+    }
+    if (strlen(channel) + sizeof OPENMMO_VSYNC_SUFFIX > sizeof vsync_page_name) {
+        return;
+    }
+    snprintf(vsync_page_name, sizeof vsync_page_name, "%s%s", channel,
+             OPENMMO_VSYNC_SUFFIX);
+    if (mmo_shm_create(&vsync_page, vsync_page_name, sizeof *v) != 0) {
+        /* A session with no page is a session on the console's own frame,
+         * which is what every one of them was until now. Not worth a line. */
+        vsync_page_name[0] = '\0';
+        return;
+    }
+    v = (struct openmmo_vsync_shm *)vsync_page.addr;
+    memset(v, 0, sizeof *v);
+    v->version = OPENMMO_VSYNC_VERSION;
+    v->writer = (uint32_t)mmo_plat_pid();
+    /* Zeroed and stamped before the magic goes down, so a game attaching in
+     * the middle of this cannot find a magic over a previous session's
+     * timestamps. */
+    __atomic_store_n(&v->magic, OPENMMO_VSYNC_MAGIC, __ATOMIC_RELEASE);
+    vsync_out = v;
+}
+
+void mmo_plat_vsync_unpublish(void)
+{
+    if (vsync_out == NULL) {
+        return;
+    }
+    /* The window owns this page: nothing else may be presenting into it, so
+     * it goes away with the window rather than being left for the next game
+     * to pace against a dead one's refreshes. */
+    vsync_out->magic = 0;
+    vsync_out->writer = 0;
+    vsync_out = NULL;
+    mmo_shm_close(&vsync_page);
+    if (vsync_page_name[0] != '\0') mmo_shm_unlink(vsync_page_name);
+    vsync_page_name[0] = '\0';
+}
+
+/* Somebody can read what this process marks: either the pacer is in here too,
+ * or a window has a page open for it. Only used to keep the line the seeder
+ * prints honest. */
+static int vsync_is_read(void)
+{
+    return mmo_shm_is_one_process() || vsync_out != NULL;
+}
+
+/*
+ * The middle gap, not the average one, and the difference is a bug that got as far as the
+ * device.
+ */
+static long long vsync_median(const long long gap[VSYNC_SEED])
+{
+    long long a[VSYNC_SEED];
+    unsigned i, j;
+
+    /* A window's worth and no other count, so the middle of the sorted copy
+     * cannot be asked for outside it. Insertion sort: sixty-four values, once
+     * per seed, on a thread that has just presented a frame. */
+    for (i = 0; i < VSYNC_SEED; i++) {
+        long long x = gap[i];
+
+        for (j = i; j > 0 && a[j - 1] > x; j--)
+            a[j] = a[j - 1];
+        a[j] = x;
+    }
+    return a[VSYNC_SEED / 2];
+}
+
+void mmo_plat_vsync_mark(void)
+{
+    long long now = mmo_plat_mono_ns();
+    long long last = vsync.last_ns;
+    long long period = vsync.period_ns;
+    uint32_t marks = vsync.marks;
+    uint32_t s = vsync.seq;
+
+    if (now <= 0)
+        return;
+    if (last > 0 && now > last && now - last <= VSYNC_STALE_NS) {
+        long long dt = now - last;
+
+        if (period <= 0) {
+            /*
+             * Nothing is believed from one gap, and the seed is where both ways of getting
+             * this wrong were found.
+             */
+            if (dt < VSYNC_MIN_NS || dt > VSYNC_MAX_NS) {
+                /* Not a refresh at all: it says nothing either way. */
+            } else if (vseed.settle < VSYNC_SETTLE) {
+                vseed.settle++;
+            } else if (vseed.n < VSYNC_SEED) {
+                vseed.gap[vseed.n++] = dt;
+            }
+            if (vseed.n >= VSYNC_SEED) {
+                long long med = vsync_median(vseed.gap);
+                unsigned agree = 0, i;
+
+                for (i = 0; i < VSYNC_SEED; i++) {
+                    if (vseed.gap[i] * 4 >= med * 3
+                        && vseed.gap[i] * 4 <= med * 5) {
+                        agree++;
+                    }
+                }
+                if (agree * 4 >= VSYNC_SEED * 3
+                    && med >= VSYNC_MIN_NS && med <= VSYNC_MAX_NS) {
+                    period = med;
+                    /* Say which of the two this is. */
+                    fprintf(stderr, "vsync: the display refreshes every"
+                                    " %.3f ms (%.2f Hz)%s\n",
+                            (double)period / 1e6, 1e9 / (double)period,
+                            vsync_is_read() ? "; the game can pace on it"
+                                            : "; nothing can read it");
+                    fflush(stderr);
+                }
+                vseed.n = 0;
+            }
+        } else {
+            /*
+             * A gap is not always one refresh. A present the window was late for covers two or
+             * three, and folding that in whole would drag the estimate long by exactly how
+             * late the window was.
+             */
+            long long k = (dt + period / 2) / period;
+            long long one = k >= 1 ? dt / k : dt;
+
+            if (k >= 1 && k <= 8 && one > period / 2 && one < period * 2)
+                period = (period * 255 + one) / 256;
+        }
+        if (marks < 0xFFFFFFFFu)
+            marks++;
+    } else if (last > 0 && now - last > VSYNC_STALE_NS) {
+        /* Gone and come back: measure the display again from scratch rather
+         * than fold a refresh together with an eternity, and settle first,
+         * the presents either side of a surface coming back are not the
+         * panel's rate and must not be taken for it. */
+        period = 0;
+        vseed.n = 0;
+        vseed.settle = 0;
+        marks = 0;
+    }
+    /*
+     * The barrier is the LOCK, and a store-release is the wrong half of one here. Release
+     * orders what came BEFORE the store; what must not move is the data going out AHEAD of the
+     * odd seq that warns a reader off it, and nothing about a release store prevents that.
+     */
+    __atomic_store_n(&vsync.seq, s + 1u, __ATOMIC_RELAXED);
+    __sync_synchronize();
+    vsync.last_ns = now;
+    vsync.period_ns = period;
+    vsync.marks = marks;
+    __sync_synchronize();
+    __atomic_store_n(&vsync.seq, s + 2u, __ATOMIC_RELAXED);
+
+    /* And out to the page, if a window opened one, under its own seqlock and
+     * with the same barriers for the same reason. Everything believed about
+     * this refresh has been decided above, so the page carries the settled
+     * answer rather than a second copy of the deciding. */
+    if (vsync_out != NULL) {
+        struct openmmo_vsync_shm *v = vsync_out;
+        uint32_t vs = v->seq;
+
+        __atomic_store_n(&v->seq, vs + 1u, __ATOMIC_RELAXED);
+        __sync_synchronize();
+        v->last_lo = (uint32_t)((unsigned long long)now & 0xFFFFFFFFu);
+        v->last_hi = (uint32_t)((unsigned long long)now >> 32);
+        v->period_ns = (period > 0 && period <= 0xFFFFFFFFLL)
+                           ? (uint32_t)period : 0u;
+        v->marks = marks;
+        __sync_synchronize();
+        __atomic_store_n(&v->seq, vs + 2u, __ATOMIC_RELAXED);
+    }
+}
+
+/* One consistent look at whichever record is carrying the display: the
+ * seqlock read, done the same way over the static and over the page. */
+static int vsync_read(volatile uint32_t *seq, long long *last,
+                      long long *period, uint32_t *marks, int from_page)
+{
+    int tries;
+
+    for (tries = 0; tries < 8; tries++) {
+        uint32_t s0 = __atomic_load_n(seq, __ATOMIC_RELAXED), s1;
+
+        if (s0 & 1u)
+            continue;                   /* a mark is being written; try again */
+        __sync_synchronize();
+        if (from_page) {
+            *last = (long long)openmmo_vsync_join(vsync_in->last_lo,
+                                                  vsync_in->last_hi);
+            *period = (long long)vsync_in->period_ns;
+            *marks = vsync_in->marks;
+        } else {
+            *last = vsync.last_ns;
+            *period = vsync.period_ns;
+            *marks = vsync.marks;
+        }
+        __sync_synchronize();
+        s1 = __atomic_load_n(seq, __ATOMIC_RELAXED);
+        if (s0 == s1)
+            return 1;                   /* nothing landed under us */
+    }
+    return 0;
+}
+
+/*
+ * The game'S end of the PAGE. Nothing marks in this process on the desktop, the window is
+ * another program, so the refreshes arrive on the page that window made, named after the
+ * frame channel it was given.
+ */
+static void vsync_follow_attach(void)
+{
+    const char *chan;
+    char name[160];
+    const struct openmmo_vsync_shm *v;
+
+    if (vsync_in != NULL || mmo_shm_is_one_process())
+        return;
+    if (vsync_follow_try++ % 60u != 0u)
+        return;
+    chan = getenv("PC_VIEW");
+    if (chan == NULL || chan[0] == '\0')
+        return;
+    if (strlen(chan) + sizeof OPENMMO_VSYNC_SUFFIX > sizeof name)
+        return;
+    snprintf(name, sizeof name, "%s%s", chan, OPENMMO_VSYNC_SUFFIX);
+    if (mmo_shm_attach(&vsync_follow_page, name, sizeof *v, 0) != 0)
+        return;
+    v = (const struct openmmo_vsync_shm *)vsync_follow_page.addr;
+    if (v->magic != OPENMMO_VSYNC_MAGIC
+        || v->version != OPENMMO_VSYNC_VERSION) {
+        mmo_shm_close(&vsync_follow_page);
+        return;
+    }
+    vsync_in = v;
+    /* Said once, because the whole effect of this is invisible: a session
+     * that is paced on the display and one that is not look the same in
+     * every other line either produces. */
+    fprintf(stderr, "vsync: the window's refreshes are on '%s'\n", name);
+    fflush(stderr);
+}
+
+/* Refreshes per guest frame, rounded, the candidate the band below judges,
+ * and the figure a refusal quotes a speed against. */
+static long long vsync_nearest(long long period)
+{
+    long long n;
+
+    if (period <= 0)
+        return 1;
+    n = (VSYNC_GUEST_FRAME_NS + period / 2) / period;
+    return n < 1 ? 1 : n;
+}
+
+/*
+ * How many refreshes make one GUEST frame, or 0 when the answer is not close
+ * enough to a whole number to be worth pacing against. See VSYNC_LOCK_TOL_PPTT.
+ */
+static long long vsync_lock_ratio(long long period)
+{
+    long long n, off;
+
+    if (period <= 0)
+        return 0;
+    n = vsync_nearest(period);
+    off = n * period - VSYNC_GUEST_FRAME_NS;
+    if (off < 0)
+        off = -off;
+    if (off * 10000LL > VSYNC_GUEST_FRAME_NS * VSYNC_LOCK_TOL_PPTT)
+        return 0;
+    return n;
+}
+
+int mmo_plat_vsync_next(long long *when_ns, long long *period_ns)
+{
+    /* Only for a display that refreshes faster than the guest runs: the
+     * instant handed back last time, so the wake stays on every nth refresh
+     * instead of walking onto the ones in between. */
+    static long long nth;
+    long long last = 0, period = 0, now, n, locked, rel, j, grid;
+    uint32_t marks = 0;
+
+    if (!vsync_read(&vsync.seq, &last, &period, &marks, 0)) {
+        return 0;
+    }
+    if (period <= 0 || marks == 0) {
+        /* Nothing marks in this process. On the desktop that is not the end
+         * of it: the window has its own, on a page. */
+        vsync_follow_attach();
+        if (vsync_in == NULL
+            || !vsync_read((volatile uint32_t *)&vsync_in->seq, &last,
+                            &period, &marks, 1)) {
+            return 0;
+        }
+    }
+    /* A period at all means the seeding window closed on a believable
+     * average; until then there is nothing to pace against. */
+    if (period < VSYNC_MIN_NS || period > VSYNC_MAX_NS || marks == 0)
+        return 0;
+    now = mmo_plat_mono_ns();
+    if (now <= 0)
+        return 0;
+    /*
+     * Both ends must be reading the same clock for a timestamp off the page to mean anything,
+     * CLOCK_MONOTONIC in both processes on Linux, and QueryPerformanceCounter with no epoch
+     * subtracted in both on Windows.
+     */
+    if (now - last > VSYNC_STALE_NS || last - now > VSYNC_STALE_NS)
+        return 0;                       /* nothing is presenting any more */
+    n = vsync_lock_ratio(period);
+    if (n == 0) {
+        /* Once. A player on a 144 Hz monitor gets the console's own frame and
+         * has no other way to find out why the window and the game are not on
+         * the same clock. */
+        static int said;
+
+        if (!said) {
+            said = 1;
+            fprintf(stderr, "vsync: %.2f Hz would run the game %+.2f%% off"
+                            " its own speed, sound and all; keeping the"
+                            " console's %.4f Hz\n",
+                    1e9 / (double)period,
+                    ((double)VSYNC_GUEST_FRAME_NS
+                     / (double)(vsync_nearest(period) * period) - 1.0) * 100.0,
+                    1e9 / (double)VSYNC_GUEST_FRAME_NS);
+            fflush(stderr);
+        }
+        return 0;
+    }
+    locked = n * period;
+    /*
+     * The next refresh strictly after now, counted from the last one that actually happened
+     * rather than from the last deadline, so the phase is re-derived from the display every
+     * frame and cannot accumulate.
+     */
+    rel = now - last;
+    j = rel >= 0 ? rel / period + 1 : 1;
+    grid = last + j * period;
+
+    /*
+     * ...but on a display whose refreshes are worth less than a guest frame each, 120 Hz is
+     * two, 240 is four, not every refresh is a place a frame may start, or the guest would
+     * run at the panel's rate.
+     */
+    if (n > 1) {
+        if (nth <= 0 || nth < now - VSYNC_STALE_NS
+            || nth > now + VSYNC_STALE_NS) {
+            nth = grid;
+        } else {
+            while (nth <= now)
+                nth += locked;
+            /* Snapped back onto the display's own lattice for the same
+             * reason as above: the phase is the display's, not a sum of
+             * intervals this function has added up. */
+            nth = last + ((nth - last) + period / 2) / period * period;
+            if (nth <= now)
+                nth += locked;
+        }
+        grid = nth;
+    }
+
+    if (when_ns != NULL)
+        *when_ns = grid;
+    if (period_ns != NULL)
+        *period_ns = locked;
+    return 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2733,9 +3355,11 @@ int mmo_plat_ui_font(int bold, char *out, size_t cap)
     FILE *f;
     int i = bold ? 1 : 0;
 
-    /* Named outright. An Android app has no directory beside the program and
-     * no distribution fonts at all, so the frontend points this at a face it
-     * carries; on the desktops it is simply an override that wins. */
+    /*
+     * Named outright: an override that wins everywhere. It is only ever a preference, never
+     * the supply, it is honoured if it opens and skipped if it does not, so a frontend may
+     * name a face it hopes is there without that being the reason the window has words in it.
+     */
     {
         const char *env = getenv("OPENMMO_UI_FONT");
 
@@ -2769,6 +3393,43 @@ int mmo_plat_ui_font(int bold, char *out, size_t cap)
         fclose(f);
         return put(out, cap, posix_face[i]);
     }
+
+#if defined(__ANDROID__)
+    /* Android'S own faces, and without this the search above finds nothing. */
+    {
+        static const char *const and_regular[] = {
+            "/system/fonts/Roboto-Regular.ttf",
+            "/system/fonts/RobotoStatic-Regular.ttf",
+            "/system/fonts/NotoSans-Regular.ttf",
+            "/system/fonts/DroidSans.ttf",
+            NULL
+        };
+        static const char *const and_bold[] = {
+            "/system/fonts/Roboto-Bold.ttf",
+            "/system/fonts/RobotoStatic-Bold.ttf",
+            "/system/fonts/NotoSans-Bold.ttf",
+            "/system/fonts/DroidSans-Bold.ttf",
+            NULL
+        };
+        const char *const *want = bold ? and_bold : and_regular;
+        int pass;
+
+        for (pass = 0; pass < 2; pass++) {
+            int k;
+
+            for (k = 0; want[k] != NULL; k++) {
+                f = fopen(want[k], "rb");
+                if (f != NULL) {
+                    fclose(f);
+                    return put(out, cap, want[k]);
+                }
+            }
+            if (want == and_regular)
+                break;          /* already the widest list there is */
+            want = and_regular;
+        }
+    }
+#endif
 
 #if defined(_WIN32)
     {
@@ -2853,6 +3514,61 @@ int mmo_plat_pick_file(const char *title, const char *start_dir,
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR
         | OFN_HIDEREADONLY;
     if (!GetOpenFileNameA(&ofn))
+        return 1;
+    return put(out, cap, chosen) == 0 ? 0 : -1;
+}
+
+int mmo_plat_pick_save_file(const char *title, const char *start_dir,
+                            const char *suggest, const char *filter_name,
+                            const char *filter_glob, char *out, size_t cap)
+{
+    OPENFILENAMEA ofn;
+    char chosen[1024];
+    char filter[256];
+    size_t at = 0;
+
+    if (out == NULL || cap == 0)
+        return -1;
+    /* The name the dialog opens with is the buffer it answers in, which is why
+     * the suggestion is copied into it rather than passed separately. */
+    chosen[0] = '\0';
+    if (suggest != NULL && suggest[0] != '\0')
+        snprintf(chosen, sizeof chosen, "%s", suggest);
+
+    if (filter_name != NULL && filter_glob != NULL) {
+        int n = snprintf(filter + at, sizeof filter - at, "%s (%s)",
+                         filter_name, filter_glob);
+
+        if (n < 0 || (size_t)n >= sizeof filter - at)
+            return -1;
+        at += (size_t)n + 1;
+        n = snprintf(filter + at, sizeof filter - at, "%s", filter_glob);
+        if (n < 0 || (size_t)n >= sizeof filter - at)
+            return -1;
+        at += (size_t)n + 1;
+    }
+    at += (size_t)snprintf(filter + at, sizeof filter - at,
+                           "All files (*.*)") + 1;
+    at += (size_t)snprintf(filter + at, sizeof filter - at, "*.*") + 1;
+    if (at >= sizeof filter)
+        return -1;
+    filter[at] = '\0';
+
+    memset(&ofn, 0, sizeof ofn);
+    ofn.lStructSize = sizeof ofn;
+    ofn.hwndOwner = NULL;
+    ofn.lpstrFilter = filter;
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFile = chosen;
+    ofn.nMaxFile = (DWORD)sizeof chosen;
+    ofn.lpstrTitle = title;
+    ofn.lpstrInitialDir = (start_dir != NULL && start_dir[0] != '\0')
+        ? start_dir : NULL;
+    /* PATHMUSTEXIST but never FILEMUSTEXIST: the answer is a name that is not
+     * there yet. NOCHANGEDIR for the reason the open dialog gives. */
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR
+        | OFN_HIDEREADONLY;
+    if (!GetSaveFileNameA(&ofn))
         return 1;
     return put(out, cap, chosen) == 0 ? 0 : -1;
 }
@@ -3001,6 +3717,90 @@ int mmo_plat_pick_file(const char *title, const char *start_dir,
         argv[n++] = (char *)"--title";
         argv[n++] = (char *)title;
         argv[n++] = (char *)"--getopenfilename";
+        argv[n++] = here[0] != '\0' ? here : (char *)".";
+        argv[n++] = kfilter;
+        argv[n] = NULL;
+        {
+            int rc = run_picker(argv, out, cap);
+
+            if (rc >= 0)
+                return rc;
+        }
+    }
+    return -1;
+}
+
+int mmo_plat_pick_save_file(const char *title, const char *start_dir,
+                            const char *suggest, const char *filter_name,
+                            const char *filter_glob, char *out, size_t cap)
+{
+    static const char *const zenity_like[] = {
+        "zenity", "qarma", "matedialog", "yad", NULL
+    };
+    char here[1024];
+    char filter[256];
+    char kfilter[128];
+    int i;
+
+    if (out == NULL || cap == 0)
+        return -1;
+    if (title == NULL || title[0] == '\0')
+        title = "Save as";
+
+    /* A whole path, not a folder: the save dialog opens on a name, and one
+     * ending in a separator would open on a folder with the name field empty.
+     */
+    if (start_dir != NULL && start_dir[0] != '\0' && suggest != NULL
+        && suggest[0] != '\0')
+        snprintf(here, sizeof here, "%s/%s", start_dir, suggest);
+    else if (suggest != NULL && suggest[0] != '\0')
+        snprintf(here, sizeof here, "%s", suggest);
+    else if (start_dir != NULL && start_dir[0] != '\0')
+        snprintf(here, sizeof here, "%s/", start_dir);
+    else
+        here[0] = '\0';
+    if (filter_name != NULL && filter_glob != NULL) {
+        snprintf(filter, sizeof filter, "%s | %s", filter_name, filter_glob);
+        snprintf(kfilter, sizeof kfilter, "%s|%s", filter_glob, filter_name);
+    } else {
+        snprintf(filter, sizeof filter, "All files | *");
+        snprintf(kfilter, sizeof kfilter, "*|All files");
+    }
+
+    for (i = 0; zenity_like[i] != NULL; i++) {
+        char *argv[12];
+        int n = 0;
+
+        if (!have_prog(zenity_like[i]))
+            continue;
+        argv[n++] = (char *)zenity_like[i];
+        argv[n++] = (char *)"--file-selection";
+        argv[n++] = (char *)"--save";
+        argv[n++] = (char *)"--confirm-overwrite";
+        argv[n++] = (char *)"--title";
+        argv[n++] = (char *)title;
+        if (here[0] != '\0') {
+            argv[n++] = (char *)"--filename";
+            argv[n++] = here;
+        }
+        argv[n++] = (char *)"--file-filter";
+        argv[n++] = filter;
+        argv[n] = NULL;
+        {
+            int rc = run_picker(argv, out, cap);
+
+            if (rc >= 0)
+                return rc;
+        }
+    }
+    if (have_prog("kdialog")) {
+        char *argv[7];
+        int n = 0;
+
+        argv[n++] = (char *)"kdialog";
+        argv[n++] = (char *)"--title";
+        argv[n++] = (char *)title;
+        argv[n++] = (char *)"--getsavefilename";
         argv[n++] = here[0] != '\0' ? here : (char *)".";
         argv[n++] = kfilter;
         argv[n] = NULL;

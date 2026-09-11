@@ -11,6 +11,7 @@ import de.fiereu.openmmo.common.enums.Direction
 import de.fiereu.openmmo.common.enums.PokemonContainer
 import de.fiereu.openmmo.common.enums.Region
 import de.fiereu.openmmo.common.enums.SkinSlot
+import de.fiereu.openmmo.server.game.services.bagStackLimit
 import io.github.oshai.kotlinlogging.KotlinLogging
 import java.time.LocalDateTime
 import java.util.concurrent.ConcurrentHashMap
@@ -45,12 +46,40 @@ const val MONEY_MAX = 999_999
  * can actually draw and address. The boxes are a view over one flat list here rather than
  * containers of their own, so a slot is `box * 30 + position`.
  */
-const val PC_STORAGE_SIZE = 18 * 30
+const val PC_BOX_COUNT = 18
+
+const val PC_BOX_SIZE = 30
+
+const val PC_STORAGE_SIZE = PC_BOX_COUNT * PC_BOX_SIZE
+
+/** Slots the day care holds, which is what the game's own day care building has room for. */
+const val DAYCARE_SIZE = 2
+
+/** Whether some live session is playing a character right now. */
+fun interface CharacterPresence {
+  fun isOnline(characterId: Long): Boolean
+
+  companion object {
+    /** Nobody is connected, which is the answer for a store with no session layer over it. */
+    val NOBODY = CharacterPresence { false }
+  }
+}
+
+/** The three containers a character's monsters sit in, as a rearrangement leaves them. */
+data class Containers(
+    val party: List<Pokemon>,
+    val pc: List<Pokemon>,
+    val daycare: List<Pokemon>,
+)
 
 data class StoredCharacter(
     val info: CharacterInfo,
     val pokemon: MutableList<Pokemon>,
     val pcStorage: MutableList<Pokemon>,
+    // Boarders at the day care. Its own list rather than part of the PC: nothing may battle, trade
+    // or list one while it is boarding, and a monster whose custody is nobody's is the monster the
+    // day care used to lose.
+    val daycare: MutableList<Pokemon> = mutableListOf(),
     val items: MutableMap<Int, Int>,
     // Story progression. Flags are set/unset booleans, vars are named integers that default to 0.
     // Keys are opaque strings supplied by the content layer, so the store stays game agnostic.
@@ -78,6 +107,7 @@ constructor(
     private val repository: CharacterRepository,
     private val entityIds: EntityIdService,
     scope: CoroutineScope,
+    private val presence: CharacterPresence = CharacterPresence.NOBODY,
 ) {
   private val flushJob = SupervisorJob()
   private val flushScope = CoroutineScope(scope.coroutineContext + flushJob)
@@ -89,6 +119,10 @@ constructor(
   private val persisted = ConcurrentHashMap<Long, StoredCharacter>()
   private val dirtySince = ConcurrentHashMap<Long, Long>()
   private val pendingUnload = ConcurrentHashMap.newKeySet<Long>()
+  // Characters some [withLoaded] is in the middle of. An eviction that lands while one is out is
+  // held until it comes back, for the same reason a durable mutation does not evict: the borrower
+  // is still writing, and a write to an evicted character is dropped.
+  private val loans = ConcurrentHashMap<Long, Loan>()
   private val flushLocks = ConcurrentHashMap<Long, Mutex>()
   // Held across the whole of a creation: without it two accounts submitting the same name
   // at once both read it free and both insert. The database's unique index is the backstop
@@ -163,10 +197,11 @@ constructor(
         )
     val stored =
         StoredCharacter(
-            info,
-            mutableListOf(),
-            mutableListOf(),
-            mutableMapOf(),
+            info = info,
+            pokemon = mutableListOf(),
+            pcStorage = mutableListOf(),
+            daycare = mutableListOf(),
+            items = mutableMapOf(),
             storyFlags = start.storyFlags.toMutableSet(),
             storyVars = start.storyVars.toMutableMap(),
             skins = skins.toMap(),
@@ -422,14 +457,17 @@ constructor(
     }
   }
 
-  /** Rearrange a character's monsters between the party and the PC. */
+  /** Rearrange a character's monsters between the party, the PC and the day care. */
   fun rearrangeMonsters(
       characterId: Long,
-      rearrange: (party: List<Pokemon>, pc: List<Pokemon>) -> Pair<List<Pokemon>, List<Pokemon>>?,
+      rearrange: (party: List<Pokemon>, pc: List<Pokemon>, daycare: List<Pokemon>) -> Containers?,
   ): Boolean =
       mutate(characterId) { stored ->
-        val (party, pc) = rearrange(stored.pokemon, stored.pcStorage) ?: return@mutate null
-        stored.copy(pokemon = party.toMutableList(), pcStorage = pc.toMutableList())
+        val next = rearrange(stored.pokemon, stored.pcStorage, stored.daycare) ?: return@mutate null
+        stored.copy(
+            pokemon = next.party.toMutableList(),
+            pcStorage = next.pc.toMutableList(),
+            daycare = next.daycare.toMutableList())
       }
 
   /** Applies a signed cash delta and answers whether the balance now holds it. */
@@ -459,6 +497,10 @@ constructor(
           apply = { stored ->
             val newQuantity = (stored.items[itemId] ?: 0) + amount
             if (newQuantity < 0) return@mutateDurably null
+            // The bag the client hands this to refuses a slot past its pocket's ceiling
+            // (`Bag_TryAddItem`), and skips the whole stack when it does, so a deeper one here
+            // is an item the player owns and cannot see.
+            if (amount > 0 && newQuantity > bagStackLimit(itemId)) return@mutateDurably null
             val items = stored.items.toMutableMap()
             if (newQuantity == 0) items.remove(itemId) else items[itemId] = newQuantity
             stored.copy(items = items)
@@ -551,6 +593,72 @@ constructor(
             storyFlags = snapshot.storyFlags.toMutableSet(),
             storyVars = snapshot.storyVars.toMutableMap(),
         )
+      }
+    }
+  }
+
+  /**
+   * Replaces the whole character with what [replacement] makes of it, and writes it before
+   * answering, or leaves the character exactly as it was.
+   */
+  /**
+   * Which of [seeds] some character other than [exceptOwner] is holding, straight off the database.
+   * The cache is not consulted: the question is about every character on the server, and only a
+   * handful of them are loaded.
+   */
+  suspend fun seedsHeldElsewhere(seeds: Set<Int>, exceptOwner: Long): Set<Int> =
+      repository.seedsHeldElsewhere(seeds, exceptOwner)
+
+  suspend fun replaceDurably(
+      characterId: Long,
+      replacement: (StoredCharacter) -> StoredCharacter,
+  ): Boolean {
+    var before: StoredCharacter? = null
+    return mutateDurably(
+        characterId,
+        apply = {
+          before = it
+          replacement(it)
+        },
+        rollback = { before ?: it },
+    )
+  }
+
+  /**
+   * One or more [withLoaded] calls out on the same character, and what to do when the last ends.
+   */
+  private class Loan(var count: Int, val letGo: Boolean)
+
+  /**
+   * Runs [block] with the character loaded, for a change that arrives while its player may not be
+   * here: a replay verdict hours after the upload, the money it gives back, a moderator's undo.
+   */
+  suspend fun <T> withLoaded(characterId: Long, block: suspend () -> T): T? {
+    val letGo = !characters.containsKey(characterId) || pendingUnload.contains(characterId)
+    getOrLoadCharacter(characterId) ?: return null
+    // The first borrower's answer is the one that counts: a second one arriving after the first
+    // loaded the character would otherwise find it cached and leave it that way for good.
+    loans.compute(characterId) { _, held -> held?.also { it.count++ } ?: Loan(1, letGo) }
+    try {
+      return block()
+    } finally {
+      var lastOut: Loan? = null
+      loans.computeIfPresent(characterId) { _, held ->
+        held.count--
+        if (held.count > 0) held
+        else {
+          lastOut = held
+          null
+        }
+      }
+      val ended = lastOut
+      if (ended != null) {
+        if (ended.letGo && !presence.isOnline(characterId)) {
+          unloadCharacterAsync(characterId)
+        } else if (pendingUnload.contains(characterId)) {
+          // Their player left while this ran and the eviction was held off. Finish it now.
+          flushCharacterAsync(characterId)
+        }
       }
     }
   }
@@ -678,7 +786,9 @@ constructor(
 
   private fun maybeEvict(id: Long) {
     if (!pendingUnload.remove(id)) return
-    if (dirtySince.containsKey(id)) {
+    // A borrower still writing is put back on the queue exactly like an unwritten change: whoever
+    // clears the reason, the next flush, or the loan coming back, evicts then.
+    if (dirtySince.containsKey(id) || loans.containsKey(id)) {
       pendingUnload.add(id)
       return
     }

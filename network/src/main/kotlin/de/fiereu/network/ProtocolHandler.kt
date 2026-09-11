@@ -11,7 +11,10 @@ import io.netty.channel.ChannelPromise
 
 private val log = KotlinLogging.logger {}
 
-/** Frames with no registered codec one session may send before it is closed. */
+/**
+ * How many frames with no registered codec one session may send before it is closed. A handful
+ * covers a client a version out of step; a thousand is somebody writing to the log.
+ */
 private const val MAX_UNKNOWN_OPCODES = 16
 
 abstract class ProtocolHandler(
@@ -109,15 +112,12 @@ abstract class ProtocolHandler(
     onErrorInternal(ctx, cause)
   }
 
-  /**
-   * A frame whose opcode this side has no codec for. It used to be one ERROR line and a return,
-   * which made three bytes the cheapest way to write to the log without authenticating.
-   */
+  /** A frame whose opcode this side has no codec for. */
   private fun onUnknownOpcode(opcode: UByte) {
     unknownOpcodes++
     val where = "opcode 0x${opcode.toString(16)} on $side from ${session.remoteAddress}"
     if (unknownOpcodes == 1) log.warn { "No incoming codec for $where" }
-    else log.debug { "No incoming codec for $where ($unknownOpcodes so far)" }
+    else log.debug { "No incoming codec for $where (${unknownOpcodes} so far)" }
     if (unknownOpcodes >= MAX_UNKNOWN_OPCODES) {
       log.warn { "Closing ${session.remoteAddress}: $unknownOpcodes frames it has no codec for" }
       session.close { "too many unknown opcodes" }

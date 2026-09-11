@@ -3,6 +3,7 @@ package de.fiereu.openmmo.server.game.di
 import dagger.Binds
 import dagger.Module
 import dagger.multibindings.IntoSet
+import de.fiereu.openmmo.server.game.services.command.BoxCommand
 import de.fiereu.openmmo.server.game.services.command.CatchCommand
 import de.fiereu.openmmo.server.game.services.command.ChallengeCommand
 import de.fiereu.openmmo.server.game.services.command.ChatCommand
@@ -13,18 +14,27 @@ import de.fiereu.openmmo.server.game.services.command.GiftCommand
 import de.fiereu.openmmo.server.game.services.command.GmCommand
 import de.fiereu.openmmo.server.game.services.command.HandbookCommand
 import de.fiereu.openmmo.server.game.services.command.HelpCommand
+import de.fiereu.openmmo.server.game.services.command.ImportsCommand
 import de.fiereu.openmmo.server.game.services.command.KitCommand
 import de.fiereu.openmmo.server.game.services.command.ListCommand
 import de.fiereu.openmmo.server.game.services.command.MenuCommand
 import de.fiereu.openmmo.server.game.services.command.MoveCommand
+import de.fiereu.openmmo.server.game.services.command.MovesCommand
+import de.fiereu.openmmo.server.game.services.command.PartyCommand
+import de.fiereu.openmmo.server.game.services.command.PcCommand
 import de.fiereu.openmmo.server.game.services.command.PosCommand
 import de.fiereu.openmmo.server.game.services.command.QuestCommand
 import de.fiereu.openmmo.server.game.services.command.QueueCommand
+import de.fiereu.openmmo.server.game.services.command.RequeueImportCommand
+import de.fiereu.openmmo.server.game.services.command.RollbackImportCommand
+import de.fiereu.openmmo.server.game.services.command.SeasonCommand
 import de.fiereu.openmmo.server.game.services.command.ShopCommand
 import de.fiereu.openmmo.server.game.services.command.StoryCommand
 import de.fiereu.openmmo.server.game.services.command.SyncCommand
 import de.fiereu.openmmo.server.game.services.command.TestBattleCommand
 import de.fiereu.openmmo.server.game.services.command.UiCommand
+import de.fiereu.openmmo.server.game.services.command.UndoImportCommand
+import de.fiereu.openmmo.server.game.services.command.VerifyCommand
 import de.fiereu.openmmo.server.game.services.command.ViolationsCommand
 import de.fiereu.openmmo.server.game.services.command.WarpCommand
 import de.fiereu.openmmo.server.game.services.command.YesNoCommand
@@ -41,13 +51,33 @@ interface ChatCommandModule {
 
   @Binds @IntoSet fun posCommand(command: PosCommand): ChatCommand
 
+  @Binds @IntoSet fun seasonCommand(command: SeasonCommand): ChatCommand
+
+  @Binds @IntoSet fun pcCommand(command: PcCommand): ChatCommand
+
   @Binds @IntoSet fun violationsCommand(command: ViolationsCommand): ChatCommand
+
+  @Binds @IntoSet fun importsCommand(command: ImportsCommand): ChatCommand
+
+  @Binds @IntoSet fun rollbackImportCommand(command: RollbackImportCommand): ChatCommand
+
+  @Binds @IntoSet fun requeueImportCommand(command: RequeueImportCommand): ChatCommand
+
+  @Binds @IntoSet fun undoImportCommand(command: UndoImportCommand): ChatCommand
+
+  @Binds @IntoSet fun verifyCommand(command: VerifyCommand): ChatCommand
 
   @Binds @IntoSet fun testBattleCommand(command: TestBattleCommand): ChatCommand
 
   @Binds @IntoSet fun challengeCommand(command: ChallengeCommand): ChatCommand
 
   @Binds @IntoSet fun catchCommand(command: CatchCommand): ChatCommand
+
+  @Binds @IntoSet fun boxCommand(command: BoxCommand): ChatCommand
+
+  @Binds @IntoSet fun partyCommand(command: PartyCommand): ChatCommand
+
+  @Binds @IntoSet fun movesCommand(command: MovesCommand): ChatCommand
 
   @Binds @IntoSet fun storyCommand(command: StoryCommand): ChatCommand
 

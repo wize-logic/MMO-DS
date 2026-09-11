@@ -200,6 +200,19 @@ static void test_ability_overlay(void)
     CHECK(strcmp(mmo_display_ability_name(547, 0), "Protean") == 0,
           "ability 547 is Protean, overlay-only");
 
+    /* The table used to stop at Bad Dreams, 123, while every ported species was
+     * already carrying a Gen 5 ability id, so Victini's own ability was one of
+     * the ids the line below refuses. The Gen 5 half comes out of a Black
+     * cartridge through codegen/gen5/enums.json. */
+    CHECK(strcmp(mmo_display_ability_name(124, 0), "Pickpocket") == 0,
+          "ability 124 is Pickpocket, the first Gen 5 one");
+    CHECK(strcmp(mmo_display_ability_name(162, 0), "Victory Star") == 0,
+          "ability 162 is Victory Star, which Victini carries");
+    CHECK(strcmp(mmo_display_ability_name(164, 0), "Teravolt") == 0,
+          "ability 164 is Teravolt, the last one either game names");
+    CHECK(mmo_display_ability_desc(164, 0) != 0,
+          "and a Gen 5 ability has a description as well as a name");
+
     why = 0;
     CHECK(mmo_display_ability_name(200, &why) == 0 && why != 0,
           "an ability past the engine table and the overlay traps");

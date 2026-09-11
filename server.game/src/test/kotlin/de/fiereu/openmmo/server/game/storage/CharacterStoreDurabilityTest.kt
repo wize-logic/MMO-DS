@@ -195,6 +195,9 @@ private class GatedRepository(
 
   override suspend fun loadById(id: Long) = delegate.loadById(id)
 
+  override suspend fun seedsHeldElsewhere(seeds: Set<Int>, exceptOwner: Long) =
+      delegate.seedsHeldElsewhere(seeds, exceptOwner)
+
   override suspend fun insertAggregate(stored: StoredCharacter) = delegate.insertAggregate(stored)
 
   override suspend fun nameTaken(name: String) = delegate.nameTaken(name)

@@ -19,12 +19,17 @@ private const val TACKLE = 33
 private const val DEFENSE_CURL = 111
 private const val BIND = 20
 private const val ROCK_TOMB = 317
+private const val WADE = 4
+private const val CATERPIE = 10
+private const val WEEDLE = 13
 
-// Every [TRAINER_*] the three decomps declare, less TRAINER_NONE in each, which has no party.
-// Platinum's are one JSON file each: 928 files, of which none.json is that empty slot.
+// Every [TRAINER_*] the four decomps declare, less TRAINER_NONE in each, which has no party.
+// Platinum's are one JSON file each: 928 files, of which none.json is that empty slot. HeartGold's
+// are one JSON array of 738, of which index 0 is that slot and one more entry carries no party.
 private const val HOENN_TRAINERS = 854
 private const val KANTO_TRAINERS = 742
 private const val SINNOH_TRAINERS = 927
+private const val JOHTO_TRAINERS = 737
 
 class TrainerRegistryTest :
     FunSpec({
@@ -32,10 +37,11 @@ class TrainerRegistryTest :
 
       test("every decomp trainer with a party is registered") {
         // An exact count, so a decomp update that breaks the party parser cannot pass unnoticed.
-        trainers.size() shouldBe HOENN_TRAINERS + KANTO_TRAINERS + SINNOH_TRAINERS
+        trainers.size() shouldBe HOENN_TRAINERS + KANTO_TRAINERS + SINNOH_TRAINERS + JOHTO_TRAINERS
         trainers.get(Region.KANTO, BROCK).shouldNotBeNull()
         trainers.get(Region.HOENN, 1).shouldNotBeNull()
         trainers.get(Region.SINNOH, 1).shouldNotBeNull()
+        trainers.get(Region.JOHTO, 1).shouldNotBeNull()
       }
 
       test("a gym leader keeps its decomp party") {
@@ -47,6 +53,22 @@ class TrainerRegistryTest :
                 TrainerMon(GEODUDE, 12, 0, 0, listOf(TACKLE, DEFENSE_CURL)),
                 TrainerMon(ONIX, 14, 0, 0, listOf(TACKLE, BIND, ROCK_TOMB)),
             )
+      }
+
+      test("a ported trainer keeps its own cartridge's party") {
+        // Wade, the Bug Catcher on Route 31, whose id is the number a ported map's person carries.
+        val wade = trainers.get(Region.JOHTO, WADE).shouldNotBeNull()
+        wade.name shouldBe "Wade"
+        wade.doubleBattle shouldBe false
+        wade.prizeRate shouldBe 4
+        wade.party shouldBe
+            listOf(
+                TrainerMon(CATERPIE, 2, 0, 0, listOf()),
+                TrainerMon(CATERPIE, 2, 0, 0, listOf()),
+                TrainerMon(WEEDLE, 3, 0, 0, listOf()),
+                TrainerMon(CATERPIE, 2, 0, 0, listOf()),
+            )
+        wade.defeatedFlag shouldBe "johto/FLAG_DEFEATED_TRAINER_BUG_CATCHER_WADE"
       }
 
       test("the same id in the other region is a different trainer") {

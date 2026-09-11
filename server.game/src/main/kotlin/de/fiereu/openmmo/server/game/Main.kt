@@ -25,6 +25,20 @@ fun main(args: Array<String>) {
   component.databaseBootstrap().migrate()
   val characterStore = component.characterStore()
   characterStore.startPeriodicFlush()
+  // Before the port opens: a guild is asked for by character id from paths that cannot wait on a
+  // database, so every one of them is in memory by the time the first player can join.
+  val guildStore = component.guildStore()
+  runBlocking { guildStore.load() }
+  log.info { "Read ${guildStore.count()} guilds" }
+  // Asked for by name before the port opens: a singleton is built on first use, and first use of
+  // the replay worker would otherwise be the first player bringing a save online. An operator who
+  // configured VERIFY_* badly hears about it here, in the log, at start.
+  log.info {
+    val revisions = component.replayRunner().revisions()
+    if (revisions.isEmpty()) "Offline play will not be replayed: no worker is configured"
+    else "Offline play is replayed for client revisions ${revisions.sorted()}"
+  }
+  component.replayWorker().start()
   Runtime.getRuntime()
       .addShutdownHook(
           Thread {
@@ -38,11 +52,8 @@ fun main(args: Array<String>) {
 }
 
 /**
- * Empty this server's database and build the schema again, leaving it as a fresh install.
- *
- * Reset the login database in the same breath: a user id ties the two together, so a game database
- * kept across a login reset leaves the next account inheriting a stranger's characters. reset-db.sh
- * does both. Nothing may be connected, or the next flush undoes it.
+ * Empty this server's database and build the schema again, leaving it as a fresh install: no
+ * characters, no guilds, nothing on the shelf.
  */
 private fun runCommand(args: Array<String>) {
   val usage = "usage: server.game [$RESET_DB $CONFIRM]"

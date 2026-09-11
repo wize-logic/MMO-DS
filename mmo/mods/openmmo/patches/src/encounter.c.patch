@@ -1,6 +1,14 @@
---- a/src/encounter.c
-+++ b/src/encounter.c
-@@ -275,6 +275,21 @@
+--- a/src/encounter.c	2026-09-07 21:12:21.478129135 -0400
++++ b2/src/encounter.c	2026-09-07 21:12:21.499729136 -0400
+@@ -7,6 +7,7 @@
+ #include "constants/pokemon.h"
+ #include "generated/game_records.h"
+ #include "generated/map_headers.h"
++#include "generated/trainer_classes.h"
+ #include "generated/trainer_score_events.h"
+ 
+ #include "struct_decls/tv_broadcast.h"
+@@ -275,6 +276,21 @@
          break;
  
      case 4:
@@ -22,7 +30,7 @@
      case 5:
          FreeEncounter(encounter);
          return TRUE;
-@@ -768,6 +783,16 @@
+@@ -768,6 +784,35 @@
      FieldTask_InitCall(task, FieldTask_LinkEncounter, encounter);
  }
  
@@ -32,7 +40,26 @@
 + * here rather than in mods/openmmo/src/openmmo_link.c. */
 +void openmmo_encounter_new_vs_link(FieldSystem *fieldSystem, FieldBattleDTO *dto)
 +{
-+    Encounter *encounter = NewEncounter(dto, EncEffects_CutInEffect(dto), EncEffects_BGM(dto), NULL);
++    /* openmmo: a duel opens with the ordinary trainer cut-in and the ordinary
++     * trainer theme, which is what it opened with when both sides' class was
++     * a gender. Both are chosen from dto->trainer[1]'s CLASS, and that class
++     * is the body the player on net id 1 picked now
++     * (mods/openmmo/src/openmmo_link.c), so asking for them straight would
++     * open a duel against somebody wearing Volkner with Volkner's cut-in and
++     * Volkner's music, and open it differently on the two screens, because
++     * net id 1 is the opponent on one of them and yourself on the other. The
++     * class is put back before the encounter is built, so the sprite the
++     * scene draws is still the picked body's. */
++    u8 keptClass = dto->trainer[1].header.trainerType;
++    u32 cutIn, bgm;
++    Encounter *encounter;
++
++    dto->trainer[1].header.trainerType = TRAINER_CLASS_PLAYER_MALE;
++    cutIn = EncEffects_CutInEffect(dto);
++    bgm = EncEffects_BGM(dto);
++    dto->trainer[1].header.trainerType = keptClass;
++
++    encounter = NewEncounter(dto, cutIn, bgm, NULL);
 +    FieldSystem_CreateTask(fieldSystem, FieldTask_LinkEncounter, encounter);
 +}
 +

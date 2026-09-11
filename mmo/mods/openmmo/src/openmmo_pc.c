@@ -4,23 +4,37 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include "constants/daycare.h"
 #include "constants/heap.h"
+#include "constants/pokemon.h"
+#include "daycare_save.h"
 #include "field/field_system.h"
 #include "field_system.h"
 #include "heap.h"
+#include "overlay005/daycare.h"
 #include "party.h"
 #include "pc_boxes.h"
 #include "pokemon.h"
 #include "savedata.h"
 #include "savedata/save_table.h"
+#include "string_template.h"
+#include "struct_defs/daycare.h"
 
 #include "../../../include/charcode.h"
+#include "../../../include/species_port.h"
+#include "../../../include/endpoint.h"
 #include "../../../include/client.h"
 
 #define PC_ENGINE_SLOTS (MAX_PC_BOXES * MAX_MONS_PER_BOX) /* 18 * 30 = 540 */
-#define TRACK_MAX (OPENMMO_PARTY_MAX + PC_ENGINE_SLOTS)
+#define TRACK_MAX (OPENMMO_PARTY_MAX + PC_ENGINE_SLOTS + NUM_DAYCARE_MONS)
+
+/* The wire's day care holds what the building holds; say so once rather than
+ * letting the two drift. */
+typedef char openmmo_pc_daycare_fits[
+    (OPENMMO_DAYCARE_MAX == NUM_DAYCARE_MONS) ? 1 : -1];
 
 typedef struct {
     u32 pid;
@@ -55,6 +69,15 @@ static struct {
     long sum_state;
 } s_last;
 static int s_last_valid;
+/* The same idea for the day care: a digest over the server's boarders and the
+ * personalities the engine's own block is holding, so the bind runs again
+ * whenever either side moves and not once a frame. */
+static long s_daycare_sum;
+static int s_daycare_valid;
+/* Boarders the server named that the engine's own day care block is not
+ * holding. The two disagreeing is a monster whose whereabouts nobody here can
+ * state, and the grant sweep must not mint one while that is true. */
+static int s_daycare_unbound;
 
 /*
  * Grants sent whose answering containers have not landed: their PIDs, so the next reconcile
@@ -235,6 +258,35 @@ int openmmo_pc_id_for_pid(u32 pid, s64 *out)
     return 0;
 }
 
+/* The monster boarding day care slot `slot`, or NULL for an empty slot. The
+ * engine holds a boarder as a BoxPokemon inside the day care save block, the
+ * same shape a box holds one, so its personality reads the same way. */
+static BoxPokemon *daycare_boarder(FieldSystem *fs, int slot)
+{
+    Daycare *dc;
+    BoxPokemon *bm;
+
+    if (slot < 0 || slot >= NUM_DAYCARE_MONS)
+        return NULL;
+    dc = SaveData_GetDaycare(fs->saveData);
+    if (dc == NULL)
+        return NULL;
+    bm = DaycareMon_GetBoxMon(Daycare_GetDaycareMon(dc, slot));
+    if (bm == NULL || !BoxPokemon_GetValue(bm, MON_DATA_SPECIES_EXISTS, NULL))
+        return NULL;
+    return bm;
+}
+
+static const char *cont_name(int cont)
+{
+    switch (cont) {
+    case OPENMMO_CONTAINER_PARTY:   return "party";
+    case OPENMMO_CONTAINER_PC:      return "pc";
+    case OPENMMO_CONTAINER_DAYCARE: return "daycare";
+    }
+    return "?";
+}
+
 /*
  * Build one engine Pokemon from a mirror record: the party seat's own builder
  * (openmmo_encounter.c), because a boxed monster is the same monster.
@@ -247,7 +299,7 @@ static void seat_pc(FieldSystem *fs, const openmmo_storage *st)
 {
     PCBoxes *pc = SaveData_GetPCBoxes(fs->saveData);
     Pokemon *mon;
-    int i, n = 0, beyond = 0, unseated = 0;
+    int i, n = 0, beyond = 0, unseated = 0, undrawable = 0;
 
     PCBoxes_Init(pc);
     openmmo_pc_track_reset_container(OPENMMO_CONTAINER_PC);
@@ -259,8 +311,14 @@ static void seat_pc(FieldSystem *fs, const openmmo_storage *st)
     for (i = 0; i < st->count; i++) {
         const openmmo_party_mon *m = &st->mon[i];
 
-        if (m->species == 0)
+        /*
+         * The id map found no engine species for this one (idmap.h: 0 means untranslatable,
+         * never an empty record, the mirror holds only monsters the server sent).
+         */
+        if (m->species == 0) {
+            undrawable++;
             continue;
+        }
         /*
          * The server's PC and the engine's eighteen boxes are both 540 slots now
          * (PC_STORAGE_SIZE), so nothing should land here.
@@ -282,25 +340,154 @@ static void seat_pc(FieldSystem *fs, const openmmo_storage *st)
         n++;
     }
     Heap_Free(mon);
-    /* Only a record that belonged in a box and did not get one leaves this
-     * side unable to say where things are: the destination of a move could
-     * then be occupied on the server and empty here, and the swap would
-     * displace a monster nobody can see. */
-    s_layout_partial = unseated != 0;
-    printf("openmmo: pc seated %d mon(s)%s%s\n", n,
+    /*
+     * A record that belonged in a box and did not get one leaves this side unable to say where
+     * things are: the destination of a move could then be occupied on the server and empty
+     * here, and the swap would displace a monster nobody can see.
+     */
+    s_layout_partial = unseated != 0 || undrawable != 0;
+    printf("openmmo: pc seated %d mon(s)%s%s%s\n", n,
            beyond ? " (some slots past the engine's boxes)" : "",
-           unseated ? " (some could not be seated)" : "");
+           unseated ? " (some could not be seated)" : "",
+           undrawable ? " (some are species this client cannot draw)" : "");
+}
+
+/* Bind the server's boarders to the slots the engine is holding them in. */
+static void bind_daycare(FieldSystem *fs, const openmmo_storage *dc)
+{
+    int i, bound = 0, unmatched = 0;
+
+    s_daycare_unbound = 0;
+
+    openmmo_pc_track_reset_container(OPENMMO_CONTAINER_DAYCARE);
+    for (i = 0; i < dc->count && dc->mon != NULL; i++) {
+        const openmmo_party_mon *m = &dc->mon[i];
+        BoxPokemon *bm;
+
+        if (m->slot < 0 || m->slot >= NUM_DAYCARE_MONS) {
+            unmatched++;
+            continue;
+        }
+        bm = daycare_boarder(fs, m->slot);
+        if (bm == NULL) {
+            unmatched++;
+            continue;
+        }
+        openmmo_pc_track(BoxPokemon_GetValue(bm, MON_DATA_PERSONALITY, NULL),
+                         m->id, OPENMMO_CONTAINER_DAYCARE, m->slot);
+        bound++;
+    }
+    s_daycare_unbound = unmatched;
+    printf("openmmo: daycare bound %d boarder(s)%s\n", bound,
+           unmatched ? " (the day care block does not hold them all yet)" : "");
+}
+
+/*
+ * A measurement seam, off unless asked for: hand party slot N over the day care counter, or
+ * take day care slot N back, once, the first time the field is settled.
+ */
+static void daycare_station(FieldSystem *fs)
+{
+    static int done;
+    const char *board, *collect;
+    Daycare *dc;
+    Party *party;
+
+    if (done)
+        return;
+    board = openmmo_dev_env("OPENMMO_DAYCARE_BOARD");
+    collect = openmmo_dev_env("OPENMMO_DAYCARE_COLLECT");
+    if ((board == NULL || board[0] == '\0')
+        && (collect == NULL || collect[0] == '\0'))
+        return;
+    done = 1;
+    dc = SaveData_GetDaycare(fs->saveData);
+    party = SaveData_GetParty(fs->saveData);
+    if (dc == NULL || party == NULL)
+        return;
+    if (board != NULL && board[0] != '\0') {
+        int slot = atoi(board);
+
+        if (slot < 0 || slot >= Party_GetCurrentCount(party)) {
+            printf("openmmo: daycare station: party slot %d is empty\n", slot);
+            return;
+        }
+        Daycare_MoveToEmptySlotFromParty(party, slot, dc, fs->saveData);
+        printf("openmmo: daycare station: handed party slot %d over the"
+               " counter\n", slot);
+        /* The lady's own path opens the party menu to choose with, and a menu
+         * closing is what arms the reconcile. This station opens none, so it
+         * says so itself, otherwise the deposit sits unreported and the next
+         * party seat quietly puts the boarder back in the party as well. */
+        openmmo_pc_request_reconcile();
+        return;
+    }
+    {
+        int slot = atoi(collect);
+        StringTemplate *tmpl;
+
+        if (daycare_boarder(fs, slot) == NULL) {
+            printf("openmmo: daycare station: day care slot %d is empty\n",
+                   slot);
+            return;
+        }
+        /*
+         * A template of this station's own. The lady's path borrows the running script's
+         * (FieldSystem_GetScriptMemberPtr), and there is no script here, asking for it
+         * dereferences a null field task and takes the process down.
+         */
+        tmpl = StringTemplate_New(1, MON_NAME_LEN + 1, HEAP_ID_FIELD2);
+        if (tmpl == NULL) {
+            printf("openmmo: daycare station: no room for a string"
+                   " template\n");
+            return;
+        }
+        Daycare_MoveToPartyFromDaycareSlot(party, tmpl, dc, (u8)slot);
+        StringTemplate_Free(tmpl);
+        printf("openmmo: daycare station: took day care slot %d back\n", slot);
+        openmmo_pc_request_reconcile();
+    }
 }
 
 void openmmo_pc_field_sync(FieldSystem *fs, const openmmo_client *c)
 {
     const openmmo_storage *st;
 
-    if (fs == NULL || fs->saveData == NULL || c == NULL || s_hold > 0)
+    if (fs == NULL || fs->saveData == NULL || c == NULL)
+        return;
+    if (s_hold > 0)
         return;
     if (fs->task != NULL || !FieldSystem_IsRunningFieldMap(fs)
         || FieldSystem_HasChildProcess(fs))
         return;
+    {
+        const openmmo_storage *dc = openmmo_client_daycare(c);
+        long dsum = 0;
+        int i;
+
+        if (dc != NULL && dc->valid) {
+            for (i = 0; i < dc->count && dc->mon != NULL; i++)
+                dsum += (long)(dc->mon[i].id * (i + 1) + dc->mon[i].slot * 31);
+            for (i = 0; i < NUM_DAYCARE_MONS; i++) {
+                BoxPokemon *bm = daycare_boarder(fs, i);
+
+                if (bm != NULL)
+                    dsum += (long)BoxPokemon_GetValue(bm, MON_DATA_PERSONALITY,
+                                                      NULL) * (i + 3);
+            }
+            if (!s_daycare_valid || s_daycare_sum != dsum) {
+                s_daycare_sum = dsum;
+                s_daycare_valid = 1;
+                bind_daycare(fs, dc);
+            }
+            /*
+             * After the bind and never before it: the station is standing in for a walk to
+             * Solaceon and a word with the lady, and by the time a player has done that the
+             * boarders have long been placed.
+             */
+            daycare_station(fs);
+        }
+    }
     st = openmmo_client_storage(c);
     if (st == NULL || !st->valid)
         return;
@@ -333,6 +520,16 @@ static int find_now(FieldSystem *fs, u32 pid, int *out_cont, int *out_slot)
     PCBoxes *pc = SaveData_GetPCBoxes(fs->saveData);
     int i, n = Party_GetCurrentCount(party);
 
+    for (i = 0; i < NUM_DAYCARE_MONS; i++) {
+        BoxPokemon *bm = daycare_boarder(fs, i);
+
+        if (bm != NULL
+            && BoxPokemon_GetValue(bm, MON_DATA_PERSONALITY, NULL) == pid) {
+            *out_cont = OPENMMO_CONTAINER_DAYCARE;
+            *out_slot = i;
+            return 1;
+        }
+    }
     for (i = 0; i < n; i++) {
         Pokemon *mon = Party_GetPokemonBySlotIndex(party, i);
 
@@ -390,11 +587,19 @@ static void print_layout(FieldSystem *fs)
                (unsigned)BoxPokemon_GetValue(bm, MON_DATA_PERSONALITY, NULL),
                (int)BoxPokemon_GetValue(bm, MON_DATA_SPECIES, NULL));
     }
+    for (i = 0; i < NUM_DAYCARE_MONS; i++) {
+        BoxPokemon *bm = daycare_boarder(fs, i);
+
+        if (bm == NULL)
+            continue;
+        printf("openmmo:   engine daycare:%d pid %08x species %d\n", i,
+               (unsigned)BoxPokemon_GetValue(bm, MON_DATA_PERSONALITY, NULL),
+               (int)BoxPokemon_GetValue(bm, MON_DATA_SPECIES, NULL));
+    }
     for (i = 0; i < s_track_n; i++)
         printf("openmmo:   tracked id %lld pid %08x at %s:%d\n",
                (long long)s_track[i].id, (unsigned)s_track[i].pid,
-               s_track[i].cont == OPENMMO_CONTAINER_PARTY ? "party" : "pc",
-               s_track[i].slot);
+               cont_name(s_track[i].cont), s_track[i].slot);
 }
 
 extern void openmmo_party_rebind(FieldSystem *fs); /* openmmo_encounter.c */
@@ -464,9 +669,7 @@ void openmmo_pc_reconcile_tick(FieldSystem *fs, openmmo_client *c)
             if (s_now_cont[i] == CONT_LOST)
                 printf("openmmo: box sync lost monster id %lld, last seen at"
                        " %s:%d\n", (long long)s_track[i].id,
-                       s_track[i].cont == OPENMMO_CONTAINER_PARTY ? "party"
-                                                                  : "pc",
-                       s_track[i].slot);
+                       cont_name(s_track[i].cont), s_track[i].slot);
         printf("openmmo: box sync stands down (%d lost%s), reseating from the"
                " server\n", lost,
                s_layout_partial ? ", last seat incomplete" : "");
@@ -538,11 +741,9 @@ void openmmo_pc_reconcile_tick(FieldSystem *fs, openmmo_client *c)
                 for (i = 0; i < n; i++)
                     printf("openmmo: moved monster id %lld %s:%d -> %s:%d\n",
                            (long long)batch_id[i],
-                           batch[i].from_container == OPENMMO_CONTAINER_PARTY
-                               ? "party" : "pc",
+                           cont_name(batch[i].from_container),
                            batch[i].from_slot,
-                           batch[i].to_container == OPENMMO_CONTAINER_PARTY
-                               ? "party" : "pc",
+                           cont_name(batch[i].to_container),
                            batch[i].to_slot);
                 sent = n;
             }
@@ -558,6 +759,9 @@ void openmmo_pc_reconcile_tick(FieldSystem *fs, openmmo_client *c)
         int held = 0;
 
         if (openmmo_trade_scene_up() || openmmo_client_trade(c)->open)
+            held = 1;
+        /* And while the day care and its block disagree. */
+        if (!held && s_daycare_unbound)
             held = 1;
         if (!held && mirror != NULL && mirror->valid) {
             for (i = 0; i < mirror->count && !held; i++) {
@@ -575,8 +779,10 @@ void openmmo_pc_reconcile_tick(FieldSystem *fs, openmmo_client *c)
             }
         }
         if (held) {
-            printf("openmmo: box sync holds its grants, an incoming"
-                   " monster has not been seated yet\n");
+            printf("openmmo: box sync holds its grants, %s\n",
+                   s_daycare_unbound
+                       ? "the day care and its block do not agree"
+                       : "an incoming monster has not been seated yet");
             s_asked = 1;
             goto tail;
         }
@@ -618,7 +824,8 @@ void openmmo_pc_reconcile_tick(FieldSystem *fs, openmmo_client *c)
                 continue;
             if (already_granted(pid))
                 continue;
-            species = BoxPokemon_GetValue(bm, MON_DATA_SPECIES, NULL);
+            /* The server's number for it, not the engine's (species_port.h). */
+            species = mmo_species_port_wire_id((int)BoxPokemon_GetValue(bm, MON_DATA_SPECIES, NULL));
             level = BoxPokemon_GetLevel(bm);
             hp = pmon != NULL ? Pokemon_GetValue(pmon, MON_DATA_HP, NULL) : 0;
             BoxPokemon_GetValue(bm, MON_DATA_NICKNAME, nick);

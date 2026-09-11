@@ -2,6 +2,7 @@ package de.fiereu.openmmo.server.game.battle
 
 import de.fiereu.openmmo.common.Pokemon
 import de.fiereu.openmmo.common.PokemonMove
+import de.fiereu.openmmo.common.enums.Ability
 import de.fiereu.openmmo.net.game.packets.battle.BattleMonBlock
 import de.fiereu.openmmo.net.game.packets.battle.BattleOpponentBlock
 import de.fiereu.openmmo.pokemon.SpeciesDef
@@ -23,6 +24,18 @@ class BattleMonState(
   var currentHp: Int = source.hp.toInt().coerceIn(0, stats.hp)
   val moves: MutableList<PokemonMove> =
       source.moves.map { PokemonMove(it.id, it.pp) }.toMutableList()
+
+  /**
+   * The ability this monster actually has, which is what [AbilityTable] is asked about and what the
+   * wire is told.
+   */
+  val ability: Ability
+    get() =
+        when {
+          source.hasHiddenAbility && species.abilityHidden != Ability.NONE -> species.abilityHidden
+          species.ability2 != Ability.NONE && (source.seed and 1) == 1 -> species.ability2
+          else -> species.ability1
+        }
 
   private val stages = EnumMap<BattleStat, Int>(BattleStat::class.java)
 
@@ -63,6 +76,20 @@ class BattleMonState(
 
   fun effective(stat: BattleStat): Int = StatStages.scaleStat(unstaged(stat), stage(stat))
 
+  /** Replace one base stat for the rest of the fight: Guard Split and Power Split. */
+  fun setUnstaged(stat: BattleStat, value: Int) {
+    stats =
+        when (stat) {
+          BattleStat.ATTACK -> stats.copy(atk = value)
+          BattleStat.DEFENSE -> stats.copy(def = value)
+          BattleStat.SP_ATTACK -> stats.copy(spAtk = value)
+          BattleStat.SP_DEFENSE -> stats.copy(spDef = value)
+          BattleStat.SPEED -> stats.copy(spd = value)
+          BattleStat.ACCURACY,
+          BattleStat.EVASION -> error("$stat has no base stat to split")
+        }
+  }
+
   fun toOpponentBlock(slot: Int): BattleOpponentBlock =
       BattleOpponentBlock(
           slot = slot,
@@ -82,7 +109,7 @@ class BattleMonState(
           species = species.id.toShort(),
           level = source.level,
           gender = gender,
-          abilityId = species.ability1.ordinal.toShort(),
+          abilityId = ability.ordinal.toShort(),
           maxHp = stats.hp.toShort(),
           currentHp = currentHp.toShort(),
           movesPresent = movesPresent,

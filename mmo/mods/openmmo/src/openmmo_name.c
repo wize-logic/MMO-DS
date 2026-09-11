@@ -20,6 +20,7 @@
 /* The client's own charcode bridge, not the engine header of the same name.
  * It mirrors charcode_t as a uint16_t and says so; this is where the two meet,
  * so this is where that is checked. */
+#include "../../../include/endpoint.h"
 #include "../../../include/charcode.h"
 
 typedef char openmmo_charcode_width_check[sizeof(mmo_charcode) == sizeof(charcode_t) ? 1 : -1];
@@ -131,7 +132,7 @@ static const charcode_t *ConfiguredName(void)
     static int state; /* 0 unread, 1 present, 2 absent */
 
     if (state == 0) {
-        const char *env = getenv("OPENMMO_PLAYER_NAME");
+        const char *env = openmmo_dev_env("OPENMMO_PLAYER_NAME");
 
         if (env == NULL || env[0] == '\0') {
             state = 2;

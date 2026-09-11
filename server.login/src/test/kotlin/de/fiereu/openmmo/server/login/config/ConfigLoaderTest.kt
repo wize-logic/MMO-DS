@@ -30,7 +30,8 @@ class ConfigLoaderTest :
 
       /**
        * The shipped secret is a signing key in a public repository, so a deployment that never set
-       * one of its own has no authentication at all. Saying so in the log was not enough.
+       * one of its own has no authentication at all: anybody who has read this tree can mint a
+       * ticket for any account, with any role.
        */
       test("the shipped session secret refuses to start a server") {
         shouldThrow<IllegalArgumentException> { ConfigLoader.load(allowDevSecret = false) }

@@ -41,3 +41,183 @@ items  named  137-148   the twelve mail slots the two worlds fill with different
 # emit.
 flags  missing 1,730,1360,2480,2720,16384,16416,16672,32768   a block boundary alias: the server holds the id under the real entry that shares it
 flags  missing 32782-32784                                    FR_VAR_0x800E..0x8010, script-local slots with no VAR_ name
+
+# The 156 species and 92 moves Black adds, which reached the server out of a
+# cartridge and the client not at all. The server's tables are the game's rules
+# and can hold a species the engine has never heard of; the client's are what it
+# can DRAW, and pl_pokegra stops at Arceus because the game it was built for did
+# (mmo/include/sprite.h). So this is not a gap to close by editing a table: the
+# art is a cartridge import. Black's a/0/0/4 is a Gen 5 archive of 14285
+# compressed members in a layout the engine's loader does not read, so it is
+# assembled into this game's own sheets on the way in.
+#
+# The client stopped refusing these ids on 2026-08-30. Seven archives it indexes
+# by species, the personal data, the learnset, the evolutions, the icon, the
+# name, the battle sheets and the byte that seats them, are filled out of the
+# same cartridge by tools/portspecies.py (the sheets through
+# tools/portsprites.py), so a Gen 5 species has stats, a type, a name, a face
+# in the box grid and its own picture in a battle. So this row is about a FILL,
+# not about ids: both halves NAME all 649, and the client draws them once a
+# cartridge is imported.
+#
+# The moves crossed the same evening, through tools/portmoves.py: the 16-byte
+# table, three text banks, the animation scripts and the per-move battle stubs,
+# 468..559, out of the same cartridge, with the 467 shared moves as the oracle
+# (they rebuild this game's own table bar the 108 changes Gen 5 made). What a
+# ported move has NOT got on the client is its Gen 5 effect: the engine's battle
+# scripts stop at 276, so the 64 moves whose effect Gen 5 invented are plain HIT
+# or Splash's nothing there. The SERVER decides what a move does, and its turn
+# engine is a Gen 3 core (damage, stat stages, accuracy), so the 61 effects fall
+# in three piles (server.game/.../battle/EffectTable.kt): 24 are real, the
+# multi-stat dances and guards (Hone Claws, Quiver Dance, Shell Smash, Coil,
+# Shift Gear, Work Up, Cotton Guard, Autotomize), the riders (Flame Charge, Acid
+# Spray, Glaciate, V-create), Clear Smog, the field-dependent powers (Stored
+# Power, Electro Ball, Acrobatics), Chip Away, Foul Play, Psyshock's kind, Storm
+# Throw's crit, Final Gambit, Synchronoise, Guard Split and Power Split; about
+# twenty are damaging moves whose rider needs a status, the weather, an item, a
+# weight or a partner the server has no notion of yet, and land as base damage
+# like their Gen 4 cousins (Scald, Hurricane, Heavy Slam, the Pledges); and the
+# rest are status moves that cannot act here and fail visibly (the rooms,
+# Telekinesis, Soak, Heal Pulse, the guards, After You, Quash). No Gen 5 move
+# has an animation of its own: each borrows a Gen 4 move's, named row by row in
+# mmo/MOVE_ANIMS.
+# THE EVOLUTIONS AND THE ABILITY NAMES CROSSED ON 2026-09-06, and both were
+# holes rather than decisions.
+#
+# evo.narc was filled with 44 zero bytes a species on the stated grounds that
+# "the server owns whether a monster evolves". It does not. Nothing on the
+# server ever sends the evolution prompt, EvolutionPromptPacket has a codec
+# and no sender, because the CLIENT runs the game's own evolution screen off
+# that archive and the server only holds the report against its table
+# afterwards (EvolutionRegistry.isReachable). So a Gen 5 monster levelled up
+# forever and never evolved, with a server standing ready to accept a report
+# that could not arrive. tools/portspecies.py carries the cartridge's own rows
+# now: 72 of the 156 have somewhere to go, and the oracle is the archive itself,
+# 492 of the 493 shared species rebuild this game's own member byte for byte
+# out of Black, the one exception being Feebas, which Gen 5 gave the Prism Scale
+# trade beside its beauty evolution. Two rows are dropped by name: Karrablast
+# and Shelmet trade for each other, which is Gen 5's own method and has no Gen 4
+# number and no mechanic here. The evolution TARGET is written as the ENGINE's
+# species id, so it goes through the Victini/Snivy translation in
+# mmo/include/species_port.h; nothing in Gen 5 evolves into either, and the
+# translation is there so it stays right.
+#
+# The ability NAME banks (610, 611, 612) stopped at Bad Dreams, 123, while the
+# personal entries tools/portspecies.py synthesises had been carrying Gen 5
+# ability ids since the species port. So every ported species named an ability
+# nothing could draw, and the client's own display table said so by name
+# ("ability: id has no name in the engine's 124 or the official client overlay").
+# tools/portabilities.py fills all three from the cartridge, 124..164. Its
+# oracle is that all 123 ids both games name are spelled IDENTICALLY in Black's
+# bank and in this game's, a shift of one slot would break all 123 at once,
+# plus the measured rule that the upper case bank is the title one upper-cased,
+# which holds over this game's 124 and Black's 165. mmo/src/display_data.gen.h
+# is grown to 165 from the same text, committed under codegen/gen5 so that
+# generator still runs on the engine tree alone.
+#
+# AND THE CLIENT'S OWN BATTLE ANSWERS FOR TEN OF THEM, since later the same day.
+# The engine's generated/abilities.h defines exactly 124 constants, so its battle
+# code had no case for anything past Bad Dreams and no name to write one with,
+# which mattered more than the server's half, because a wild or trainer fight is
+# computed HERE and only reported. mods/openmmo/src/openmmo_ability.c is the
+# answer and mods/openmmo/include/openmmo_ability_ids.h is where the ids come
+# from, generated out of the same codegen/gen5/enums.json the server's enum and
+# the display table are built from, so an id means one thing in all three.
+#
+# Every one of the ten sits at a site the engine already asked a question at, so
+# each patch is a clause added to a condition rather than a new mechanism:
+# Turboblaze and Teravolt in Battler_IgnorableAbility beside Mold Breaker,
+# Prankster on the priority the turn order compares, Sand Rush beside Swift Swim
+# and Chlorophyll, Defeatist on the attack stat beside Hustle and Guts, Sheer
+# Force and Sand Force on the move's power in the same block (and Sheer Force
+# again at BtlCmd_CheckEffectActivation, because a move paid 30% for its rider
+# does not also get the rider), Victory Star and Wonder Skin on the hit rate
+# beside Compound Eyes, Iron Barbs sharing Rough Skin's whole case through a
+# one-line rename that lasts for that switch alone, and Big Pecks beside Keen Eye
+# and Hyper Cutter, whose message reads the ability off the monster, so it
+# names itself now that the bank is filled.
+#
+# THE OTHER SIXTEEN ARE NOT WRITTEN, and the reasons differ. Moxie, Defiant,
+# Justified and Weak Armor each raise or lower a stat with a message of their
+# own, which is a battle SUBSCRIPT and therefore script data in battle/skill/
+# rather than code; Cursed Body, Mummy and Poison Touch need an effect the engine
+# has no subscript for at all. Regenerator, Unnerve, Infiltrator and Overcoat
+# each want a site openmmo_ability.c does not reach yet (a switch-out hook, the
+# berry check, the screen checks, the weather damage step) and are ordinary work.
+# Illusion needs the display layer rather than the battle one. Healer and
+# Telepathy act only on an ALLY and this client runs no double battles, so inert
+# is the correct answer for those two and not a gap.
+#
+# The SERVER decides what an ability does in the fights IT runs (PvP, duels,
+# static battles), and since 2026-09-06 it decides something too. The two lists
+# do not match and should not: the client's battle has weather, status, items and
+# healing, and the server's Gen 3 core has none of them.
+# server.game/.../battle/AbilityTable.kt is the same three-pile split
+# EffectTable.kt keeps. Real: the mould breakers, the type immunities and Wonder
+# Guard, the attack and power multipliers (Huge Power, Pure Power, Hustle,
+# Defeatist, the four pinch abilities, Technician, Sheer Force, Reckless,
+# Analytic, Rivalry), Adaptability, Tinted Lens, Filter, Solid Rock, Multiscale,
+# Thick Fat, Heatproof, Dry Skin, the crit abilities (Battle Armor, Shell Armor,
+# Super Luck, Sniper, Anger Point), the accuracy ones (Compound Eyes, No Guard,
+# Victory Star, Wonder Skin), the stage ones (Clear Body, White Smoke, Hyper
+# Cutter, Keen Eye, Big Pecks, Contrary, Simple, Unaware, Defiant), Moxie,
+# Justified, Rattled, Weak Armor, Rough Skin, Iron Barbs, Sturdy, Damp,
+# Prankster, Stall, Serene Grace and Shield Dust. Inert, each waiting on a
+# system the turn engine has not got: everything needing weather, a status
+# condition, a held item, healing, a switch-in hook, a turn counter or an ally.
+# AbilityTable.INERT is that list and it is meant to shorten.
+#
+# Two things a battle got right for the first time with it: a monster now fights
+# with ITS OWN ability rather than its species' first (the personality value
+# picks the second slot, the Dream World bit the third), and BattleMonBlock's
+# abilityId on the wire is that same answer, so a battle and the import legality
+# check no longer disagree about what a monster has.
+#
+# THE MACHINES CROSSED THE SAME DAY, on both halves at once.
+#
+# Where Gen 5 keeps the table was the blocker and it is not on the items: Hone
+# Claws, 468, appears nowhere as a u16 in Black's whole item archive. It is one
+# table of 101 move ids in the ARM9, at 0x09AAA0, and it is the ONLY run of 101
+# consecutive distinct valid move ids in the 682 KB image, which is how
+# gen5_tables.machine_moves finds it rather than trusting an offset. Its layout
+# explains itself: TM01..TM92, then HM01..HM06, then TM93..TM95, this game's
+# own item-id block with two HMs dropped and three TMs put in the gap.
+#
+# THE PERSONAL ENTRY'S BIT ORDER IS A DIFFERENT ORDER, and reading the table's
+# order into it is the mistake this nearly made: bits 0..94 are TM01..TM95 and
+# bits 95..100 are HM01..HM06, so a machine's bit is its NUMBER. The bit columns
+# said so, not an assumption, with the table's order the six HMs agreed with
+# this game's own columns on 43% to 75% of the shared species against 96% for
+# the TMs, and with the right order the same 75 columns come out at 99.79% mean,
+# 59 of them perfect and none below 95%. What is left disagreeing is Gen 5
+# changing its mind (Light Screen 95.9%, Safeguard 96.6%, Reflect 98.0%), and
+# portspecies.check_machines holds the floors that measurement justifies.
+#
+# Machines are paired by the MOVE they teach and never by number, because the
+# numbering is the one thing that does not cross: Gen 5's TM01 is Hone Claws
+# where this game's is Focus Punch. Both halves do that pairing from the same two
+# facts, tools/gen5_tables.py commits the move ids a ported species can be
+# taught, and tools/portspecies.py writes this game's bitfield, and the two
+# were checked against each other over all 156 species with zero disagreements.
+#
+# The server's half mattered more than it looks. GeneratedMoveSources held no row
+# at all for 494-649, and MoveSourceRegistry answering null is "nothing here
+# knows", but the level up learnsets for those species have been there since
+# the species port, so LocalScriptService already had a table to hold them to and
+# refused every move that was not on it. A ported species could not legally be
+# taught a machine move, and the report saying it had been was written down as a
+# cheat. 155 of the 156 have a machine list now.
+#
+# WHAT IS NOT CARRIED, and is not a gap: 25 of this game's 100 machines teach a
+# move Gen 5 has no machine for (Focus Punch, Water Pulse, Bullet Seed, Giga
+# Drain, Iron Tail, Roost, Dragon Pulse, Stealth Rock, Dark Pulse and 16 more).
+# Those bits are zero. Whether Excadrill could be taught a Stealth Rock TM is not
+# a fact sitting in an image nobody read, Gen 5 has no such machine and Gen 4
+# has no such species, so no cartridge this project reads states it. Writing zero
+# is the same refusal-rather-than-guess the rest of these tables make, and the
+# question is closed rather than open. Egg moves and tutors are a different
+# absence: Black has no tutors at all, which is the true answer, and its egg move
+# archive has not been read, which is the same silence as before rather than a
+# claim that a ported species hatches knowing nothing.
+species extra 494-649   Black's, from mmo/tools/gen5_tables.py; the client names and draws them once a cartridge is imported, battle sprite included, and since 2026-08-30 every species' battle sprite is Black's looping one, baked to eight frames a face (mmo/ASSETS.md)
+moves    extra  468-559   Black's, from mmo/tools/gen5_tables.py; the client names and serves them once a cartridge is imported (tools/portmoves.py): table, name, description, a borrowed animation (mmo/MOVE_ANIMS), and HIT or Splash's nothing for an effect the engine does not have

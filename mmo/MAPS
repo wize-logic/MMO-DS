@@ -16,545 +16,593 @@
 # BGM is the source cartridge's own sequence NAME, which is what
 # tools/portmusic.py takes; the number it lands on is the porter's.
 #
-# Rows: hg <name> <header id> <area bank> <matrix> <events> <kind> <bgm>
+# REGION is the header's own regionNo. `portmap.py --region johto`
+# ports every row with that word, which is what makes a region a
+# selection rather than a list of names somebody typed out.
+#
+# LABEL is the place name the banner draws, from the header's map
+# section. It runs to the end of the line and may contain spaces.
+#
+# SCRIPTS and MSG are the members a map's field scripts and its own
+# text live in. tools/portscript.py folds the first out of the
+# cartridge and the porter carries the second whole; -1 is a map
+# whose header names neither.
+#
+# ENC is the map's own entry in the source game's encounter data
+# (`files/fielddata/encountdata/gs_enc_data.json`, which is committed
+# there as text), or `-` for the 405 maps whose header says ENCDATA_NA
+# and where nothing is met. A ported map's encounters are the
+# SERVER's: the client's own header keeps 0xFFFF, because the engine
+# rolling its own would be a second opinion about what a step met.
+#
+# BG is the header's own battle background, by the name the
+# cartridge's decompilation gives it. The two games number the
+# shared set identically, plain, water, city, forest, mountain,
+# snow, three rooms, three caves, five Elite Four chambers, so
+# tools/portmap.py carries it by name and a fight on a ported route
+# opens on the field the source drew, not on one guessed from the
+# map's kind.
+#
+# HDR is the member of the map's own arrival-script table, the one
+# the header names as scriptHeaderBank: which of the map's scripts
+# runs on entry, and the frame table behind it. The porter reads the
+# entry off the cartridge and carries it only when the fold left
+# nothing in it but the hour and the flags it sets (Routes 34, 35
+# and 39 hide and show people by the clock); -1 is a map with none.
+#
+# ICON is the header's own areaIcon: which of the source game's nine
+# place-name signs (its gs_areawindow archive) the banner is drawn
+# on when the player arrives. tools/portmap.py appends those nine
+# after this game's own and gives the ported header the one it names,
+# so a Johto town is announced on Johto's sign and not on Sinnoh's.
+#
+# CAM is the header's own cameraType: which of the source game's
+# seventeen camera templates (its overlay 1 table, ov01_02206478)
+# the map is viewed through. tools/portmap.py appends those
+# seventeen after this game's own and names each ported header's,
+# so a Johto gym is looked at the way its own game looked at it.
+#
+# Rows: hg <name> <header id> <area bank> <matrix> <events> <scripts>
+#          <msg> <enc> <kind> <region> <bgm> <bg> <hdr> <icon> <cam>
+#          <label...>
 
-hg  everywhere                                0    0    0    0  route          SEQ_DUMMY
-hg  nothing                                   1    0    0    0  invalid        SEQ_DUMMY
-hg  union                                     2   26   74    1  interior       SEQ_GS_POKESEN
-hg  underground                               3    0    0    0  underground    SEQ_GS_D_CHIKATSUURO
-hg  wifi_single_battle_area                   4   26   75    2  interior       SEQ_GS_POKESEN
-hg  wifi_multi_battle_area                    5   26   76    3  interior       SEQ_GS_POKESEN
-hg  bellchime_tower                           6   88   67    4  city_town      SEQ_SILENCE_FIELD
-hg  burned_tower_1f                           7   78   25    5  cave           SEQ_GS_TO_YAKETA
-hg  ruins_of_alph_unused                      8    3    0    0  route          SEQ_GS_D_UNKNOWN_ISEKI
-hg  route_1                                   9   18    0    6  route          SEQ_GS_R_17_01
-hg  route_2                                  10   10    0    7  route          SEQ_GS_R_9_03
-hg  route_3                                  11   17    0    8  route          SEQ_GS_R_16_03
-hg  route_4                                  12   13    0    9  route          SEQ_GS_R_12_03
-hg  route_5                                  13   13    0   10  route          SEQ_GS_R_12_03
-hg  route_6                                  14   11    0   11  route          SEQ_GS_R_10_03
-hg  route_7                                  15   15    0   12  route          SEQ_GS_R_14_03
-hg  route_8                                  16   14    0   13  route          SEQ_GS_R_13_03
-hg  route_9                                  17   13    0   14  route          SEQ_GS_R_12_03
-hg  route_10                                 18   13    0   15  route          SEQ_GS_R_12_03
-hg  route_11                                 19   11    0   16  route          SEQ_GS_R_10_11
-hg  route_12                                 20   14    0   17  route          SEQ_GS_R_13_11
-hg  route_13                                 21   14    0   18  route          SEQ_GS_R_13_11
-hg  route_14                                 22   14    0   19  route          SEQ_GS_R_13_11
-hg  route_15                                 23   14    0   20  route          SEQ_GS_R_13_11
-hg  route_16                                 24   16    0   21  route          SEQ_GS_R_15_03
-hg  route_17                                 25   16    0   22  route          SEQ_PL_BICYCLE
-hg  route_18                                 26   16    0   23  route          SEQ_GS_R_15_03
-hg  route_22                                 27   10    0   24  route          SEQ_GS_R_9_03
-hg  route_24                                 28   13    0   25  route          SEQ_GS_R_12_24
-hg  route_25                                 29   13    0   26  route          SEQ_GS_R_12_24
-hg  route_26                                 30    2    0   27  route          SEQ_GS_R_1_26
-hg  route_27                                 31    2    0   28  route          SEQ_GS_R_1_26
-hg  route_28                                 32   10    0   29  route          SEQ_GS_CHAMPROAD
-hg  route_29                                 33    2    0   30  route          SEQ_GS_R_1_29
-hg  route_30                                 34    2    0   31  route          SEQ_GS_R_1_30
-hg  route_31                                 35    2    0   32  route          SEQ_GS_R_1_30
-hg  route_32                                 36    3    0   33  route          SEQ_GS_R_2_30
-hg  route_33                                 37    4    0   34  route          SEQ_GS_R_3_30
-hg  route_34                                 38    5    0   35  route          SEQ_GS_R_4_34
-hg  route_35                                 39    6    0   36  route          SEQ_GS_R_5_34
-hg  route_36                                 40    6    0   37  route          SEQ_GS_R_5_34
-hg  route_37                                 41    6    0   38  route          SEQ_GS_R_5_34
-hg  route_38                                 42    7    0   39  route          SEQ_GS_R_6_38
-hg  route_39                                 43    7    0   40  route          SEQ_GS_R_6_38
-hg  route_42                                 44    8    0   41  route          SEQ_GS_R_7_42
-hg  route_43                                 45    8    0   42  route          SEQ_GS_R_7_42
-hg  route_44                                 46    8    0   43  route          SEQ_GS_R_7_42
-hg  route_45                                 47    9    0   44  route          SEQ_GS_R_8_34
-hg  route_46                                 48    9    0   45  route          SEQ_GS_R_8_34
-hg  pallet                                   49   18    0   46  city_town      SEQ_GS_T_MASARA
-hg  viridian                                 50   10    0   47  city_town      SEQ_GS_C_TOKIWA
-hg  pewter                                   51   17    0   48  city_town      SEQ_GS_C_NIBI
-hg  cerulean                                 52   13    0   49  city_town      SEQ_GS_C_HANADA
-hg  lavender                                 53   14    0   50  city_town      SEQ_GS_T_CHION
-hg  vermilion                                54   11    0   51  city_town      SEQ_GS_C_KUCHIBA
-hg  celadon                                  55   15    0   52  city_town      SEQ_GS_C_TAMAMUSHI
-hg  fuchsia                                  56   16    0   53  city_town      SEQ_GS_C_SEKICHIKU
-hg  cinnabar_island                          57   18    0   54  city_town      SEQ_GS_T_GUREN
-hg  indigo_plateau                           58   10    0   55  route          SEQ_GS_CHAMPROAD
-hg  saffron                                  59   12    0   56  city_town      SEQ_GS_C_YAMABUKI
-hg  new_bark                                 60    2    0   57  city_town      SEQ_GS_T_WAKABA
-hg  new_bark_elms_lab_1f                     61   25  100   58  interior       SEQ_GS_UTSUGI_RABO
-hg  new_bark_elms_lab_2f                     62   25  101   59  interior       SEQ_GS_T_WAKABA
-hg  new_bark_player_house_1f                 63   25   71   60  interior       SEQ_GS_T_WAKABA
-hg  new_bark_player_house_2f                 64   25   72   61  interior       SEQ_GS_T_WAKABA
-hg  new_bark_southwest_house                 65   25   66   62  interior       SEQ_GS_T_WAKABA
-hg  new_bark_rival_house_1f                  66   25   71   63  interior       SEQ_GS_T_WAKABA
-hg  cherrygrove                              67    2    0   64  city_town      SEQ_GS_C_YOSHINO
-hg  cherrygrove_pokemart                     68   27  104   65  interior       SEQ_GS_FS
-hg  cherrygrove_pokecenter_1f                69   26   73   66  interior       SEQ_GS_POKESEN
-hg  cherrygrove_southwest_house              70   25   97   67  interior       SEQ_GS_C_YOSHINO
-hg  cherrygrove_guide_gent_house             71   25   96   68  interior       SEQ_GS_C_YOSHINO
-hg  cherrygrove_southeast_house              72   25   97   69  interior       SEQ_GS_C_YOSHINO
-hg  violet                                   73    3    0   70  city_town      SEQ_GS_C_KIKYOU
-hg  azalea                                   74    4    0   71  city_town      SEQ_GS_T_HIWADA
-hg  cianwood                                 75    7    0   72  city_town      SEQ_GS_C_TANBA
-hg  goldenrod                                76    5    0   73  city_town      SEQ_GS_C_KOGANE
-hg  olivine                                  77    7    0   74  city_town      SEQ_GS_C_ASAGI
-hg  ecruteak                                 78    6    0   75  city_town      SEQ_GS_C_ENJU
-hg  ecruteak_pokemart                        79   27  104   76  interior       SEQ_GS_FS
-hg  ecruteak_gym                             80   31   90   77  interior       SEQ_GS_GYM
-hg  ecruteak_pokecenter_1f                   81   26   73   78  interior       SEQ_GS_POKESEN
-hg  ecruteak_unused_house                    82   25   66   79  interior       SEQ_GS_C_ENJU
-hg  ecruteak_bell_tower_barrier_station      83   61   68   80  interior       SEQ_GS_C_ENJU
-hg  ecruteak_dowsing_machine_house           84   25   66   81  interior       SEQ_GS_C_ENJU
-hg  ecruteak_southwest_house                 85   25   66   82  interior       SEQ_GS_C_ENJU
-hg  ecruteak_dance_theater                   86   61  126   83  interior       SEQ_GS_KABURENJOU
-hg  mahogany                                 87    8    0   84  city_town      SEQ_GS_T_CHOUJI
-hg  lake_of_rage                             88    8    0   85  route          SEQ_GS_R_7_42
-hg  blackthorn                               89    9    0   86  city_town      SEQ_GS_C_FUSUBE
-hg  mount_silver                             90   10    0   87  city_town      SEQ_GS_CHAMPROAD
-hg  route_19                                 91   18    0   88  route          SEQ_GS_R_15_03
-hg  route_20                                 92   18    0   89  route          SEQ_GS_R_15_03
-hg  route_21                                 93   18    0   90  route          SEQ_GS_R_17_03
-hg  route_40                                 94    7    0   91  route          SEQ_GS_R_6_34
-hg  route_41                                 95    7    0   92  route          SEQ_GS_R_6_34
-hg  national_park                            96   71   27   93  city_town      SEQ_GS_D_KOUEN
-hg  route_31_violet_gatehouse                97   63   70   94  interior       SEQ_GS_R_1_30
-hg  route_32_ruins_of_alph_gatehouse         98   63   70   95  interior       SEQ_GS_R_2_30
-hg  union_cave_1f                            99   87   42   96  cave           SEQ_GS_D_CHIKATSUURO
-hg  azalea_ilex_forest_gatehouse            100   63   70   97  interior       SEQ_GS_R_5_34
-hg  route_35_goldenrod_gatehouse            101   63   69   98  interior       SEQ_GS_R_5_34
-hg  route_35_national_park_pokeathalon_gatehouse  102   63  196   99  interior       SEQ_GS_R_5_34
-hg  route_36_ruins_of_alph_gatehouse        103   63   69  100  interior       SEQ_GS_R_5_34
-hg  route_36_national_park_gatehouse        104   63   70  101  interior       SEQ_GS_R_5_34
-hg  ecruteak_unused_gatehouse               105   63   70  102  interior       SEQ_GS_R_5_34
-hg  diglett_cave                            106   82    2  103  cave           SEQ_GS_D_IWAYAMA
-hg  mount_moon                              107   70    3  104  cave           SEQ_GS_D_CHIKATSUURO
-hg  rock_tunnel_1f                          108   83    6  105  cave           SEQ_GS_D_IWAYAMA
-hg  pal_park                                109   75    8  106  route          SEQ_GS_SAFARI_FIELD
-hg  sprout_tower_1f                         110   77   12  107  cave           SEQ_GS_TO_MADATSUBOMI1
-hg  bell_tower_1f                           111   77   15  108  cave           SEQ_GS_TO_SUZU
-hg  goldenrod_radio_tower_1f                112   36   28  109  interior       SEQ_GS_C_KOGANE
-hg  ruins_of_alph                           113   20    0  110  route          SEQ_GS_D_CHIKATSUURO
-hg  slowpoke_well_entrance                  114   84   45  111  cave           SEQ_GS_D_CHIKATSUURO
-hg  olivine_lighthouse_1f                   115   47   47  112  cave           SEQ_GS_TO_TOUDAI
-hg  mahogany_souvenir_shop                  116   27  138  113  interior       SEQ_GS_T_CHOUJI
-hg  ilex_forest                             117   74   56  114  cave           SEQ_GS_D_CHIKATSUURO
-hg  goldenrod_tunnel_1f                     118   62   57  115  interior       SEQ_GS_C_KOGANE
-hg  mount_mortar_1f_entrance                119   79   62  116  cave           SEQ_GS_D_CHIKATSUURO
-hg  ice_path_1f                             120   76  132  117  cave           SEQ_GS_D_KOORINONUKE
-hg  whirl_islands_1f                        121   85  141  118  cave           SEQ_GS_D_CHIKATSUURO
-hg  mount_silver_cave_1f                    122   80  265  119  cave           SEQ_GS_TO_TOUDAI
-hg  dark_cave_route_45_side                 123   87   98  120  cave           SEQ_GS_D_KOORINONUKE
-hg  victory_road_1f                         124   70  161  121  cave           SEQ_GS_D_CHAMPROAD
-hg  dragons_den_entrance                    125   86  145  122  cave           SEQ_GS_RYUUNOANA
-hg  tohjo_falls                             126   70  151  123  cave           SEQ_GS_D_CHIKATSUURO
-hg  route_30_apricorn_house                 127   25   66  124  interior       SEQ_GS_R_1_30
-hg  ecruteak_pokecenter_unused_1            128   26   74  125  interior       SEQ_GS_POKESEN
-hg  ecruteak_pokecenter_unused_2            129   26   75  126  interior       SEQ_GS_POKESEN
-hg  ecruteak_pokecenter_unused_3            130   26   76    0  interior       SEQ_GS_POKESEN
-hg  ecruteak_pokecenter_b1f                 131   26   77  127  interior       SEQ_GS_POKESEN
-hg  route_42_ecruteak_gatehouse             132   63   70  128  interior       SEQ_GS_R_7_42
-hg  mahogany_east_house                     133   25   95  129  interior       SEQ_GS_T_CHOUJI
-hg  route_29_route_46_gatehouse             134   63   69  130  interior       SEQ_GS_R_1_29
-hg  violet_gym                              135   28   87  131  interior       SEQ_GS_GYM
-hg  azalea_gym_entrance                     136   29   88  132  interior       SEQ_GS_GYM
-hg  goldenrod_gym                           137   30   89  133  interior       SEQ_GS_GYM
-hg  olivine_gym                             138   32   91  134  interior       SEQ_GS_GYM
-hg  cianwood_gym                            139   33   92  135  interior       SEQ_GS_GYM
-hg  mahogany_gym_leader_room                140   34  229  136  interior       SEQ_GS_GYM
-hg  blackthorn_gym                          141   35   94  137  interior       SEQ_GS_GYM
-hg  route_43_mahogany_gatehouse             142   63   69  138  interior       SEQ_GS_R_7_42
-hg  route_30_mr_pokemon_house               143   61  103  139  interior       SEQ_GS_R_1_30
-hg  cherrygrove_pokecenter_b1f              144   26   77  140  interior       SEQ_GS_POKESEN
-hg  cerulean_cave_1f                        145   73   78  141  cave           SEQ_GS_D_IWAYAMA
-hg  seafoam_islands_1f                      146   70   81  142  cave           SEQ_GS_D_KOORINONUKE
-hg  viridian_forest                         147  103   86  143  cave           SEQ_GS_D_TOKIWANOMORI3
-hg  route_9_unused                          148   25   66    0  interior       SEQ_GS_C_NIBI
-hg  violet_route_36_gatehouse               149   63   70  144  interior       SEQ_GS_R_5_34
-hg  national_park_unused_gatehouse          150   63   69  145  interior       SEQ_GS_PT_ENTR
-hg  route_47                                151   19    0  146  route          SEQ_GS_SAFARI_ROAD
-hg  route_48                                152   19    0  147  route          SEQ_GS_SAFARI_ROAD
-hg  union_cave_b1f                          153   87   43  148  cave           SEQ_GS_D_CHIKATSUURO
-hg  union_cave_b2f                          154   87   44  149  cave           SEQ_GS_D_CHIKATSUURO
-hg  sprout_tower_2f                         155   77   13  150  cave           SEQ_GS_TO_MADATSUBOMI1
-hg  sprout_tower_3f                         156   77   14  151  cave           SEQ_GS_TO_MADATSUBOMI1
-hg  violet_pokemart                         157   27  104  152  interior       SEQ_GS_FS
-hg  violet_pokecenter_1f                    158   26   73  153  interior       SEQ_GS_POKESEN
-hg  violet_pokemon_school                   159   61  102  154  interior       SEQ_GS_C_KIKYOU
-hg  violet_northwest_house                  160   25   95  155  interior       SEQ_GS_C_KIKYOU
-hg  violet_unused                           161   25   66    0  interior       SEQ_GS_C_YOSHINO
-hg  violet_bellsprout_onyx_trade_house      162   25   95  156  interior       SEQ_GS_C_KIKYOU
-hg  azalea_charcoal_kiln                    163   61  125  157  interior       SEQ_GS_T_HIWADA
-hg  azalea_kurt_house                       164   61  127  158  interior       SEQ_GS_T_HIWADA
-hg  azalea_pokemart                         165   27  104  159  interior       SEQ_GS_FS
-hg  azalea_pokecenter_1f                    166   26   73  160  interior       SEQ_GS_POKESEN
-hg  violet_pokecenter_b1f                   167   26   77  161  interior       SEQ_GS_POKESEN
-hg  azalea_pokecenter_b1f                   168   26   77  162  interior       SEQ_GS_POKESEN
-hg  route_32_pokecenter_1f                  169   26   73  163  interior       SEQ_GS_POKESEN
-hg  route_32_pokecenter_b1f                 170   26   77  164  interior       SEQ_GS_POKESEN
-hg  route_34_ilex_forest_gatehouse          171   63   69  165  interior       SEQ_GS_R_4_34
-hg  route_38_ecruteak_gatehouse             172   63   70  166  interior       SEQ_GS_R_6_38
-hg  safari_zone_entrance_interior           173   39  227  167  interior       SEQ_GS_SAFARI_HOUSE
-hg  safari_zone_gate                        174   19    0  168  route          SEQ_GS_SAFARI_HOUSE
-hg  ecruteak_unused_1                       175   25   66    0  interior       SEQ_GS_C_ENJU
-hg  dark_cave_route_31_side                 176   87   99  169  cave           SEQ_GS_D_KOORINONUKE
-hg  slowpoke_well_b1f                       177   84   46  170  cave           SEQ_GS_D_CHIKATSUURO
-hg  victory_road_2f                         178   70  162  171  cave           SEQ_GS_D_CHAMPROAD
-hg  victory_road_3f                         179   70  163  172  cave           SEQ_GS_D_CHAMPROAD
-hg  azalea_gym                              180   29  105  173  interior       SEQ_GS_GYM
-hg  slowpoke_well_b2f                       181   84  106  174  cave           SEQ_GS_D_CHIKATSUURO
-hg  goldenrod_bike_shop                     182   27  107  175  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_game_corner_jp                183   27  109  176  interior       SEQ_GS_GAME
-hg  goldenrod_flower_shop                   184   27  108  177  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_pokecenter_1f                 185   26   73  178  interior       SEQ_GS_POKESEN
-hg  goldenrod_radio_tower_2f                186   36   29  179  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_radio_tower_3f                187   36   30  180  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_radio_tower_4f                188   36   31  181  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_radio_tower_5f                189   36   32  182  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_radio_tower_observation_deck  190   36  110  183  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_department_store_1f           191   62  113  184  interior       SEQ_GS_FS
-hg  goldenrod_department_store_2f           192   62  114  185  interior       SEQ_GS_FS
-hg  goldenrod_department_store_3f           193   62  115  186  interior       SEQ_GS_FS
-hg  goldenrod_department_store_4f           194   62  116  187  interior       SEQ_GS_FS
-hg  goldenrod_department_store_5f           195   62  117  188  interior       SEQ_GS_FS
-hg  goldenrod_department_store_6f           196   62  118  189  interior       SEQ_GS_FS
-hg  goldenrod_magnet_train_station_1f       197   48  111  190  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_magnet_train_station_2f       198   48  112  191  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_tunnel_b1f                    199   62   58  192  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_department_store_basement     200   62   59  193  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_tunnel_b2f                    201   62   60  194  interior       SEQ_GS_D_CHIKATSUURO
-hg  goldenrod_tunnel_warehouse              202   62   61  195  interior       SEQ_GS_D_CHIKATSUURO
-hg  goldenrod_bills_house                   203   25   97  196  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_friendship_checker_house      204   25   96  197  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_northeast_house               205   25   96  198  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_name_rater_house              206   42  140  199  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_global_terminal_1f            207   45  237  200  interior       SEQ_GS_WIFITOWER
-hg  goldenrod_unused_1                      208   63  119    0  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_unused_2                      209   63  120    0  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_unused_3                      210   63  121    0  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_unused_4                      211   63  122    0  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_unused_5                      212   63  123    0  interior       SEQ_GS_C_KOGANE
-hg  goldenrod_unused_6                      213   63  124    0  interior       SEQ_GS_C_KOGANE
-hg  route_39_moomoo_farm_house              214   42  128  201  interior       SEQ_GS_R_6_38
-hg  route_39_moomoo_farm_stable             215   42  129  202  interior       SEQ_GS_R_6_38
-hg  ecruteak_bell_tower_barrier_station_corridor  216   61  130  203  interior       SEQ_GS_C_ENJU
-hg  burned_tower_b1f                        217   78   26  204  cave           SEQ_GS_TO_YAKETA
-hg  ruins_of_alph_unused_2                  218    2    0    0  route          SEQ_GS_D_UNKNOWN_ISEKI
-hg  goldenrod_pokecenter_b1f                219   26   77  205  interior       SEQ_GS_POKESEN
-hg  olivine_lighthouse_2f                   220   47   48  206  cave           SEQ_GS_TO_TOUDAI
-hg  olivine_lighthouse_exterior             221   74   49  207  cave           SEQ_GS_TO_TOUDAI
-hg  olivine_lighthouse_3f                   222   47   50  208  cave           SEQ_GS_TO_TOUDAI
-hg  olivine_lighthouse_4f                   223   47   51  209  cave           SEQ_GS_TO_TOUDAI
-hg  olivine_lighthouse_5f                   224   47   52  210  cave           SEQ_GS_TO_TOUDAI
-hg  olivine_lighthouse_light_room           225   89  131  211  cave           SEQ_GS_TO_TOUDAI
-hg  olivine_pokecenter_1f                   226   26   73  212  interior       SEQ_GS_POKESEN
-hg  olivine_pokemart                        227   27  104  213  interior       SEQ_GS_FS
-hg  olivine_north_house                     228   25   97  214  interior       SEQ_GS_C_ASAGI
-hg  olivine_northeast_house                 229   25   97  215  interior       SEQ_GS_C_ASAGI
-hg  olivine_northwest_house                 230   25   97  216  interior       SEQ_GS_C_ASAGI
-hg  olivine_cafe                            231   42  136  217  interior       SEQ_GS_C_ASAGI
-hg  cianwood_kirks_house                    232   25   95  218  interior       SEQ_GS_C_TANBA
-hg  cianwood_pharmacy                       233   27  139  219  interior       SEQ_GS_C_TANBA
-hg  cianwood_camerons_house                 234   25   97  220  interior       SEQ_GS_C_TANBA
-hg  cianwood_central_house                  235   25   95  221  interior       SEQ_GS_C_TANBA
-hg  cianwood_pokecenter_1f                  236   26   73  222  interior       SEQ_GS_POKESEN
-hg  ice_path_b1f                            237   76  133  223  cave           SEQ_GS_D_KOORINONUKE
-hg  ice_path_b2f                            238   76  134  224  cave           SEQ_GS_D_KOORINONUKE
-hg  ice_path_b3f                            239   76  135  225  cave           SEQ_GS_D_KOORINONUKE
-hg  ss_aqua_olivine_port_interior           240   63  137  226  interior       SEQ_GS_C_ASAGI
-hg  cianwood_pokecenter_b1f                 241   26   77  227  interior       SEQ_GS_POKESEN
-hg  whirl_islands_b1f                       242   85  142  228  cave           SEQ_GS_D_CHIKATSUURO
-hg  whirl_islands_b2f                       243   85  143  229  cave           SEQ_GS_D_CHIKATSUURO
-hg  whirl_islands_b3f_lugia_cave            244   98  144  230  cave           SEQ_SILENCE_FIELD
-hg  route_43_gatehouse                      245   63   69  231  interior       SEQ_GS_R_7_42
-hg  mahogany_pokecenter_1f                  246   26   73  232  interior       SEQ_GS_POKESEN
-hg  team_rocket_headquarters_b1f            247   64   53  233  cave           SEQ_GS_D_AJITO
-hg  team_rocket_headquarters_b2f            248   64   54  234  cave           SEQ_GS_D_AJITO
-hg  team_rocket_headquarters_b3f            249   64   55  235  cave           SEQ_GS_D_AJITO
-hg  mount_mortar_1f_back                    250   79   63  236  cave           SEQ_GS_D_CHIKATSUURO
-hg  mount_mortar_2f                         251   79   64  237  cave           SEQ_GS_D_CHIKATSUURO
-hg  mount_mortar_b1f                        252   79   65  238  cave           SEQ_GS_D_CHIKATSUURO
-hg  dragons_den                             253   86  146  239  cave           SEQ_GS_RYUUNOANA
-hg  fight_area_unused_1                     254    2    0    0  city_town      SEQ_GS_BATTLETOWER
-hg  fight_area_unused_2                     255    2    0    0  interior       SEQ_GS_POKESEN
-hg  fight_area_unused_3                     256    2    0    0  interior       SEQ_GS_POKESEN
-hg  fight_area_unused_4                     257    2    0    0  interior       SEQ_GS_FS
-hg  fight_area_unused_5                     258    2    0    0  interior       SEQ_GS_BATTLETOWER
-hg  fight_area_unused_6                     259    2    0    0  interior       SEQ_GS_BATTLETOWER
-hg  fight_area_unused_7                     260    2    0    0  interior       SEQ_GS_BATTLETOWER
-hg  fight_area_unused_8                     261    2    0    0  interior       SEQ_GS_BATTLETOWER
-hg  fight_area_unused_9                     262    2    0    0  interior       SEQ_GS_POKESEN
-hg  battle_park_unused_1                    263    2    0    0  interior       SEQ_GS_BATTLETOWER
-hg  battle_park_unused_2                    264    2    0    0  interior       SEQ_GS_BATTLETOWER
-hg  battle_tower                            265   56  232  240  interior       SEQ_GS_BATTLETOWER2
-hg  battle_tower_elevator                   266   44  262  241  interior       SEQ_GS_BATTLETOWER2
-hg  battle_tower_unused_1                   267    2    0    0  interior       SEQ_GS_BATTLETOWER
-hg  battle_tower_unused_2                   268    2    0    0  interior       SEQ_GS_BATTLETOWER
-hg  battle_tower_unused_3                   269    2    0    0  interior       SEQ_GS_BATTLETOWER
-hg  battle_tower_unused_4                   270    2    0    0  interior       SEQ_GS_BATTLETOWER
-hg  battle_tower_partner_room               271   38  263  242  interior       SEQ_GS_BATTLETOWER
-hg  battle_frontier                         272   92  230  243  city_town      SEQ_GS_BATTLETOWER
-hg  battle_frontier_frontier_access_gatehouse  273   46  231  244  interior       SEQ_GS_BATTLETOWER
-hg  battle_frontier_battle_tower_unused     274   56  232  245  interior       SEQ_GS_BATTLETOWER2
-hg  battle_frontier_battle_factory          275   57  233  246  interior       SEQ_GS_BF_FACTORY
-hg  battle_frontier_battle_hall             276   58  234  247  interior       SEQ_GS_BF_STAGE
-hg  battle_frontier_battle_castle           277   59  235  248  interior       SEQ_GS_BF_CASTLE
-hg  battle_frontier_battle_arcade           278   60  236  249  interior       SEQ_GS_BF_ROULETTE
-hg  cliff_edge_gate                         279   70  152  250  cave           SEQ_GS_R_5_34
-hg  pokeathlon_dome                         280   90  153  251  city_town      SEQ_GS_R_5_34
-hg  pokeathlon_dome_interior_1f             281   37  154  252  interior       SEQ_GS_PT_ENTR
-hg  pokeathlon_dome_interior_2f             282   37  155  253  interior       SEQ_GS_PT_ENTR
-hg  pokeathlon_dome_interior_2f_entrance    283   37  156  254  interior       SEQ_GS_PT_ENTR
-hg  pokeathlon_dome_interior_b1f_solidarity_room  284   37  157  255  interior       SEQ_GS_PT_ENTR
-hg  pokeathlon_dome_interior_b1f_trust_room  285   37  158  256  interior       SEQ_GS_PT_ENTR
-hg  pokeathlon_dome_interior_b1f_potential_room  286   37  159  257  interior       SEQ_GS_PT_ENTR
-hg  pokeathlon_dome_interior_b1f_friendship_room  287   37  160  258  interior       SEQ_GS_PT_END_FIELD
-hg  dragons_den_shrine                      288   42  149  259  interior       SEQ_GS_RYUUNOANA
-hg  blackthorn_west_house                   289   25   95  260  interior       SEQ_GS_C_FUSUBE
-hg  blackthorn_east_house                   290   25   95  261  interior       SEQ_GS_C_FUSUBE
-hg  blackthorn_move_tutor_house             291   25   95  262  interior       SEQ_GS_C_FUSUBE
-hg  blackthorn_pokemart                     292   27  104  263  interior       SEQ_GS_FS
-hg  blackthorn_pokecenter_1f                293   26   73  264  interior       SEQ_GS_POKESEN
-hg  lake_of_rage_hidden_power_house         294   25   66  265  interior       SEQ_GS_R_7_42
-hg  lake_of_rage_fishing_guru_house         295   25   95  266  interior       SEQ_GS_R_7_42
-hg  route_26_north_house                    296   25   66  267  interior       SEQ_GS_R_1_26
-hg  route_26_week_siblings_house            297   42  147  268  interior       SEQ_GS_R_1_26
-hg  tohjo_falls_hidden_room                 298   70  164  269  cave           SEQ_GS_D_CHIKATSUURO
-hg  route_22_pokemon_league_reception_gate  299   63  150  270  interior       SEQ_GS_R_1_26
-hg  pokemon_league_entrance                 300   26  148  271  interior       SEQ_GS_CHAMPROAD
-hg  pokemon_league_will_room                301   41  165  272  interior       SEQ_GS_CHAMPROAD
-hg  pokemon_league_koga_room                302   41  166  273  interior       SEQ_GS_CHAMPROAD
-hg  pokemon_league_bruno_room               303   41  167  274  interior       SEQ_GS_CHAMPROAD
-hg  pokemon_league_karen_room               304   41  168  275  interior       SEQ_GS_CHAMPROAD
-hg  pokemon_league_lance_room               305   65  169  276  interior       SEQ_GS_CHAMPROAD
-hg  pokemon_league_hall_of_fame             306   65  170  277  interior       SEQ_GS_CHAMPROAD
-hg  ss_aqua_1f                              307   42  171  278  interior       SEQ_GS_KOUSOKUSEN
-hg  ss_aqua_captain_room                    308   42  172  279  interior       SEQ_GS_KOUSOKUSEN
-hg  ss_aqua_1f_southeast_rooms              309   42  173  280  interior       SEQ_GS_KOUSOKUSEN
-hg  ss_aqua_1f_southwest_rooms              310   42  174  281  interior       SEQ_GS_KOUSOKUSEN
-hg  ss_aqua_1f_northeast_rooms              311   42  175  282  interior       SEQ_GS_KOUSOKUSEN
-hg  ruins_of_alph_northeast_entrance_first_room  312   72   34  283  cave           SEQ_GS_D_CHIKATSUURO
-hg  ruins_of_alph_northeast_hidden_room     313   72   35  284  cave           SEQ_GS_D_CHIKATSUURO
-hg  ruins_of_alph_southeast_entrance_first_room  314   72   34  285  cave           SEQ_GS_D_CHIKATSUURO
-hg  ruins_of_alph_underground_hall          315  105   37  286  cave           SEQ_GS_D_UNKNOWN_ISEKI
-hg  ruins_of_alph_southwest_entrance_first_room  316   72   34  287  cave           SEQ_GS_D_CHIKATSUURO
-hg  ruins_of_alph_southwest_hidden_room     317   72   39  288  cave           SEQ_GS_D_CHIKATSUURO
-hg  ruins_of_alph_northwest_entrance_first_room  318   72   34  289  cave           SEQ_GS_D_CHIKATSUURO
-hg  ruins_of_alph_northwest_hidden_room     319   72   41  290  cave           SEQ_GS_D_CHIKATSUURO
-hg  ruins_of_alph_southeast_hidden_room     320   72  180  291  cave           SEQ_GS_D_CHIKATSUURO
-hg  ruins_of_alph_research_center           321   61  273  292  interior       SEQ_GS_D_CHIKATSUURO
-hg  route_27_house                          322   25   66  293  interior       SEQ_GS_R_1_26
-hg  ruins_of_alph_hall_entrance             323  105  181  294  cave           SEQ_GS_D_CHIKATSUURO
-hg  ruins_of_alph_northeast_entrance_second_room  324   72  182  295  cave           SEQ_GS_D_CHIKATSUURO
-hg  ruins_of_alph_southeast_entrance_second_room  325   72  182  296  cave           SEQ_GS_D_CHIKATSUURO
-hg  ruins_of_alph_northwest_entrance_second_room  326   72  182  297  cave           SEQ_GS_D_CHIKATSUURO
-hg  ruins_of_alph_southwest_entrance_second_room  327   72  182  298  cave           SEQ_GS_D_CHIKATSUURO
-hg  ss_aqua_1f_northwest_rooms              328   42  176  299  interior       SEQ_GS_KOUSOKUSEN
-hg  ss_aqua_b1f                             329   42  177  300  interior       SEQ_GS_KOUSOKUSEN
-hg  ss_aqua_olivine_port_exterior           330   94  178  301  city_town      SEQ_GS_C_ASAGI
-hg  route_34_daycare                        331   27  179  302  interior       SEQ_GS_R_4_34
-hg  bell_tower_2f                           332   77   16  303  cave           SEQ_GS_TO_SUZU
-hg  bell_tower_3f                           333   77   17  304  cave           SEQ_GS_TO_SUZU
-hg  bell_tower_4f                           334   77   18  305  cave           SEQ_GS_TO_SUZU
-hg  bell_tower_5f                           335   77   19  306  cave           SEQ_GS_TO_SUZU
-hg  bell_tower_6f                           336   77   20  307  cave           SEQ_GS_TO_SUZU
-hg  bell_tower_7f                           337   77   21  308  cave           SEQ_GS_TO_SUZU
-hg  bell_tower_8f                           338   77   22  309  cave           SEQ_GS_TO_SUZU
-hg  bell_tower_9f                           339   77   23  310  cave           SEQ_GS_TO_SUZU
-hg  bell_tower_roof                         340   91   24  311  cave           SEQ_SILENCE_FIELD
-hg  bell_tower_10f                          341   77  183  312  cave           SEQ_GS_TO_SUZU
-hg  cliff_cave                              342   70  184  313  cave           SEQ_GS_SAFARI_ROAD
-hg  safari_zone_01                          343   75  197    0  cave           SEQ_GS_R_6_34
-hg  safari_zone_02                          344   75  198    0  cave           SEQ_GS_R_6_34
-hg  safari_zone_03                          345   75  199    0  cave           SEQ_GS_R_6_34
-hg  safari_zone_04                          346   75  200    0  cave           SEQ_GS_R_6_34
-hg  safari_zone_05                          347   75  201    0  cave           SEQ_GS_R_6_34
-hg  safari_zone_06                          348   75  202    0  cave           SEQ_GS_R_6_34
-hg  safari_zone_07                          349   75  203    0  cave           SEQ_GS_R_6_34
-hg  safari_zone_08                          350   75  204    0  cave           SEQ_GS_R_6_34
-hg  safari_zone_09                          351   75  205    0  cave           SEQ_GS_R_6_34
-hg  safari_zone_10                          352   75  206    0  cave           SEQ_GS_R_6_34
-hg  safari_zone_11                          353   75  207    0  cave           SEQ_GS_R_6_34
-hg  safari_zone_12                          354   75  208    0  cave           SEQ_GS_R_6_34
-hg  safari_zone_13                          355   75  209    0  cave           SEQ_GS_R_6_34
-hg  safari_zone_14                          356   75  210    0  cave           SEQ_GS_R_6_34
-hg  safari_zone_entrance_exterior           357   75  212  314  route          SEQ_GS_SAFARI_FIELD
-hg  vermilion_pokecenter_1f                 358   26   73  315  interior       SEQ_GS_POKESEN
-hg  vermilion_pokecenter_b1f                359   26   77  316  interior       SEQ_GS_POKESEN
-hg  vermilion_pokemart                      360   27  104  317  interior       SEQ_GS_FS
-hg  vermilion_fishing_dude_house            361   25   95  318  interior       SEQ_GS_C_KUCHIBA
-hg  vermilion_pokemon_fan_club              362   40  185  319  interior       SEQ_GS_C_KUCHIBA
-hg  vermilion_central_house                 363   25   95  320  interior       SEQ_GS_C_KUCHIBA
-hg  vermilion_south_house                   364   25   95  321  interior       SEQ_GS_C_KUCHIBA
-hg  vermilion_gym                           365   49  255  322  interior       SEQ_GS_GYM
-hg  route_40_battle_frontier_gatehouse      366   63   69  323  interior       SEQ_GS_R_6_34
-hg  olivine_pokecenter_b1f                  367   26   77  324  interior       SEQ_GS_POKESEN
-hg  mahogany_pokecenter_b1f                 368   26   77  325  interior       SEQ_GS_POKESEN
-hg  blackthorn_pokecenter_b1f               369   26   77  326  interior       SEQ_GS_POKESEN
-hg  celadon_department_store_1f             370   39  215  327  interior       SEQ_GS_FS
-hg  celadon_department_store_2f             371   39  216  328  interior       SEQ_GS_FS
-hg  celadon_department_store_3f             372   39  217  329  interior       SEQ_GS_FS
-hg  celadon_department_store_4f             373   39  218  330  interior       SEQ_GS_FS
-hg  celadon_department_store_5f             374   39  219  331  interior       SEQ_GS_FS
-hg  celadon_department_store_roof           375   39  220  332  interior       SEQ_GS_FS
-hg  celadon_condominiums_1f                 376   39  221  333  interior       SEQ_GS_C_TAMAMUSHI
-hg  celadon_condominiums_2f                 377   39  222  334  interior       SEQ_GS_C_TAMAMUSHI
-hg  celadon_condominiums_3f                 378   39  223  335  interior       SEQ_GS_C_TAMAMUSHI
-hg  celadon_condominiums_roof               379   95  224  336  city_town      SEQ_GS_C_TAMAMUSHI
-hg  celadon_condominiums_roof_room          380   40  225  337  interior       SEQ_GS_C_TAMAMUSHI
-hg  celadon_game_corner_jp                  381   40  213  338  interior       SEQ_GS_GAME
-hg  celadon_prize_corner                    382   40  214  339  interior       SEQ_GS_GAME
-hg  celadon_restaurant                      383   40  226  340  interior       SEQ_GS_C_TAMAMUSHI
-hg  new_bark_rival_house_2f                 384   25   72  341  interior       SEQ_GS_T_WAKABA
-hg  cianwood_north_house                    385   25   95  342  interior       SEQ_GS_C_TANBA
-hg  ss_aqua_vermilion_port_interior         386   39  186  343  interior       SEQ_GS_C_KUCHIBA
-hg  ss_aqua_vermilion_port_exterior         387   94  211  344  city_town      SEQ_GS_C_KUCHIBA
-hg  route_10_south                          388   14    0  345  route          SEQ_GS_R_13_03
-hg  route_6_saffron_gatehouse               389   63   69  346  interior       SEQ_GS_R_10_03
-hg  route_8_saffron_gatehouse               390   63   70  347  interior       SEQ_GS_R_13_03
-hg  route_5_saffron_gatehouse               391   63   69  348  interior       SEQ_GS_R_12_03
-hg  route_15_fuchsia_gatehouse              392   63   70  349  interior       SEQ_GS_R_13_11
-hg  celadon_pokecenter_1f                   393   26   73  350  interior       SEQ_GS_POKESEN
-hg  celadon_pokecenter_b1f                  394   26   77  351  interior       SEQ_GS_POKESEN
-hg  celadon_gym                             395   52  258  352  interior       SEQ_GS_GYM
-hg  mahogany_gym_room_2                     396   34  228  353  interior       SEQ_GS_GYM
-hg  mahogany_gym_room_1                     397   34   93  354  interior       SEQ_GS_GYM
-hg  saffron_fighting_dojo                   398   40  192  355  interior       SEQ_GS_C_YAMABUKI
-hg  saffron_mr_psychic_house                399   25   97  356  interior       SEQ_GS_C_YAMABUKI
-hg  saffron_magnet_train_station_1f         400   48  187  357  interior       SEQ_GS_C_YAMABUKI
-hg  saffron_magnet_train_station_2f         401   48  188  358  interior       SEQ_GS_C_YAMABUKI
-hg  saffron_silph_co_hq                     402   39  189  359  interior       SEQ_GS_C_YAMABUKI
-hg  saffron_silph_co_rotom_room             403   39  241  360  interior       SEQ_GS_C_YAMABUKI
-hg  saffron_copycat_house_1f                404   39  190  361  interior       SEQ_GS_C_YAMABUKI
-hg  saffron_copycat_house_2f                405   39  191  362  interior       SEQ_GS_C_YAMABUKI
-hg  saffron_unused                          406   40   66    0  interior       SEQ_GS_C_YAMABUKI
-hg  saffron_pokecenter_1f                   407   26   73  363  interior       SEQ_GS_POKESEN
-hg  saffron_pokecenter_2f                   408   26   77  364  interior       SEQ_GS_POKESEN
-hg  saffron_pokemart                        409   27  104  365  interior       SEQ_GS_FS
-hg  saffron_gym                             410   50  256  366  interior       SEQ_GS_GYM
-hg  battle_frontier_frontier_access         411   93  240  367  city_town      SEQ_GS_BATTLETOWER
-hg  goldenrod_global_terminal_2f            412   45  238  368  interior       SEQ_GS_WIFITOWER
-hg  goldenrod_global_terminal_3f            413   45  239  369  interior       SEQ_GS_WIFITOWER
-hg  route_2_east                            414   17    0  370  route          SEQ_GS_R_16_03
-hg  route_16_house                          415   25   66  371  interior       SEQ_GS_R_14_03
-hg  route_20_unused                         416   16    0    0  route          SEQ_GS_R_17_03
-hg  route_2_house                           417   25   66  372  interior       SEQ_GS_R_16_03
-hg  route_2_southeast_gatehouse             418   63   69  373  interior       SEQ_GS_R_16_03
-hg  route_2_viridian_forest_south_gatehouse  419   63   69  374  interior       SEQ_GS_R_16_03
-hg  route_2_viridian_forest_north_gatehouse  420   63   69  375  interior       SEQ_GS_R_16_03
-hg  route_16_gatehouse                      421   63   70  376  interior       SEQ_GS_R_14_03
-hg  route_16_east                           422   15    0  377  route          SEQ_GS_R_14_03
-hg  route_18_gatehouse                      423   63   70  378  interior       SEQ_GS_R_15_03
-hg  route_19_fuchsia_gatehouse              424   63   69  379  interior       SEQ_GS_R_15_03
-hg  route_19_route_12_gatehouse             425   63   70  380  interior       SEQ_GS_R_10_11
-hg  cerulean_pokemart                       426   27  104  381  interior       SEQ_GS_FS
-hg  cerulean_gym                            427   51  257  382  interior       SEQ_GS_GYM
-hg  cerulean_pokecenter_1f                  428   26   73  383  interior       SEQ_GS_POKESEN
-hg  cerulean_north_house                    429   25   96  384  interior       SEQ_GS_C_HANADA
-hg  cerulean_east_house                     430   25   97  385  interior       SEQ_GS_C_HANADA
-hg  cerulean_west_house                     431   25   96  386  interior       SEQ_GS_C_HANADA
-hg  cerulean_bike_maniac_house              432   27  274  387  interior       SEQ_GS_C_HANADA
-hg  lavender_pokemart                       433   27  104  388  interior       SEQ_GS_FS
-hg  lavender_pokecenter_1f                  434   26   73  389  interior       SEQ_GS_POKESEN
-hg  lavender_volunteer_pokemon_house        435   40  193  390  interior       SEQ_GS_T_CHION
-hg  lavender_southwest_house                436   25   96  391  interior       SEQ_GS_T_CHION
-hg  lavender_name_rater                     437   42  140  392  interior       SEQ_GS_T_CHION
-hg  lavender_house_of_memories              438   40  194  393  interior       SEQ_GS_T_CHION
-hg  lavender_radio_station                  439   39  195  394  interior       SEQ_GS_T_CHION
-hg  route_25_sea_cottage                    440   43  254  395  interior       SEQ_GS_R_12_24
-hg  goldenrod_department_store_elevator     441   44  262  396  interior       SEQ_GS_FS
-hg  celadon_department_store_elevator       442   44  262  397  interior       SEQ_GS_FS
-hg  celadon_condominiums_left_elevator      443   44  262  398  interior       SEQ_GS_C_TAMAMUSHI
-hg  celadon_condominiums_right_elevator     444   44  262  399  interior       SEQ_GS_C_TAMAMUSHI
-hg  saffron_silph_co_elevator               445   44  262  400  interior       SEQ_GS_C_YAMABUKI
-hg  olivine_lighthouse_elevator             446   44  262  401  interior       SEQ_GS_TO_TOUDAI
-hg  goldenrod_radio_tower_elevator          447   44  262  402  interior       SEQ_GS_C_KOGANE
-hg  mount_moon_square_entrance              448   70    4  403  cave           SEQ_GS_D_CHIKATSUURO
-hg  mount_moon_square                       449   97    5  404  route          SEQ_GS_D_CHIKATSUURO
-hg  cerulean_cave_2f                        450   73   79  405  cave           SEQ_GS_D_IWAYAMA
-hg  cerulean_cave_b1f                       451   73   80  406  cave           SEQ_GS_D_IWAYAMA
-hg  rock_tunnel_b1f                         452   83    7  407  cave           SEQ_GS_D_IWAYAMA
-hg  seafoam_islands_b1f                     453  104   82  408  cave           SEQ_GS_D_KOORINONUKE
-hg  seafoam_islands_b2f                     454  104   83  409  cave           SEQ_GS_D_KOORINONUKE
-hg  seafoam_islands_b3f                     455  104   84  410  cave           SEQ_GS_D_KOORINONUKE
-hg  seafoam_islands_b4f                     456  104   85  411  cave           SEQ_GS_D_KOORINONUKE
-hg  seafoam_islands_cinnabar_gym            457   81  264  412  cave           SEQ_GS_GYM
-hg  seafoam_islands_unused                  458   70  264    0  cave           SEQ_GS_D_KOORINONUKE
-hg  mount_silver_cave_upper_mountainside    459   96  266  413  cave           SEQ_GS_TO_TOUDAI
-hg  mount_silver_cave_lower_mountainside    460  102  267  414  cave           SEQ_GS_TO_TOUDAI
-hg  mount_silver_cave_expert_belt_chamber   461   80  268  415  cave           SEQ_GS_TO_TOUDAI
-hg  mount_silver_cave_moltres_chamber       462   80  269  416  cave           SEQ_GS_TO_TOUDAI
-hg  mount_silver_cave_2f                    463   80  270  417  cave           SEQ_GS_TO_TOUDAI
-hg  mount_silver_cave_3f                    464   80  271  418  cave           SEQ_GS_TO_TOUDAI
-hg  mount_silver_cave_summit                465   96  272  419  cave           SEQ_SILENCE_FIELD
-hg  route_10_pokecenter_1f                  466   26   73  420  interior       SEQ_GS_POKESEN
-hg  route_10_power_plant_repaired           467   44  251  421  interior       SEQ_GS_C_NIBI
-hg  route_5_unused                          468   44  252    0  interior       SEQ_GS_R_12_03
-hg  route_5_underground_path_gate           469   44  253  422  interior       SEQ_GS_D_IWAYAMA
-hg  route_6_underground_path_gate           470   44  253  423  interior       SEQ_GS_D_IWAYAMA
-hg  pewter_museum_of_science                471   44  242  424  interior       SEQ_GS_C_NIBI
-hg  pewter_northeast_house                  472   25   66  425  interior       SEQ_GS_C_NIBI
-hg  pewter_gym                              473   54  260  426  interior       SEQ_GS_GYM
-hg  pewter_pokemart                         474   27  104  427  interior       SEQ_GS_FS
-hg  pewter_pokecenter_1f                    475   26   73  428  interior       SEQ_GS_POKESEN
-hg  pewter_pokecenter_b1f                   476   26   77  429  interior       SEQ_GS_POKESEN
-hg  pewter_southwest_house                  477   25   66  430  interior       SEQ_GS_C_NIBI
-hg  fuchsia_pokemart                        478   27  104  431  interior       SEQ_GS_FS
-hg  fuchsia_pal_park_entrance               479   44  243  432  interior       SEQ_GS_C_SEKICHIKU
-hg  fuchsia_gym                             480   53  259  433  interior       SEQ_GS_GYM
-hg  fuchsia_southwest_house                 481   25   96  434  interior       SEQ_GS_C_SEKICHIKU
-hg  fuchsia_pokecenter_1f                   482   26   73  435  interior       SEQ_GS_POKESEN
-hg  fuchsia_safari_zone_warden_house        483   25   97  436  interior       SEQ_GS_C_SEKICHIKU
-hg  route_10_pokecenter_b1f                 484   26   77  437  interior       SEQ_GS_POKESEN
-hg  fuchsia_pokecenter_b1f                  485   26   77  438  interior       SEQ_GS_POKESEN
-hg  whirl_islands_b3f                       486   98  275  439  cave           SEQ_GS_D_CHIKATSUURO
-hg  national_park_bug_catching_contest      487   71   27  440  city_town      SEQ_GS_TAIKAI
-hg  national_park_unused                    488   71   27    0  city_town      SEQ_GS_D_KOUEN
-hg  route_10_power_plant_broken             489   44  276  441  interior       SEQ_GS_C_NIBI
-hg  ruins_of_alph_underground_hall_sinjoh_event  490  105   37  442  cave           SEQ_GS_D_UNKNOWN_ISEKI
-hg  ruins_of_alph_hall_entrance_sinjoh_event  491  105  181  443  cave           SEQ_GS_D_UNKNOWN_ISEKI
-hg  ruins_of_alph_underground_hall_sinjoh_event_2  492  105   37  444  cave           SEQ_GS_D_UNKNOWN_ISEKI
-hg  route_7_saffron_gatehouse               493   63   70  445  interior       SEQ_GS_R_14_03
-hg  lavender_pokecenter_b1f                 494   26   77  446  interior       SEQ_GS_POKESEN
-hg  cerulean_pokecenter_b1f                 495   26   77  447  interior       SEQ_GS_POKESEN
-hg  viridian_gym                            496   55  261  448  interior       SEQ_GS_GYM
-hg  viridian_northeast_house                497   25   96  449  interior       SEQ_GS_C_TOKIWA
-hg  viridian_trainer_house_1f               498   43  244  450  interior       SEQ_GS_C_TOKIWA
-hg  viridian_trainer_house_b1f              499   43  245  451  interior       SEQ_GS_C_TOKIWA
-hg  viridian_pokemart                       500   27  104  452  interior       SEQ_GS_FS
-hg  viridian_pokecenter_1f                  501   26   73  453  interior       SEQ_GS_POKESEN
-hg  viridian_pokecenter_b1f                 502   26   77  454  interior       SEQ_GS_POKESEN
-hg  pallet_town_reds_house_1f               503   43  246  455  interior       SEQ_GS_T_MASARA
-hg  pallet_town_blues_house_1f              504   43  248  456  interior       SEQ_GS_T_MASARA
-hg  pallet_town_oaks_lab                    505   43  250  457  interior       SEQ_GS_T_MASARA
-hg  pallet_town_reds_house_2f               506   43  247  458  interior       SEQ_GS_T_MASARA
-hg  pallet_town_blues_house_2f              507   43  249  459  interior       SEQ_GS_T_MASARA
-hg  cinnabar_island_pokecenter_1f           508   26   73  460  interior       SEQ_GS_POKESEN
-hg  cinnabar_island_pokecenter_b1f          509   26   77  461  interior       SEQ_GS_POKESEN
-hg  route_28_house                          510   25   66  462  interior       SEQ_GS_CHAMPROAD
-hg  route_3_pokecenter_1f                   511   26   73  463  interior       SEQ_GS_POKESEN
-hg  route_3_pokecenter_b1f                  512   26   77  464  interior       SEQ_GS_POKESEN
-hg  mount_moon_square_clefairy_event        513   97  281  465  route          SEQ_GS_OTSUKIMI_EVENT
-hg  mount_silver_pokecenter_1f              514   26   73  466  interior       SEQ_GS_POKESEN
-hg  mount_silver_pokecenter_b1f             515   26   77  467  interior       SEQ_GS_POKESEN
-hg  wifi_plaza_warp_room                    516   45  280  468  interior       SEQ_GS_POKESEN
-hg  route_5_house                           517   25   66  469  interior       SEQ_GS_R_12_03
-hg  mount_moon_square_shop                  518   27  139  470  interior       SEQ_GS_D_CHIKATSUURO
-hg  goldenrod_magnet_train_station_2f_empty  519   48  282  471  interior       SEQ_GS_C_KOGANE
-hg  saffron_magnet_train_station_2f_empty   520   48  283  472  interior       SEQ_GS_C_YAMABUKI
-hg  sinjoh_ruins_exterior                   521  100  277  473  route          SEQ_GS_D_SHINTO
-hg  sinjoh_ruins_mystri_stage               522  101  278  474  cave           SEQ_GS_D_SHINTO
-hg  sinjoh_ruins_cabin                      523   42  287  475  interior       SEQ_GS_D_SHINTO
-hg  embedded_tower_groudon_room             524   99  279  476  cave           SEQ_GS_D_CHIKATSUURO
-hg  embedded_tower_kyogre_room              525   99  284  477  cave           SEQ_GS_D_CHIKATSUURO
-hg  embedded_tower_rayquaza_room            526   99  285  478  cave           SEQ_GS_D_CHIKATSUURO
-hg  viridian_route_1_gatehouse              527   63   69  479  interior       SEQ_GS_C_TOKIWA
-hg  frontier_access_pokecenter_1f           528   26   73  480  interior       SEQ_GS_POKESEN
-hg  frontier_access_pokecenter_b1f          529   26   77  481  interior       SEQ_GS_POKESEN
-hg  frontier_access_pokemart                530   27  104  482  interior       SEQ_GS_FS
-hg  frontier_access_move_tutor_house        531   25   97  483  interior       SEQ_GS_BATTLETOWER
-hg  route_5_underground_path                532   44  252  484  interior       SEQ_GS_D_IWAYAMA
-hg  route_12_fishing_brother_house          533   25   66  485  interior       SEQ_GS_R_13_11
-hg  safari_zone_gate_pokecenter_1f          534   26   73  486  interior       SEQ_GS_POKESEN
-hg  safari_zone_gate_pokecenter_b1f         535   26   77  487  interior       SEQ_GS_POKESEN
-hg  goldenrod_game_corner                   536   66  286  488  interior       SEQ_GS_GAME
-hg  celadon_game_corner                     537   66  286  489  interior       SEQ_GS_GAME
-hg  unused                                  538    4    0    0  route          SEQ_GS_GAME
-hg  pokemon_league_entrance_wifi_room       539   26   77  490  interior       SEQ_GS_POKESEN
+hg  everywhere                                0    0    0    0  139    3 -          route          johto  SEQ_DUMMY                forest      399  6  0 Mystery Zone
+hg  nothing                                   1    0    0    0  139    3 -          invalid        johto  SEQ_DUMMY                forest      399  6  0 Mystery Zone
+hg  union                                     2   26   74    1  957  738 -          interior       johto  SEQ_GS_POKESEN           building_1  726  6  4 Mystery Zone
+hg  underground                               3    0    0    0  139    3 -          underground    johto  SEQ_GS_D_CHIKATSUURO     forest      399  6  0 Mystery Zone
+hg  wifi_single_battle_area                   4   26   75    2  137    3 -          interior       johto  SEQ_GS_POKESEN           building_1  397  6  4 Mystery Zone
+hg  wifi_multi_battle_area                    5   26   76    3  138    3 -          interior       johto  SEQ_GS_POKESEN           building_1  398  6  4 Mystery Zone
+hg  bellchime_tower                           6   88   67    4   22   59 -          city_town      johto  SEQ_SILENCE_FIELD        general     283  1  0 Bellchime Trail
+hg  burned_tower_1f                           7   78   25    5   23   60 D18R0101   cave           johto  SEQ_GS_TO_YAKETA         building_3  284  4  0 Burned Tower
+hg  ruins_of_alph_unused                      8    3    0    0  139    3 -          route          johto  SEQ_GS_D_UNKNOWN_ISEKI   general     399  3  0 Ruins of Alph
+hg  route_1                                   9   18    0    6  168  319 R01        route          kanto  SEQ_GS_R_17_01           general     413  3  0 Route 1
+hg  route_2                                  10   10    0    7  169  320 R02        route          kanto  SEQ_GS_R_9_03            general     414  3  0 Route 2
+hg  route_3                                  11   17    0    8  175  326 R03        route          kanto  SEQ_GS_R_16_03           general     420  3  0 Route 3
+hg  route_4                                  12   13    0    9  178  328 R04        route          kanto  SEQ_GS_R_12_03           general     423  3  0 Route 4
+hg  route_5                                  13   13    0   10  179  329 R05        route          kanto  SEQ_GS_R_12_03           general     424  3  0 Route 5
+hg  route_6                                  14   11    0   11  184  334 R06        route          kanto  SEQ_GS_R_10_03           general     429  3  0 Route 6
+hg  route_7                                  15   15    0   12  186  336 R07        route          kanto  SEQ_GS_R_14_03           general     431  3  0 Route 7
+hg  route_8                                  16   14    0   13  188  338 R08        route          kanto  SEQ_GS_R_13_03           general     433  3  0 Route 8
+hg  route_9                                  17   13    0   14  190  340 R09        route          kanto  SEQ_GS_R_12_03           general     435  3  0 Route 9
+hg  route_10                                 18   13    0   15  191  341 R10        route          kanto  SEQ_GS_R_12_03           general     436  3  0 Route 10
+hg  route_11                                 19   11    0   16  197  346 R11        route          kanto  SEQ_GS_R_10_11           general     442  3  0 Route 11
+hg  route_12                                 20   14    0   17  199  348 R12        route          kanto  SEQ_GS_R_13_11           general     444  3  0 Route 12
+hg  route_13                                 21   14    0   18  201  350 R13        route          kanto  SEQ_GS_R_13_11           general     446  3  0 Route 13
+hg  route_14                                 22   14    0   19  202  351 R14        route          kanto  SEQ_GS_R_13_11           general     447  3  0 Route 14
+hg  route_15                                 23   14    0   20  203  352 R15        route          kanto  SEQ_GS_R_13_11           general     448  3  0 Route 15
+hg  route_16                                 24   16    0   21  205  354 -          route          kanto  SEQ_GS_R_15_03           general     450  3  0 Route 16
+hg  route_17                                 25   16    0   22  209  357 R17        route          kanto  SEQ_PL_BICYCLE           city        454  3  0 Route 17
+hg  route_18                                 26   16    0   23  210  358 R18        route          kanto  SEQ_GS_R_15_03           general     455  3  0 Route 18
+hg  route_22                                 27   10    0   24  212  360 R22        route          kanto  SEQ_GS_R_9_03            general     457  3  0 Route 22
+hg  route_24                                 28   13    0   25  215  362 R24        route          kanto  SEQ_GS_R_12_24           general     460  3  0 Route 24
+hg  route_25                                 29   13    0   26  216  363 R25        route          kanto  SEQ_GS_R_12_24           general     461  3  0 Route 25
+hg  route_26                                 30    2    0   27  218  365 R26        route          kanto  SEQ_GS_R_1_26            general     463  3  0 Route 26
+hg  route_27                                 31    2    0   28  221  369 R27        route          kanto  SEQ_GS_R_1_26            general     466  3  0 Route 27
+hg  route_28                                 32   10    0   29  223  371 R28        route          kanto  SEQ_GS_CHAMPROAD         general     468  3  0 Route 28
+hg  route_29                                 33    2    0   30  225  373 R29        route          johto  SEQ_GS_R_1_29            general     470  3  0 Route 29
+hg  route_30                                 34    2    0   31  227  375 R30        route          johto  SEQ_GS_R_1_30            general     472  3  0 Route 30
+hg  route_31                                 35    2    0   32  230  378 R31        route          johto  SEQ_GS_R_1_30            general     475  3  0 Route 31
+hg  route_32                                 36    3    0   33  232  380 R32        route          johto  SEQ_GS_R_2_30            general     477  3  0 Route 32
+hg  route_33                                 37    4    0   34  236  383 R33        route          johto  SEQ_GS_R_3_30            general     481  3  0 Route 33
+hg  route_34                                 38    5    0   35  237  384 R34        route          johto  SEQ_GS_R_4_34            general     482  3  0 Route 34
+hg  route_35                                 39    6    0   36  240  387 R35        route          johto  SEQ_GS_R_5_34            general     485  3  0 Route 35
+hg  route_36                                 40    6    0   37  243  390 R36        route          johto  SEQ_GS_R_5_34            general     488  3  0 Route 36
+hg  route_37                                 41    6    0   38  246  393 R37        route          johto  SEQ_GS_R_5_34            general     491  3  0 Route 37
+hg  route_38                                 42    7    0   39  247  394 R38        route          johto  SEQ_GS_R_6_38            general     492  3  0 Route 38
+hg  route_39                                 43    7    0   40  249  396 R39        route          johto  SEQ_GS_R_6_38            general     494  3  0 Route 39
+hg  route_42                                 44    8    0   41  252  399 R42        route          johto  SEQ_GS_R_7_42            general     497  3  0 Route 42
+hg  route_43                                 45    8    0   42  254  401 R43        route          johto  SEQ_GS_R_7_42            general     499  3  0 Route 43
+hg  route_44                                 46    8    0   43  257  404 R44        route          johto  SEQ_GS_R_7_42            general     502  3  0 Route 44
+hg  route_45                                 47    9    0   44  258  405 R45        route          johto  SEQ_GS_R_8_34            general     503  3  0 Route 45
+hg  route_46                                 48    9    0   45  259  406 R46        route          johto  SEQ_GS_R_8_34            general     504  3  0 Route 46
+hg  pallet                                   49   18    0   46  735  446 T01        city_town      kanto  SEQ_GS_T_MASARA          general     508  2  0 Pallet Town
+hg  viridian                                 50   10    0   47  741  452 T02        city_town      kanto  SEQ_GS_C_TOKIWA          city        514  1  0 Viridian City
+hg  pewter                                   51   17    0   48  750  460 -          city_town      kanto  SEQ_GS_C_NIBI            city        523  1  0 Pewter City
+hg  cerulean                                 52   13    0   49  758  467 T04        city_town      kanto  SEQ_GS_C_HANADA          city        531  1  0 Cerulean City
+hg  lavender                                 53   14    0   50  767  475 -          city_town      kanto  SEQ_GS_T_CHION           city        540  2  0 Lavender Town
+hg  vermilion                                54   11    0   51  776  483 T06        city_town      kanto  SEQ_GS_C_KUCHIBA         city        549  1  0 Vermilion City
+hg  celadon                                  55   15    0   52  785  491 T07        city_town      kanto  SEQ_GS_C_TAMAMUSHI       city        558  1  0 Celadon City
+hg  fuchsia                                  56   16    0   53  807  512 T08        city_town      kanto  SEQ_GS_C_SEKICHIKU       city        580  1  0 Fuchsia City
+hg  cinnabar_island                          57   18    0   54  815  519 T09        city_town      kanto  SEQ_GS_T_GUREN           city        588  2  0 Cinnabar Island
+hg  indigo_plateau                           58   10    0   55  818  521 -          route          kanto  SEQ_GS_CHAMPROAD         city        591  3  0 Indigo Plateau
+hg  saffron                                  59   12    0   56  827  529 -          city_town      kanto  SEQ_GS_C_YAMABUKI        city        600  1  0 Saffron City
+hg  new_bark                                 60    2    0   57  842  542 T20        city_town      johto  SEQ_GS_T_WAKABA          general     615  2  0 New Bark Town
+hg  new_bark_elms_lab_1f                     61   25  100   58  843  543 -          interior       johto  SEQ_GS_UTSUGI_RABO       building_1  616  9  4 New Bark Town
+hg  new_bark_elms_lab_2f                     62   25  101   59  844  544 -          interior       johto  SEQ_GS_T_WAKABA          building_1  617  9  4 New Bark Town
+hg  new_bark_player_house_1f                 63   25   71   60  845  545 -          interior       johto  SEQ_GS_T_WAKABA          building_1  618  9  4 New Bark Town
+hg  new_bark_player_house_2f                 64   25   72   61  846  546 -          interior       johto  SEQ_GS_T_WAKABA          building_1  619  9  4 New Bark Town
+hg  new_bark_southwest_house                 65   25   66   62  847  547 -          interior       johto  SEQ_GS_T_WAKABA          building_1  620  9  4 New Bark Town
+hg  new_bark_rival_house_1f                  66   25   71   63  848  548 -          interior       johto  SEQ_GS_T_WAKABA          building_1  621  9  4 New Bark Town
+hg  cherrygrove                              67    2    0   64  850  550 T21        city_town      johto  SEQ_GS_C_YOSHINO         general     623  1  0 Cherrygrove City
+hg  cherrygrove_pokemart                     68   27  104   65  851  551 -          interior       johto  SEQ_GS_FS                building_1  624  9  4 Cherrygrove City
+hg  cherrygrove_pokecenter_1f                69   26   73   66  852  552 -          interior       johto  SEQ_GS_POKESEN           building_1  625  9  4 Cherrygrove City
+hg  cherrygrove_southwest_house              70   25   97   67  854  553 -          interior       johto  SEQ_GS_C_YOSHINO         building_1  627  9  4 Cherrygrove City
+hg  cherrygrove_guide_gent_house             71   25   96   68  855  554 -          interior       johto  SEQ_GS_C_YOSHINO         building_1  628  9  4 Cherrygrove City
+hg  cherrygrove_southeast_house              72   25   97   69  856  555 -          interior       johto  SEQ_GS_C_YOSHINO         building_1  629  9  4 Cherrygrove City
+hg  violet                                   73    3    0   70  857  556 T22        city_town      johto  SEQ_GS_C_KIKYOU          city        630  1  0 Violet City
+hg  azalea                                   74    4    0   71  866  564 -          city_town      johto  SEQ_GS_T_HIWADA          general     639  2  0 Azalea Town
+hg  cianwood                                 75    7    0   72  875  572 T24        city_town      johto  SEQ_GS_C_TANBA           city        648  1  0 Cianwood City
+hg  goldenrod                                76    5    0   73  885  581 -          city_town      johto  SEQ_GS_C_KOGANE          city        658  1  0 Goldenrod City
+hg  olivine                                  77    7    0   74  911  604 T26        city_town      johto  SEQ_GS_C_ASAGI           city        684  1  0 Olivine City
+hg  ecruteak                                 78    6    0   75  920  612 T27        city_town      johto  SEQ_GS_C_ENJU            city        693  1  0 Ecruteak City
+hg  ecruteak_pokemart                        79   27  104   76  921  613 -          interior       johto  SEQ_GS_FS                building_1  694  9  4 Ecruteak City
+hg  ecruteak_gym                             80   31   90   77  922  614 -          interior       johto  SEQ_GS_GYM               building_1  695  9  0 Ecruteak City
+hg  ecruteak_pokecenter_1f                   81   26   73   78  923  615 -          interior       johto  SEQ_GS_POKESEN           building_1  696  9  4 Ecruteak City
+hg  ecruteak_unused_house                    82   25   66   79  139    3 -          interior       johto  SEQ_GS_C_ENJU            building_1  399  9  4 Jubilife City
+hg  ecruteak_bell_tower_barrier_station      83   61   68   80  926  616 -          interior       johto  SEQ_GS_C_ENJU            building_1  699  9  4 Ecruteak City
+hg  ecruteak_dowsing_machine_house           84   25   66   81  929  619 -          interior       johto  SEQ_GS_C_ENJU            building_1  702  9  4 Ecruteak City
+hg  ecruteak_southwest_house                 85   25   66   82  927  617 -          interior       johto  SEQ_GS_C_ENJU            building_1  700  9  4 Ecruteak City
+hg  ecruteak_dance_theater                   86   61  126   83  928  618 -          interior       johto  SEQ_GS_KABURENJOU        building_1  701  9 15 Ecruteak City
+hg  mahogany                                 87    8    0   84  930  620 -          city_town      johto  SEQ_GS_T_CHOUJI          general     703  2  0 Mahogany Town
+hg  lake_of_rage                             88    8    0   85  938  626 T29        route          johto  SEQ_GS_R_7_42            general     711  8  0 Lake of Rage
+hg  blackthorn                               89    9    0   86  941  629 T30        city_town      johto  SEQ_GS_C_FUSUBE          general     714  1  0 Blackthorn City
+hg  mount_silver                             90   10    0   87  949  636 T31        city_town      johto  SEQ_GS_CHAMPROAD         general     722  3  0 Mt. Silver
+hg  route_19                                 91   18    0   88  958  740 W19        route          kanto  SEQ_GS_R_15_03           general     727  6  0 Route 19
+hg  route_20                                 92   18    0   89  960  742 W20        route          kanto  SEQ_GS_R_15_03           ocean       729  6  0 Route 20
+hg  route_21                                 93   18    0   90  961  743 W21        route          kanto  SEQ_GS_R_17_03           ocean       730  6  0 Route 21
+hg  route_40                                 94    7    0   91  962  744 W40        route          johto  SEQ_GS_R_6_34            ocean       731  6  0 Route 40
+hg  route_41                                 95    7    0   92  964  746 W41        route          johto  SEQ_GS_R_6_34            ocean       733  6  0 Route 41
+hg  national_park                            96   71   27   93   25   62 D22R0101   city_town      johto  SEQ_GS_D_KOUEN           general     286  7  0 National Park
+hg  route_31_violet_gatehouse                97   63   70   94  231  379 -          interior       johto  SEQ_GS_R_1_30            building_1  476  9  4 Route 31
+hg  route_32_ruins_of_alph_gatehouse         98   63   70   95  235  382 -          interior       johto  SEQ_GS_R_2_30            building_1  480  9  4 Route 32
+hg  union_cave_1f                            99   87   42   96   56   87 D25R0101   cave           johto  SEQ_GS_D_CHIKATSUURO     cave_1      317  4  0 Union Cave
+hg  azalea_ilex_forest_gatehouse            100   63   70   97  872  569 -          interior       johto  SEQ_GS_R_5_34            building_1  645  9  4 Azalea Town
+hg  route_35_goldenrod_gatehouse            101   63   69   98  241  388 -          interior       johto  SEQ_GS_R_5_34            building_1  486  9  4 Route 35
+hg  route_35_national_park_pokeathalon_gatehouse  102   63  196   99  242  389 -          interior       johto  SEQ_GS_R_5_34            building_1  487  9  4 Route 35
+hg  route_36_ruins_of_alph_gatehouse        103   63   69  100  244  391 -          interior       johto  SEQ_GS_R_5_34            building_1  489  9  4 Route 36
+hg  route_36_national_park_gatehouse        104   63   70  101  245  392 -          interior       johto  SEQ_GS_R_5_34            building_1  490  9  4 Route 36
+hg  ecruteak_unused_gatehouse               105   63   70  102  139    3 -          interior       johto  SEQ_GS_R_5_34            building_1  399  9  4 Jubilife City
+hg  diglett_cave                            106   82    2  103    5   47 D01R0101   cave           kanto  SEQ_GS_D_IWAYAMA         cave_2      266  4  0 DIGLETT’s Cave
+hg  mount_moon                              107   70    3  104    7   49 D02R0101   cave           kanto  SEQ_GS_D_CHIKATSUURO     building_2  268  4  0 Mt. Moon
+hg  rock_tunnel_1f                          108   83    6  105  139    3 D05R0101   cave           kanto  SEQ_GS_D_IWAYAMA         cave_1      399  4  0 Rock Tunnel
+hg  pal_park                                109   75    8  106   12   52 -          route          kanto  SEQ_GS_SAFARI_FIELD      general     273  7  0 Pal Park
+hg  sprout_tower_1f                         110   77   12  107   16   54 -          cave           johto  SEQ_GS_TO_MADATSUBOMI1   building_3  277  4  0 Sprout Tower
+hg  bell_tower_1f                           111   77   15  108   19   57 -          cave           johto  SEQ_GS_TO_SUZU           building_3  280  4  0 Bell Tower
+hg  goldenrod_radio_tower_1f                112   36   28  109   29   65 -          interior       johto  SEQ_GS_C_KOGANE          building_1  290  9  4 Radio Tower
+hg  ruins_of_alph                           113   20    0  110   37   72 D24R0101   route          johto  SEQ_GS_D_CHIKATSUURO     mountain    298  4  0 Ruins of Alph
+hg  slowpoke_well_entrance                  114   84   45  111   59   90 -          cave           johto  SEQ_GS_D_CHIKATSUURO     cave_1      320  4  0 SLOWPOKE Well
+hg  olivine_lighthouse_1f                   115   47   47  112   62   93 -          cave           johto  SEQ_GS_TO_TOUDAI         building_1  323  9  0 Lighthouse
+hg  mahogany_souvenir_shop                  116   27  138  113   88  111 -          interior       johto  SEQ_GS_T_CHOUJI          building_1  349  9  4 Mahogany Town
+hg  ilex_forest                             117   74   56  114   92  115 D36R0101   cave           johto  SEQ_GS_D_CHIKATSUURO     forest      353  5  0 Ilex Forest
+hg  goldenrod_tunnel_1f                     118   62   57  115   93  116 -          interior       johto  SEQ_GS_C_KOGANE          building_1  354  9  4 Goldenrod Tunnel
+hg  mount_mortar_1f_entrance                119   79   62  116  139    3 D38R0101   cave           johto  SEQ_GS_D_CHIKATSUURO     cave_1      399  4  0 Mt. Mortar
+hg  ice_path_1f                             120   76  132  117   99  122 D39R0101   cave           johto  SEQ_GS_D_KOORINONUKE     cave_1      360  4  0 Ice Path
+hg  whirl_islands_1f                        121   85  141  118  139    3 D40R0101   cave           johto  SEQ_GS_D_CHIKATSUURO     cave_1      399  4  0 Whirl Islands
+hg  mount_silver_cave_1f                    122   80  265  119  105    3 D41R0101   cave           johto  SEQ_GS_TO_TOUDAI         cave_1      366  4  0 Mt. Silver Cave
+hg  dark_cave_route_45_side                 123   87   98  120  108  127 D42R0101   cave           johto  SEQ_GS_D_KOORINONUKE     cave_1      369  4  0 Dark Cave
+hg  victory_road_1f                         124   70  161  121  139    3 D43R0101   cave           kanto  SEQ_GS_D_CHAMPROAD       cave_3      399  4  0 Victory Road
+hg  dragons_den_entrance                    125   86  145  122  139    3 -          cave           johto  SEQ_GS_RYUUNOANA         cave_1      399  4  0 Dragon’s Den
+hg  tohjo_falls                             126   70  151  123  113    3 D45R0101   cave           kanto  SEQ_GS_D_CHIKATSUURO     cave_1      374  4  0 Tohjo Falls
+hg  route_30_apricorn_house                 127   25   66  124  228  376 -          interior       johto  SEQ_GS_R_1_30            building_1  473  9  4 Route 30
+hg  ecruteak_pokecenter_unused_1            128   26   74  125  139    3 -          interior       johto  SEQ_GS_POKESEN           building_1  399  9  4 Ecruteak City
+hg  ecruteak_pokecenter_unused_2            129   26   75  126  139    3 -          interior       johto  SEQ_GS_POKESEN           building_1  399  9  4 Ecruteak City
+hg  ecruteak_pokecenter_unused_3            130   26   76    0  139    3 -          interior       johto  SEQ_GS_POKESEN           building_1  399  9  4 Ecruteak City
+hg  ecruteak_pokecenter_b1f                 131   26   77  127  924    3 -          interior       johto  SEQ_GS_POKESEN           building_1  697  9  4 Ecruteak City
+hg  route_42_ecruteak_gatehouse             132   63   70  128  253  400 -          interior       johto  SEQ_GS_R_7_42            building_1  498  9  4 Route 42
+hg  mahogany_east_house                     133   25   95  129  937  625 -          interior       johto  SEQ_GS_T_CHOUJI          building_1  710  9  4 Mahogany Town
+hg  route_29_route_46_gatehouse             134   63   69  130  226  374 -          interior       johto  SEQ_GS_R_1_29            building_1  471  9  4 Route 29
+hg  violet_gym                              135   28   87  131  859  558 -          interior       johto  SEQ_GS_GYM               building_1  632  9  1 Violet City
+hg  azalea_gym_entrance                     136   29   88  132  868  566 -          interior       johto  SEQ_GS_GYM               building_1  641  9  4 Azalea Town
+hg  goldenrod_gym                           137   30   89  133  886  582 -          interior       johto  SEQ_GS_GYM               building_1  659  9  2 Goldenrod City
+hg  olivine_gym                             138   32   91  134  913  606 -          interior       johto  SEQ_GS_GYM               building_1  686  9  4 Olivine City
+hg  cianwood_gym                            139   33   92  135  877  574 -          interior       johto  SEQ_GS_GYM               building_2  650  9  0 Cianwood City
+hg  mahogany_gym_leader_room                140   34  229  136  932  622 -          interior       johto  SEQ_GS_GYM               building_2  705  9  0 Mahogany Town
+hg  blackthorn_gym                          141   35   94  137  943  631 -          interior       johto  SEQ_GS_GYM               building_1  716  9  0 Blackthorn City
+hg  route_43_mahogany_gatehouse             142   63   69  138  255  402 -          interior       johto  SEQ_GS_R_7_42            building_1  500  9  4 Route 43
+hg  route_30_mr_pokemon_house               143   61  103  139  229  377 -          interior       johto  SEQ_GS_R_1_30            building_1  474  9  4 Route 30
+hg  cherrygrove_pokecenter_b1f              144   26   77  140  853    3 -          interior       johto  SEQ_GS_POKESEN           building_1  626  9  4 Cherrygrove City
+hg  cerulean_cave_1f                        145   73   78  141  139    3 D03R0101   cave           kanto  SEQ_GS_D_IWAYAMA         cave_1      399  4  0 Cerulean Cave
+hg  seafoam_islands_1f                      146   70   81  142  139    3 D11R0101   cave           kanto  SEQ_GS_D_KOORINONUKE     cave_1      399  4  0 Seafoam Islands
+hg  viridian_forest                         147  103   86  143  115  132 D46R0101   cave           kanto  SEQ_GS_D_TOKIWANOMORI3   forest      376  5  0 Viridian Forest
+hg  route_9_unused                          148   25   66    0  139    3 -          interior       kanto  SEQ_GS_C_NIBI            building_1  399  9  4 Power Plant
+hg  violet_route_36_gatehouse               149   63   70  144  865  563 -          interior       johto  SEQ_GS_R_5_34            building_1  638  9  4 Route 36
+hg  national_park_unused_gatehouse          150   63   69  145   28   64 -          interior       johto  SEQ_GS_PT_ENTR           building_1  289  9  4 Pokéathlon Dome
+hg  route_47                                151   19    0  146  260  407 R47        route          johto  SEQ_GS_SAFARI_ROAD       mountain    505  3  0 Route 47
+hg  route_48                                152   19    0  147  261  408 R48        route          johto  SEQ_GS_SAFARI_ROAD       mountain    506  3  0 Route 48
+hg  union_cave_b1f                          153   87   43  148   57   88 D25R0102   cave           johto  SEQ_GS_D_CHIKATSUURO     cave_2      318  4  0 Union Cave
+hg  union_cave_b2f                          154   87   44  149   58   89 D25R0103   cave           johto  SEQ_GS_D_CHIKATSUURO     cave_3      319  4  0 Union Cave
+hg  sprout_tower_2f                         155   77   13  150   17   55 D15R0102   cave           johto  SEQ_GS_TO_MADATSUBOMI1   building_3  278  4  0 Sprout Tower
+hg  sprout_tower_3f                         156   77   14  151   18   56 D15R0103   cave           johto  SEQ_GS_TO_MADATSUBOMI1   building_3  279  4  0 Sprout Tower
+hg  violet_pokemart                         157   27  104  152  858  557 -          interior       johto  SEQ_GS_FS                building_1  631  9  4 Violet City
+hg  violet_pokecenter_1f                    158   26   73  153  860  559 -          interior       johto  SEQ_GS_POKESEN           building_1  633  9  4 Violet City
+hg  violet_pokemon_school                   159   61  102  154  862  560 -          interior       johto  SEQ_GS_C_KIKYOU          building_1  635  9  4 Violet City
+hg  violet_northwest_house                  160   25   95  155  863  561 -          interior       johto  SEQ_GS_C_KIKYOU          building_1  636  9  4 Violet City
+hg  violet_unused                           161   25   66    0  139    3 -          interior       johto  SEQ_GS_C_YOSHINO         building_1  399  0  4 Jubilife City
+hg  violet_bellsprout_onyx_trade_house      162   25   95  156  864  562 -          interior       johto  SEQ_GS_C_KIKYOU          building_1  637  9  4 Violet City
+hg  azalea_charcoal_kiln                    163   61  125  157  873  570 -          interior       johto  SEQ_GS_T_HIWADA          building_1  646  9  4 Azalea Town
+hg  azalea_kurt_house                       164   61  127  158  874  571 -          interior       johto  SEQ_GS_T_HIWADA          building_1  647  9  4 Azalea Town
+hg  azalea_pokemart                         165   27  104  159  867  565 -          interior       johto  SEQ_GS_FS                building_1  640  9  4 Azalea Town
+hg  azalea_pokecenter_1f                    166   26   73  160  870  568 -          interior       johto  SEQ_GS_POKESEN           building_1  643  9  4 Azalea Town
+hg  violet_pokecenter_b1f                   167   26   77  161  861    3 -          interior       johto  SEQ_GS_POKESEN           building_1  634  9  4 Violet City
+hg  azalea_pokecenter_b1f                   168   26   77  162  871    3 -          interior       johto  SEQ_GS_POKESEN           building_1  644  9  4 Azalea Town
+hg  route_32_pokecenter_1f                  169   26   73  163  233  381 -          interior       johto  SEQ_GS_POKESEN           building_1  478  9  4 Route 32
+hg  route_32_pokecenter_b1f                 170   26   77  164  234    3 -          interior       johto  SEQ_GS_POKESEN           building_1  479  9  4 Route 32
+hg  route_34_ilex_forest_gatehouse          171   63   69  165  239  386 -          interior       johto  SEQ_GS_R_4_34            building_1  484  9  4 Route 34
+hg  route_38_ecruteak_gatehouse             172   63   70  166  248  395 -          interior       johto  SEQ_GS_R_6_38            building_1  493  9  4 Route 38
+hg  safari_zone_entrance_interior           173   39  227  167  119  135 -          interior       johto  SEQ_GS_SAFARI_HOUSE      building_1  380  7  4 Safari Zone Gate
+hg  safari_zone_gate                        174   19    0  168  116  133 -          route          johto  SEQ_GS_SAFARI_HOUSE      general     377  3  0 Safari Zone Gate
+hg  ecruteak_unused_1                       175   25   66    0  139    3 -          interior       johto  SEQ_GS_C_ENJU            building_1  399  9  4 Jubilife City
+hg  dark_cave_route_31_side                 176   87   99  169  139    3 D42R0102   cave           johto  SEQ_GS_D_KOORINONUKE     cave_1      399  4  0 Dark Cave
+hg  slowpoke_well_b1f                       177   84   46  170   60   91 D26R0102   cave           johto  SEQ_GS_D_CHIKATSUURO     cave_2      321  4  0 SLOWPOKE Well
+hg  victory_road_2f                         178   70  162  171  109    3 D43R0102   cave           kanto  SEQ_GS_D_CHAMPROAD       cave_2      370  4  0 Victory Road
+hg  victory_road_3f                         179   70  163  172  110  128 D43R0103   cave           kanto  SEQ_GS_D_CHAMPROAD       cave_3      371  4  0 Victory Road
+hg  azalea_gym                              180   29  105  173  869  567 -          interior       johto  SEQ_GS_GYM               building_3  642  9  5 Azalea Town
+hg  slowpoke_well_b2f                       181   84  106  174   61   92 D26R0103   cave           johto  SEQ_GS_D_CHIKATSUURO     cave_3      322  4  0 SLOWPOKE Well
+hg  goldenrod_bike_shop                     182   27  107  175  890  584 -          interior       johto  SEQ_GS_C_KOGANE          building_1  663  9  4 Goldenrod City
+hg  goldenrod_game_corner_jp                183   27  109  176  906  599 -          interior       johto  SEQ_GS_GAME              building_1  679  9  4 Goldenrod City
+hg  goldenrod_flower_shop                   184   27  108  177  896  589 -          interior       johto  SEQ_GS_C_KOGANE          building_1  669  9  4 Goldenrod City
+hg  goldenrod_pokecenter_1f                 185   26   73  178  887  583 -          interior       johto  SEQ_GS_POKESEN           building_1  660  9  4 Goldenrod City
+hg  goldenrod_radio_tower_2f                186   36   29  179   30   66 -          interior       johto  SEQ_GS_C_KOGANE          building_1  291  9  4 Radio Tower
+hg  goldenrod_radio_tower_3f                187   36   30  180   31   67 -          interior       johto  SEQ_GS_C_KOGANE          building_1  292  9  4 Radio Tower
+hg  goldenrod_radio_tower_4f                188   36   31  181   32   68 -          interior       johto  SEQ_GS_C_KOGANE          building_1  293  9  4 Radio Tower
+hg  goldenrod_radio_tower_5f                189   36   32  182   33   69 -          interior       johto  SEQ_GS_C_KOGANE          building_1  294  9  4 Radio Tower
+hg  goldenrod_radio_tower_observation_deck  190   36  110  183   34   70 -          interior       johto  SEQ_GS_C_KOGANE          building_1  295  9  0 Radio Tower
+hg  goldenrod_department_store_1f           191   62  113  184  899  592 -          interior       johto  SEQ_GS_FS                building_1  672  9  4 Goldenrod City
+hg  goldenrod_department_store_2f           192   62  114  185  900  593 -          interior       johto  SEQ_GS_FS                building_1  673  9  4 Goldenrod City
+hg  goldenrod_department_store_3f           193   62  115  186  901  594 -          interior       johto  SEQ_GS_FS                building_1  674  9  4 Goldenrod City
+hg  goldenrod_department_store_4f           194   62  116  187  902  595 -          interior       johto  SEQ_GS_FS                building_1  675  9  4 Goldenrod City
+hg  goldenrod_department_store_5f           195   62  117  188  903  596 -          interior       johto  SEQ_GS_FS                building_1  676  9  4 Goldenrod City
+hg  goldenrod_department_store_6f           196   62  118  189  904  597 -          interior       johto  SEQ_GS_FS                building_1  677  9  4 Goldenrod City
+hg  goldenrod_magnet_train_station_1f       197   48  111  190  893  587 -          interior       johto  SEQ_GS_C_KOGANE          building_1  666  9  4 Goldenrod City
+hg  goldenrod_magnet_train_station_2f       198   48  112  191  894  588 -          interior       johto  SEQ_GS_C_KOGANE          building_1  667  9  4 Goldenrod City
+hg  goldenrod_tunnel_b1f                    199   62   58  192   94  117 -          interior       johto  SEQ_GS_C_KOGANE          building_1  355  9  0 Goldenrod Tunnel
+hg  goldenrod_department_store_basement     200   62   59  193   95  118 -          interior       johto  SEQ_GS_C_KOGANE          building_3  356  9  4 Goldenrod City
+hg  goldenrod_tunnel_b2f                    201   62   60  194   96  119 -          interior       johto  SEQ_GS_D_CHIKATSUURO     building_3  357  9  4 Goldenrod City
+hg  goldenrod_tunnel_warehouse              202   62   61  195   97  120 -          interior       johto  SEQ_GS_D_CHIKATSUURO     building_3  358  9  4 Goldenrod City
+hg  goldenrod_bills_house                   203   25   97  196  892  586 -          interior       johto  SEQ_GS_C_KOGANE          building_1  665  9  4 Goldenrod City
+hg  goldenrod_friendship_checker_house      204   25   96  197  891  585 -          interior       johto  SEQ_GS_C_KOGANE          building_1  664  9  4 Goldenrod City
+hg  goldenrod_northeast_house               205   25   96  198  897  590 -          interior       johto  SEQ_GS_C_KOGANE          building_1  670  9  4 Goldenrod City
+hg  goldenrod_name_rater_house              206   42  140  199  898  591 -          interior       johto  SEQ_GS_C_KOGANE          building_1  671  9  4 Goldenrod City
+hg  goldenrod_global_terminal_1f            207   45  237  200  907  600 -          interior       johto  SEQ_GS_WIFITOWER         building_1  680  9  4 Global Terminal
+hg  goldenrod_unused_1                      208   63  119    0  139    3 -          interior       johto  SEQ_GS_C_KOGANE          building_1  399  9  4 Goldenrod City
+hg  goldenrod_unused_2                      209   63  120    0  139    3 -          interior       johto  SEQ_GS_C_KOGANE          building_1  399  9  4 Goldenrod City
+hg  goldenrod_unused_3                      210   63  121    0  139    3 -          interior       johto  SEQ_GS_C_KOGANE          building_1  399  9  4 Goldenrod City
+hg  goldenrod_unused_4                      211   63  122    0  139    3 -          interior       johto  SEQ_GS_C_KOGANE          building_1  399  9  4 Goldenrod City
+hg  goldenrod_unused_5                      212   63  123    0  139    3 -          interior       johto  SEQ_GS_C_KOGANE          building_1  399  9  4 Goldenrod City
+hg  goldenrod_unused_6                      213   63  124    0  139    3 -          interior       johto  SEQ_GS_C_KOGANE          building_1  399  9  4 Goldenrod City
+hg  route_39_moomoo_farm_house              214   42  128  201  250  397 -          interior       johto  SEQ_GS_R_6_38            building_1  495  9  4 Route 39
+hg  route_39_moomoo_farm_stable             215   42  129  202  251  398 -          interior       johto  SEQ_GS_R_6_38            building_1  496  9  4 Route 39
+hg  ecruteak_bell_tower_barrier_station_corridor  216   61  130  203  139    3 -          interior       johto  SEQ_GS_C_ENJU            building_1  399  9  4 Ecruteak City
+hg  burned_tower_b1f                        217   78   26  204   24   61 D18R0102   cave           johto  SEQ_GS_TO_YAKETA         building_3  285  4  0 Burned Tower
+hg  ruins_of_alph_unused_2                  218    2    0    0  139    3 -          route          johto  SEQ_GS_D_UNKNOWN_ISEKI   general     399  4  0 Ruins of Alph
+hg  goldenrod_pokecenter_b1f                219   26   77  205  888    3 -          interior       johto  SEQ_GS_POKESEN           building_1  661  9  4 Goldenrod City
+hg  olivine_lighthouse_2f                   220   47   48  206  139    3 -          cave           johto  SEQ_GS_TO_TOUDAI         building_3  399  9  0 Lighthouse
+hg  olivine_lighthouse_exterior             221   74   49  207   63    3 -          cave           johto  SEQ_GS_TO_TOUDAI         city        324  9  3 Lighthouse
+hg  olivine_lighthouse_3f                   222   47   50  208  139    3 -          cave           johto  SEQ_GS_TO_TOUDAI         building_3  399  9  0 Lighthouse
+hg  olivine_lighthouse_4f                   223   47   51  209   64    3 -          cave           johto  SEQ_GS_TO_TOUDAI         building_3  325  9  0 Lighthouse
+hg  olivine_lighthouse_5f                   224   47   52  210   65    3 -          cave           johto  SEQ_GS_TO_TOUDAI         building_3  326  9  0 Lighthouse
+hg  olivine_lighthouse_light_room           225   89  131  211   66   94 -          cave           johto  SEQ_GS_TO_TOUDAI         building_3  327  9  0 Lighthouse
+hg  olivine_pokecenter_1f                   226   26   73  212  914  607 -          interior       johto  SEQ_GS_POKESEN           building_1  687  9  4 Olivine City
+hg  olivine_pokemart                        227   27  104  213  912  605 -          interior       johto  SEQ_GS_FS                building_1  685  9  4 Olivine City
+hg  olivine_north_house                     228   25   97  214  916  608 -          interior       johto  SEQ_GS_C_ASAGI           building_1  689  9  4 Olivine City
+hg  olivine_northeast_house                 229   25   97  215  917  609 -          interior       johto  SEQ_GS_C_ASAGI           building_1  690  9  4 Olivine City
+hg  olivine_northwest_house                 230   25   97  216  918  610 -          interior       johto  SEQ_GS_C_ASAGI           building_1  691  9  4 Olivine City
+hg  olivine_cafe                            231   42  136  217  919  611 -          interior       johto  SEQ_GS_C_ASAGI           building_1  692  9  4 Olivine City
+hg  cianwood_kirks_house                    232   25   95  218  880  576 -          interior       johto  SEQ_GS_C_TANBA           building_1  653  9  4 Cianwood City
+hg  cianwood_pharmacy                       233   27  139  219  881  577 -          interior       johto  SEQ_GS_C_TANBA           building_1  654  9  4 Cianwood City
+hg  cianwood_camerons_house                 234   25   97  220  882  578 -          interior       johto  SEQ_GS_C_TANBA           building_1  655  9  4 Cianwood City
+hg  cianwood_central_house                  235   25   95  221  883  579 -          interior       johto  SEQ_GS_C_TANBA           building_1  656  9  4 Cianwood City
+hg  cianwood_pokecenter_1f                  236   26   73  222  878  575 -          interior       johto  SEQ_GS_POKESEN           building_1  651  9  4 Cianwood City
+hg  ice_path_b1f                            237   76  133  223  100    3 D39R0102   cave           johto  SEQ_GS_D_KOORINONUKE     cave_2      361  4  0 Ice Path
+hg  ice_path_b2f                            238   76  134  224  101  123 D39R0103   cave           johto  SEQ_GS_D_KOORINONUKE     cave_3      362  4  0 Ice Path
+hg  ice_path_b3f                            239   76  135  225  139    3 D39R0104   cave           johto  SEQ_GS_D_KOORINONUKE     cave_3      399  4  0 Ice Path
+hg  ss_aqua_olivine_port_interior           240   63  137  226  152  255 -          interior       johto  SEQ_GS_C_ASAGI           building_1  402  9  4 Olivine City
+hg  cianwood_pokecenter_b1f                 241   26   77  227  879    3 -          interior       johto  SEQ_GS_POKESEN           building_1  652  9  4 Cianwood City
+hg  whirl_islands_b1f                       242   85  142  228  102    3 D40R0102   cave           johto  SEQ_GS_D_CHIKATSUURO     cave_2      363  4  0 Whirl Islands
+hg  whirl_islands_b2f                       243   85  143  229  103  124 D40R0104   cave           johto  SEQ_GS_D_CHIKATSUURO     cave_3      364  4  0 Whirl Islands
+hg  whirl_islands_b3f_lugia_cave            244   98  144  230  104  125 -          cave           johto  SEQ_SILENCE_FIELD        cave_3      365  4 12 Whirl Islands
+hg  route_43_gatehouse                      245   63   69  231  256  403 -          interior       johto  SEQ_GS_R_7_42            building_1  501  9  4 Route 43
+hg  mahogany_pokecenter_1f                  246   26   73  232  935  624 -          interior       johto  SEQ_GS_POKESEN           building_1  708  9  4 Mahogany Town
+hg  team_rocket_headquarters_b1f            247   64   53  233   89  112 -          cave           johto  SEQ_GS_D_AJITO           building_1  350  9  4 Team Rocket HQ
+hg  team_rocket_headquarters_b2f            248   64   54  234   90  113 -          cave           johto  SEQ_GS_D_AJITO           building_1  351  9  4 Team Rocket HQ
+hg  team_rocket_headquarters_b3f            249   64   55  235   91  114 -          cave           johto  SEQ_GS_D_AJITO           building_1  352  9  4 Team Rocket HQ
+hg  mount_mortar_1f_back                    250   79   63  236  139    3 D38R0102   cave           johto  SEQ_GS_D_CHIKATSUURO     cave_2      399  4  0 Mt. Mortar
+hg  mount_mortar_2f                         251   79   64  237  139    3 D38R0103   cave           johto  SEQ_GS_D_CHIKATSUURO     cave_2      399  4  0 Mt. Mortar
+hg  mount_mortar_b1f                        252   79   65  238   98  121 D38R0104   cave           johto  SEQ_GS_D_CHIKATSUURO     cave_2      359  4  0 Mt. Mortar
+hg  dragons_den                             253   86  146  239  111  129 D44R0102   cave           johto  SEQ_GS_RYUUNOANA         cave_2      372  4  0 Dragon’s Den
+hg  fight_area_unused_1                     254    2    0    0  139    3 -          city_town      johto  SEQ_GS_BATTLETOWER       general     399  2  0 Fight Area
+hg  fight_area_unused_2                     255    2    0    0  139    3 -          interior       johto  SEQ_GS_POKESEN           general     399  9  4 Fight Area
+hg  fight_area_unused_3                     256    2    0    0  139    3 -          interior       johto  SEQ_GS_POKESEN           general     399  9  4 Fight Area
+hg  fight_area_unused_4                     257    2    0    0  139    3 -          interior       johto  SEQ_GS_FS                general     399  9  4 Fight Area
+hg  fight_area_unused_5                     258    2    0    0  139    3 -          interior       johto  SEQ_GS_BATTLETOWER       general     399  9  4 Fight Area
+hg  fight_area_unused_6                     259    2    0    0  139    3 -          interior       johto  SEQ_GS_BATTLETOWER       general     399  9  4 Fight Area
+hg  fight_area_unused_7                     260    2    0    0  139    3 -          interior       johto  SEQ_GS_BATTLETOWER       general     399  9  4 Fight Area
+hg  fight_area_unused_8                     261    2    0    0  139    3 -          interior       johto  SEQ_GS_BATTLETOWER       general     399  9  4 Fight Area
+hg  fight_area_unused_9                     262    2    0    0  139    3 -          interior       johto  SEQ_GS_POKESEN           general     399  9  4 Fight Area
+hg  battle_park_unused_1                    263    2    0    0  139    3 -          interior       johto  SEQ_GS_BATTLETOWER       general     399  2  4 Battle Park
+hg  battle_park_unused_2                    264    2    0    0  139    3 -          interior       johto  SEQ_GS_BATTLETOWER       general     399  9  4 Battle Park
+hg  battle_tower                            265   56  232  240   69   96 -          interior       johto  SEQ_GS_BATTLETOWER2      building_1  330  9 16 Battle Tower
+hg  battle_tower_elevator                   266   44  262  241   70    3 -          interior       johto  SEQ_GS_BATTLETOWER2      building_1  331  9  4 Battle Tower
+hg  battle_tower_unused_1                   267    2    0    0  139    3 -          interior       johto  SEQ_GS_BATTLETOWER       building_1  399  9  4 Battle Tower
+hg  battle_tower_unused_2                   268    2    0    0  139    3 -          interior       johto  SEQ_GS_BATTLETOWER       building_1  399  9  4 Battle Tower
+hg  battle_tower_unused_3                   269    2    0    0  139    3 -          interior       johto  SEQ_GS_BATTLETOWER       building_1  399  9  4 Battle Tower
+hg  battle_tower_unused_4                   270    2    0    0  139    3 -          interior       johto  SEQ_GS_BATTLETOWER       building_1  399  9  4 Battle Tower
+hg  battle_tower_partner_room               271   38  263  242   75   99 -          interior       johto  SEQ_GS_BATTLETOWER       building_1  336  9  0 Battle Tower
+hg  battle_frontier                         272   92  230  243   76  100 -          city_town      johto  SEQ_GS_BATTLETOWER       building_1  337  1  8 Battle Frontier
+hg  battle_frontier_frontier_access_gatehouse  273   46  231  244   80  103 -          interior       johto  SEQ_GS_BATTLETOWER       building_1  341  9  4 Battle Frontier
+hg  battle_frontier_battle_tower_unused     274   56  232  245   83    3 -          interior       johto  SEQ_GS_BATTLETOWER2      building_1  344  9  0 Battle Tower
+hg  battle_frontier_battle_factory          275   57  233  246   84  107 -          interior       johto  SEQ_GS_BF_FACTORY        building_1  345  9 16 Battle Factory
+hg  battle_frontier_battle_hall             276   58  234  247   85  108 -          interior       johto  SEQ_GS_BF_STAGE          building_1  346  9 16 Battle Hall
+hg  battle_frontier_battle_castle           277   59  235  248   86  109 -          interior       johto  SEQ_GS_BF_CASTLE         building_1  347  9 16 Battle Castle
+hg  battle_frontier_battle_arcade           278   60  236  249   87  110 -          interior       johto  SEQ_GS_BF_ROULETTE       building_1  348  9 16 Battle Arcade
+hg  cliff_edge_gate                         279   70  152  250  121  136 D48R0101   cave           johto  SEQ_GS_R_5_34            cave_1      382  4  0 Cliff Edge Gate
+hg  pokeathlon_dome                         280   90  153  251  122  137 -          city_town      johto  SEQ_GS_R_5_34            city        383  1  0 Pokéathlon Dome
+hg  pokeathlon_dome_interior_1f             281   37  154  252  123  138 -          interior       johto  SEQ_GS_PT_ENTR           building_2  384  9  4 Pokéathlon Dome
+hg  pokeathlon_dome_interior_2f             282   37  155  253  124  139 -          interior       johto  SEQ_GS_PT_ENTR           building_1  385  9  7 Pokéathlon Dome
+hg  pokeathlon_dome_interior_2f_entrance    283   37  156  254  139    3 -          interior       johto  SEQ_GS_PT_ENTR           building_1  399  9  4 Pokéathlon Dome
+hg  pokeathlon_dome_interior_b1f_solidarity_room  284   37  157  255  125  140 -          interior       johto  SEQ_GS_PT_ENTR           building_1  386  9  4 Pokéathlon Dome
+hg  pokeathlon_dome_interior_b1f_trust_room  285   37  158  256  126  141 -          interior       johto  SEQ_GS_PT_ENTR           building_1  387  9  4 Pokéathlon Dome
+hg  pokeathlon_dome_interior_b1f_potential_room  286   37  159  257  127  142 -          interior       johto  SEQ_GS_PT_ENTR           building_1  388  9  4 Pokéathlon Dome
+hg  pokeathlon_dome_interior_b1f_friendship_room  287   37  160  258  128  143 -          interior       johto  SEQ_GS_PT_END_FIELD      building_1  389  9  4 Pokéathlon Dome
+hg  dragons_den_shrine                      288   42  149  259  112  130 -          interior       johto  SEQ_GS_RYUUNOANA         building_3  373  9  4 Dragon’s Den
+hg  blackthorn_west_house                   289   25   95  260  946  633 -          interior       johto  SEQ_GS_C_FUSUBE          building_1  719  9  4 Blackthorn City
+hg  blackthorn_east_house                   290   25   95  261  947  634 -          interior       johto  SEQ_GS_C_FUSUBE          building_1  720  9  4 Blackthorn City
+hg  blackthorn_move_tutor_house             291   25   95  262  948  635 -          interior       johto  SEQ_GS_C_FUSUBE          building_1  721  9  4 Blackthorn City
+hg  blackthorn_pokemart                     292   27  104  263  942  630 -          interior       johto  SEQ_GS_FS                building_1  715  9  4 Blackthorn City
+hg  blackthorn_pokecenter_1f                293   26   73  264  944  632 -          interior       johto  SEQ_GS_POKESEN           building_1  717  9  4 Blackthorn City
+hg  lake_of_rage_hidden_power_house         294   25   66  265  939  627 -          interior       johto  SEQ_GS_R_7_42            building_1  712  9  4 Lake of Rage
+hg  lake_of_rage_fishing_guru_house         295   25   95  266  940  628 -          interior       johto  SEQ_GS_R_7_42            building_1  713  9  4 Lake of Rage
+hg  route_26_north_house                    296   25   66  267  219  366 -          interior       kanto  SEQ_GS_R_1_26            building_1  464  9  4 Route 26
+hg  route_26_week_siblings_house            297   42  147  268  220  367 -          interior       kanto  SEQ_GS_R_1_26            building_1  465  9  4 Route 26
+hg  tohjo_falls_hidden_room                 298   70  164  269  114  131 -          cave           kanto  SEQ_GS_D_CHIKATSUURO     cave_2      375  4  0 Tohjo Falls
+hg  route_22_pokemon_league_reception_gate  299   63  150  270  213  361 -          interior       kanto  SEQ_GS_R_1_26            building_1  458  9  4 Route 26
+hg  pokemon_league_entrance                 300   26  148  271  819  522 -          interior       kanto  SEQ_GS_CHAMPROAD         building_1  592  9  4 Pokémon League
+hg  pokemon_league_will_room                301   41  165  272  820  523 -          interior       kanto  SEQ_GS_CHAMPROAD         will        593  9  0 Pokémon League
+hg  pokemon_league_koga_room                302   41  166  273  821  524 -          interior       kanto  SEQ_GS_CHAMPROAD         koga        594  9  0 Pokémon League
+hg  pokemon_league_bruno_room               303   41  167  274  822  525 -          interior       kanto  SEQ_GS_CHAMPROAD         bruno       595  9  0 Pokémon League
+hg  pokemon_league_karen_room               304   41  168  275  823  526 -          interior       kanto  SEQ_GS_CHAMPROAD         karen       596  9  0 Pokémon League
+hg  pokemon_league_lance_room               305   65  169  276  824  527 -          interior       kanto  SEQ_GS_CHAMPROAD         lance       597  9  0 Pokémon League
+hg  pokemon_league_hall_of_fame             306   65  170  277  825  528 -          interior       kanto  SEQ_GS_CHAMPROAD         building_1  598  9  0 Pokémon League
+hg  ss_aqua_1f                              307   42  171  278  156  259 -          interior       johto  SEQ_GS_KOUSOKUSEN        building_1  406  9  4 S.S. Aqua
+hg  ss_aqua_captain_room                    308   42  172  279  157  260 -          interior       johto  SEQ_GS_KOUSOKUSEN        building_1  407  9  4 S.S. Aqua
+hg  ss_aqua_1f_southeast_rooms              309   42  173  280  158  261 -          interior       johto  SEQ_GS_KOUSOKUSEN        building_1  408  9  4 S.S. Aqua
+hg  ss_aqua_1f_southwest_rooms              310   42  174  281  159    3 -          interior       johto  SEQ_GS_KOUSOKUSEN        building_1  409  9  4 S.S. Aqua
+hg  ss_aqua_1f_northeast_rooms              311   42  175  282  160    3 -          interior       johto  SEQ_GS_KOUSOKUSEN        building_1  410  9  4 S.S. Aqua
+hg  ruins_of_alph_northeast_entrance_first_room  312   72   34  283   39   74 -          cave           johto  SEQ_GS_D_CHIKATSUURO     building_3  300  4  4 Ruins of Alph
+hg  ruins_of_alph_northeast_hidden_room     313   72   35  284   40    3 -          cave           johto  SEQ_GS_D_CHIKATSUURO     building_3  301  4  4 Ruins of Alph
+hg  ruins_of_alph_southeast_entrance_first_room  314   72   34  285   41   75 -          cave           johto  SEQ_GS_D_CHIKATSUURO     building_3  302  4  4 Ruins of Alph
+hg  ruins_of_alph_underground_hall          315  105   37  286   42   76 D24R0205   cave           johto  SEQ_GS_D_UNKNOWN_ISEKI   building_3  303  4  0 Ruins of Alph
+hg  ruins_of_alph_southwest_entrance_first_room  316   72   34  287   43   77 -          cave           johto  SEQ_GS_D_CHIKATSUURO     building_3  304  4  4 Ruins of Alph
+hg  ruins_of_alph_southwest_hidden_room     317   72   39  288   44    3 -          cave           johto  SEQ_GS_D_CHIKATSUURO     building_3  305  4  4 Ruins of Alph
+hg  ruins_of_alph_northwest_entrance_first_room  318   72   34  289   45    3 -          cave           johto  SEQ_GS_D_CHIKATSUURO     building_3  306  4  4 Ruins of Alph
+hg  ruins_of_alph_northwest_hidden_room     319   72   41  290   46    3 -          cave           johto  SEQ_GS_D_CHIKATSUURO     building_3  307  4  4 Ruins of Alph
+hg  ruins_of_alph_southeast_hidden_room     320   72  180  291   47    3 -          cave           johto  SEQ_GS_D_CHIKATSUURO     building_3  308  4  4 Ruins of Alph
+hg  ruins_of_alph_research_center           321   61  273  292   38   73 -          interior       johto  SEQ_GS_D_CHIKATSUURO     building_1  299  9  4 Ruins of Alph
+hg  route_27_house                          322   25   66  293  222  370 -          interior       kanto  SEQ_GS_R_1_26            building_1  467  9  4 Route 27
+hg  ruins_of_alph_hall_entrance             323  105  181  294   48   79 -          cave           johto  SEQ_GS_D_CHIKATSUURO     building_3  309  4  4 Ruins of Alph
+hg  ruins_of_alph_northeast_entrance_second_room  324   72  182  295   49   80 -          cave           johto  SEQ_GS_D_CHIKATSUURO     building_3  310  4  4 Ruins of Alph
+hg  ruins_of_alph_southeast_entrance_second_room  325   72  182  296   50   81 -          cave           johto  SEQ_GS_D_CHIKATSUURO     building_3  311  4  4 Ruins of Alph
+hg  ruins_of_alph_northwest_entrance_second_room  326   72  182  297   51   82 -          cave           johto  SEQ_GS_D_CHIKATSUURO     building_3  312  4  4 Ruins of Alph
+hg  ruins_of_alph_southwest_entrance_second_room  327   72  182  298   52   83 -          cave           johto  SEQ_GS_D_CHIKATSUURO     building_3  313  4  4 Ruins of Alph
+hg  ss_aqua_1f_northwest_rooms              328   42  176  299  161  262 -          interior       johto  SEQ_GS_KOUSOKUSEN        building_1  411  9  4 S.S. Aqua
+hg  ss_aqua_b1f                             329   42  177  300  162  263 -          interior       johto  SEQ_GS_KOUSOKUSEN        building_3  412  9  4 S.S. Aqua
+hg  ss_aqua_olivine_port_exterior           330   94  178  301  153  256 -          city_town      johto  SEQ_GS_C_ASAGI           city        403  1  0 Olivine City
+hg  route_34_daycare                        331   27  179  302  238  385 -          interior       johto  SEQ_GS_R_4_34            building_1  483  9  4 Route 34
+hg  bell_tower_2f                           332   77   16  303  139    3 D17R0102   cave           johto  SEQ_GS_TO_SUZU           building_3  399  4  0 Bell Tower
+hg  bell_tower_3f                           333   77   17  304  139    3 D17R0103   cave           johto  SEQ_GS_TO_SUZU           building_3  399  4  0 Bell Tower
+hg  bell_tower_4f                           334   77   18  305  139    3 D17R0104   cave           johto  SEQ_GS_TO_SUZU           building_3  399  4  0 Bell Tower
+hg  bell_tower_5f                           335   77   19  306  139    3 D17R0105   cave           johto  SEQ_GS_TO_SUZU           building_3  399  4  0 Bell Tower
+hg  bell_tower_6f                           336   77   20  307  139    3 D17R0106   cave           johto  SEQ_GS_TO_SUZU           building_3  399  4  0 Bell Tower
+hg  bell_tower_7f                           337   77   21  308   20    3 D17R0107   cave           johto  SEQ_GS_TO_SUZU           building_3  281  4  0 Bell Tower
+hg  bell_tower_8f                           338   77   22  309  139    3 D17R0108   cave           johto  SEQ_GS_TO_SUZU           building_3  399  4  0 Bell Tower
+hg  bell_tower_9f                           339   77   23  310  139    3 D17R0109   cave           johto  SEQ_GS_TO_SUZU           building_3  399  4  0 Bell Tower
+hg  bell_tower_roof                         340   91   24  311   21   58 -          cave           johto  SEQ_SILENCE_FIELD        city        282  4 13 Bell Tower
+hg  bell_tower_10f                          341   77  183  312  139    3 D17R0112   cave           johto  SEQ_GS_TO_SUZU           building_3  399  4  0 Bell Tower
+hg  cliff_cave                              342   70  184  313  129  144 D50R0101   cave           johto  SEQ_GS_SAFARI_ROAD       cave_1      390  4  0 Cliff Cave
+hg  safari_zone_01                          343   75  197    0  139    3 -          cave           johto  SEQ_GS_R_6_34            general     399  7  4 Safari Zone
+hg  safari_zone_02                          344   75  198    0  139    3 -          cave           johto  SEQ_GS_R_6_34            general     399  7  4 Safari Zone
+hg  safari_zone_03                          345   75  199    0  139    3 -          cave           johto  SEQ_GS_R_6_34            general     399  7  4 Safari Zone
+hg  safari_zone_04                          346   75  200    0  139    3 -          cave           johto  SEQ_GS_R_6_34            general     399  7  4 Safari Zone
+hg  safari_zone_05                          347   75  201    0  139    3 -          cave           johto  SEQ_GS_R_6_34            general     399  7  4 Safari Zone
+hg  safari_zone_06                          348   75  202    0  139    3 -          cave           johto  SEQ_GS_R_6_34            general     399  7  4 Safari Zone
+hg  safari_zone_07                          349   75  203    0  139    3 -          cave           johto  SEQ_GS_R_6_34            general     399  7  4 Safari Zone
+hg  safari_zone_08                          350   75  204    0  139    3 -          cave           johto  SEQ_GS_R_6_34            general     399  7  4 Safari Zone
+hg  safari_zone_09                          351   75  205    0  139    3 -          cave           johto  SEQ_GS_R_6_34            general     399  7  4 Safari Zone
+hg  safari_zone_10                          352   75  206    0  139    3 -          cave           johto  SEQ_GS_R_6_34            general     399  7  4 Safari Zone
+hg  safari_zone_11                          353   75  207    0  139    3 -          cave           johto  SEQ_GS_R_6_34            general     399  7  4 Safari Zone
+hg  safari_zone_12                          354   75  208    0  139    3 -          cave           johto  SEQ_GS_R_6_34            general     399  7  4 Safari Zone
+hg  safari_zone_13                          355   75  209    0  139    3 -          cave           johto  SEQ_GS_R_6_34            general     399  7  4 Safari Zone
+hg  safari_zone_14                          356   75  210    0  139    3 -          cave           johto  SEQ_GS_R_6_34            general     399  7  4 Safari Zone
+hg  safari_zone_entrance_exterior           357   75  212  314  120    3 D47R0102   route          johto  SEQ_GS_SAFARI_FIELD      general     381  9  0 Safari Zone
+hg  vermilion_pokecenter_1f                 358   26   73  315  779  486 -          interior       kanto  SEQ_GS_POKESEN           building_1  552  9  4 Vermilion City
+hg  vermilion_pokecenter_b1f                359   26   77  316  780    3 -          interior       kanto  SEQ_GS_POKESEN           building_1  553  9  4 Vermilion City
+hg  vermilion_pokemart                      360   27  104  317  777  484 -          interior       kanto  SEQ_GS_FS                building_1  550  9  4 Vermilion City
+hg  vermilion_fishing_dude_house            361   25   95  318  781  487 -          interior       kanto  SEQ_GS_C_KUCHIBA         building_1  554  9  4 Vermilion City
+hg  vermilion_pokemon_fan_club              362   40  185  319  782  488 -          interior       kanto  SEQ_GS_C_KUCHIBA         building_1  555  9  4 Vermilion City
+hg  vermilion_central_house                 363   25   95  320  783  489 -          interior       kanto  SEQ_GS_C_KUCHIBA         building_1  556  9  4 Vermilion City
+hg  vermilion_south_house                   364   25   95  321  784  490 -          interior       kanto  SEQ_GS_C_KUCHIBA         building_1  557  9  4 Vermilion City
+hg  vermilion_gym                           365   49  255  322  778  485 -          interior       kanto  SEQ_GS_GYM               building_1  551  9  9 Vermilion City
+hg  route_40_battle_frontier_gatehouse      366   63   69  323  963  745 -          interior       johto  SEQ_GS_R_6_34            building_1  732  9  4 Route 40
+hg  olivine_pokecenter_b1f                  367   26   77  324  915    3 -          interior       johto  SEQ_GS_POKESEN           building_1  688  9  4 Olivine City
+hg  mahogany_pokecenter_b1f                 368   26   77  325  936    3 -          interior       johto  SEQ_GS_POKESEN           building_1  709  9  4 Mahogany Town
+hg  blackthorn_pokecenter_b1f               369   26   77  326  945    3 -          interior       johto  SEQ_GS_POKESEN           building_1  718  9  4 Blackthorn City
+hg  celadon_department_store_1f             370   39  215  327  789  494 -          interior       kanto  SEQ_GS_FS                building_1  562  9  4 Celadon City
+hg  celadon_department_store_2f             371   39  216  328  790  495 -          interior       kanto  SEQ_GS_FS                building_1  563  9  4 Celadon City
+hg  celadon_department_store_3f             372   39  217  329  791  496 -          interior       kanto  SEQ_GS_FS                building_1  564  9  4 Celadon City
+hg  celadon_department_store_4f             373   39  218  330  792  497 -          interior       kanto  SEQ_GS_FS                building_1  565  9  4 Celadon City
+hg  celadon_department_store_5f             374   39  219  331  793  498 -          interior       kanto  SEQ_GS_FS                building_1  566  9  4 Celadon City
+hg  celadon_department_store_roof           375   39  220  332  794  499 -          interior       kanto  SEQ_GS_FS                building_1  567  9  4 Celadon City
+hg  celadon_condominiums_1f                 376   39  221  333  796  501 -          interior       kanto  SEQ_GS_C_TAMAMUSHI       building_1  569  9  4 Celadon City
+hg  celadon_condominiums_2f                 377   39  222  334  797  502 -          interior       kanto  SEQ_GS_C_TAMAMUSHI       building_1  570  9  4 Celadon City
+hg  celadon_condominiums_3f                 378   39  223  335  798  503 -          interior       kanto  SEQ_GS_C_TAMAMUSHI       building_1  571  9  4 Celadon City
+hg  celadon_condominiums_roof               379   95  224  336  799  504 -          city_town      kanto  SEQ_GS_C_TAMAMUSHI       building_1  572  9  3 Celadon City
+hg  celadon_condominiums_roof_room          380   40  225  337  800  505 -          interior       kanto  SEQ_GS_C_TAMAMUSHI       building_1  573  9  4 Celadon City
+hg  celadon_game_corner_jp                  381   40  213  338  803  508 -          interior       kanto  SEQ_GS_GAME              building_1  576  9  4 Celadon City
+hg  celadon_prize_corner                    382   40  214  339  804  509 -          interior       kanto  SEQ_GS_GAME              building_1  577  9  4 Celadon City
+hg  celadon_restaurant                      383   40  226  340  805  510 -          interior       kanto  SEQ_GS_C_TAMAMUSHI       building_1  578  9  4 Celadon City
+hg  new_bark_rival_house_2f                 384   25   72  341  849  549 -          interior       johto  SEQ_GS_T_WAKABA          building_1  622  9  4 New Bark Town
+hg  cianwood_north_house                    385   25   95  342  884  580 -          interior       johto  SEQ_GS_C_TANBA           building_1  657  9  4 Cianwood City
+hg  ss_aqua_vermilion_port_interior         386   39  186  343  154  257 -          interior       kanto  SEQ_GS_C_KUCHIBA         building_1  404  9  4 Vermilion City
+hg  ss_aqua_vermilion_port_exterior         387   94  211  344  155  258 -          city_town      kanto  SEQ_GS_C_KUCHIBA         city        405  1  0 Vermilion City
+hg  route_10_south                          388   14    0  345  194  343 -          route          kanto  SEQ_GS_R_13_03           mountain    439  3  0 Route 10
+hg  route_6_saffron_gatehouse               389   63   69  346  185  335 -          interior       kanto  SEQ_GS_R_10_03           building_1  430  9  4 Route 6
+hg  route_8_saffron_gatehouse               390   63   70  347  189  339 -          interior       kanto  SEQ_GS_R_13_03           building_1  434  9  4 Route 8
+hg  route_5_saffron_gatehouse               391   63   69  348  182  332 -          interior       kanto  SEQ_GS_R_12_03           building_1  427  9  4 Route 5
+hg  route_15_fuchsia_gatehouse              392   63   70  349  204  353 -          interior       kanto  SEQ_GS_R_13_11           building_1  449  9  4 Route 15
+hg  celadon_pokecenter_1f                   393   26   73  350  787  493 -          interior       kanto  SEQ_GS_POKESEN           building_1  560  9  4 Celadon City
+hg  celadon_pokecenter_b1f                  394   26   77  351  788    3 -          interior       kanto  SEQ_GS_POKESEN           building_1  561  9  4 Celadon City
+hg  celadon_gym                             395   52  258  352  786  492 -          interior       kanto  SEQ_GS_GYM               building_1  559  9  0 Celadon City
+hg  mahogany_gym_room_2                     396   34  228  353  139    3 -          interior       johto  SEQ_GS_GYM               building_2  399  9  0 Mahogany Town
+hg  mahogany_gym_room_1                     397   34   93  354  934  623 -          interior       johto  SEQ_GS_GYM               building_2  707  9  0 Mahogany Town
+hg  saffron_fighting_dojo                   398   40  192  355  832  533 -          interior       kanto  SEQ_GS_C_YAMABUKI        building_1  605  9  4 Saffron City
+hg  saffron_mr_psychic_house                399   25   97  356  833  534 -          interior       kanto  SEQ_GS_C_YAMABUKI        building_1  606  9  4 Saffron City
+hg  saffron_magnet_train_station_1f         400   48  187  357  834  535 -          interior       kanto  SEQ_GS_C_YAMABUKI        building_1  607  9  4 Saffron City
+hg  saffron_magnet_train_station_2f         401   48  188  358  835  536 -          interior       kanto  SEQ_GS_C_YAMABUKI        building_1  608  9  4 Saffron City
+hg  saffron_silph_co_hq                     402   39  189  359  837  537 -          interior       kanto  SEQ_GS_C_YAMABUKI        building_1  610  9  4 Saffron City
+hg  saffron_silph_co_rotom_room             403   39  241  360  838  538 -          interior       kanto  SEQ_GS_C_YAMABUKI        building_1  611  9  4 ROTOM’s Room
+hg  saffron_copycat_house_1f                404   39  190  361  840  540 -          interior       kanto  SEQ_GS_C_YAMABUKI        building_1  613  9  4 Saffron City
+hg  saffron_copycat_house_2f                405   39  191  362  841  541 -          interior       kanto  SEQ_GS_C_YAMABUKI        building_1  614  9  4 Saffron City
+hg  saffron_unused                          406   40   66    0  139    3 -          interior       kanto  SEQ_GS_C_YAMABUKI        building_1  399  9  4 Saffron City
+hg  saffron_pokecenter_1f                   407   26   73  363  830  532 -          interior       kanto  SEQ_GS_POKESEN           building_1  603  9  4 Saffron City
+hg  saffron_pokecenter_2f                   408   26   77  364  831    3 -          interior       kanto  SEQ_GS_POKESEN           building_1  604  9  4 Saffron City
+hg  saffron_pokemart                        409   27  104  365  828  530 -          interior       kanto  SEQ_GS_FS                building_1  601  9  4 Saffron City
+hg  saffron_gym                             410   50  256  366  829  531 -          interior       kanto  SEQ_GS_GYM               building_1  602  9  0 Saffron City
+hg  battle_frontier_frontier_access         411   93  240  367   81  104 -          city_town      johto  SEQ_GS_BATTLETOWER       city        342  1  8 Frontier Access
+hg  goldenrod_global_terminal_2f            412   45  238  368  908  601 -          interior       johto  SEQ_GS_WIFITOWER         building_1  681  9  4 Global Terminal
+hg  goldenrod_global_terminal_3f            413   45  239  369  909  602 -          interior       johto  SEQ_GS_WIFITOWER         building_1  682  9  4 Global Terminal
+hg  route_2_east                            414   17    0  370  170  321 R02R0101   route          kanto  SEQ_GS_R_16_03           general     415  3  0 Route 2
+hg  route_16_house                          415   25   66  371  206  355 -          interior       kanto  SEQ_GS_R_14_03           building_1  451  9  4 Route 16
+hg  route_20_unused                         416   16    0    0  139    3 -          route          kanto  SEQ_GS_R_17_03           building_1  399  6  0 Route 20
+hg  route_2_house                           417   25   66  372  171  322 -          interior       kanto  SEQ_GS_R_16_03           building_1  416  9  4 Route 2
+hg  route_2_southeast_gatehouse             418   63   69  373  172  323 -          interior       kanto  SEQ_GS_R_16_03           building_1  417  9  4 Route 2
+hg  route_2_viridian_forest_south_gatehouse  419   63   69  374  173  324 -          interior       kanto  SEQ_GS_R_16_03           building_1  418  9  4 Route 2
+hg  route_2_viridian_forest_north_gatehouse  420   63   69  375  174  325 -          interior       kanto  SEQ_GS_R_16_03           building_1  419  9  4 Route 2
+hg  route_16_gatehouse                      421   63   70  376  207  356 -          interior       kanto  SEQ_GS_R_14_03           building_1  452  9  4 Route 16
+hg  route_16_east                           422   15    0  377  208    3 R16R0301   route          kanto  SEQ_GS_R_14_03           general     453  3  0 Route 16
+hg  route_18_gatehouse                      423   63   70  378  211  359 -          interior       kanto  SEQ_GS_R_15_03           building_1  456  9  4 Route 18
+hg  route_19_fuchsia_gatehouse              424   63   69  379  959  741 -          interior       kanto  SEQ_GS_R_15_03           building_1  728  9  4 Route 19
+hg  route_19_route_12_gatehouse             425   63   70  380  198  347 -          interior       kanto  SEQ_GS_R_10_11           building_1  443  9  4 Route 11
+hg  cerulean_pokemart                       426   27  104  381  759  468 -          interior       kanto  SEQ_GS_FS                building_1  532  9  4 Cerulean City
+hg  cerulean_gym                            427   51  257  382  760  469 -          interior       kanto  SEQ_GS_GYM               building_1  533  9  0 Cerulean City
+hg  cerulean_pokecenter_1f                  428   26   73  383  761  470 -          interior       kanto  SEQ_GS_POKESEN           building_1  534  9  4 Cerulean City
+hg  cerulean_north_house                    429   25   96  384  763  471 -          interior       kanto  SEQ_GS_C_HANADA          building_1  536  9  4 Cerulean City
+hg  cerulean_east_house                     430   25   97  385  764  472 -          interior       kanto  SEQ_GS_C_HANADA          building_1  537  9  4 Cerulean City
+hg  cerulean_west_house                     431   25   96  386  765  473 -          interior       kanto  SEQ_GS_C_HANADA          building_1  538  9  4 Cerulean City
+hg  cerulean_bike_maniac_house              432   27  274  387  766  474 -          interior       kanto  SEQ_GS_C_HANADA          building_1  539  9  4 Cerulean City
+hg  lavender_pokemart                       433   27  104  388  768  476 -          interior       kanto  SEQ_GS_FS                building_1  541  9  4 Lavender Town
+hg  lavender_pokecenter_1f                  434   26   73  389  769  477 -          interior       kanto  SEQ_GS_POKESEN           building_1  542  9  4 Lavender Town
+hg  lavender_volunteer_pokemon_house        435   40  193  390  771  478 -          interior       kanto  SEQ_GS_T_CHION           building_1  544  9  4 Lavender Town
+hg  lavender_southwest_house                436   25   96  391  772  479 -          interior       kanto  SEQ_GS_T_CHION           building_1  545  9  4 Lavender Town
+hg  lavender_name_rater                     437   42  140  392  773  480 -          interior       kanto  SEQ_GS_T_CHION           building_1  546  9  4 Lavender Town
+hg  lavender_house_of_memories              438   40  194  393  774  481 -          interior       kanto  SEQ_GS_T_CHION           building_1  547  9  4 Lavender Town
+hg  lavender_radio_station                  439   39  195  394  775  482 -          interior       kanto  SEQ_GS_T_CHION           building_1  548  9  4 Lavender Town
+hg  route_25_sea_cottage                    440   43  254  395  217  364 -          interior       kanto  SEQ_GS_R_12_24           building_1  462  9  4 Route 25
+hg  goldenrod_department_store_elevator     441   44  262  396  905  598 -          interior       johto  SEQ_GS_FS                building_1  678  9  4 Goldenrod City
+hg  celadon_department_store_elevator       442   44  262  397  795  500 -          interior       kanto  SEQ_GS_FS                building_1  568  9  4 Celadon City
+hg  celadon_condominiums_left_elevator      443   44  262  398  801  506 -          interior       kanto  SEQ_GS_C_TAMAMUSHI       building_1  574  9  4 Celadon City
+hg  celadon_condominiums_right_elevator     444   44  262  399  802  507 -          interior       kanto  SEQ_GS_C_TAMAMUSHI       building_1  575  9  4 Celadon City
+hg  saffron_silph_co_elevator               445   44  262  400  839  539 -          interior       kanto  SEQ_GS_C_YAMABUKI        building_1  612  9  4 Saffron City
+hg  olivine_lighthouse_elevator             446   44  262  401   67   95 -          interior       johto  SEQ_GS_TO_TOUDAI         building_1  328  9  4 Lighthouse
+hg  goldenrod_radio_tower_elevator          447   44  262  402   35   71 -          interior       johto  SEQ_GS_C_KOGANE          building_1  296  9  4 Radio Tower
+hg  mount_moon_square_entrance              448   70    4  403    8    3 D02R0102   cave           kanto  SEQ_GS_D_CHIKATSUURO     cave_1      269  4  0 Mt. Moon
+hg  mount_moon_square                       449   97    5  404    9   50 D02R0103   route          kanto  SEQ_GS_D_CHIKATSUURO     general     270  4  0 Mt. Moon
+hg  cerulean_cave_2f                        450   73   79  405  139    3 D03R0102   cave           kanto  SEQ_GS_D_IWAYAMA         cave_1      399  4  0 Cerulean Cave
+hg  cerulean_cave_b1f                       451   73   80  406   11    3 D03R0103   cave           kanto  SEQ_GS_D_IWAYAMA         cave_2      272  4  0 Cerulean Cave
+hg  rock_tunnel_b1f                         452   83    7  407  139    3 D05R0102   cave           kanto  SEQ_GS_D_IWAYAMA         cave_2      399  4  0 Rock Tunnel
+hg  seafoam_islands_b1f                     453  104   82  408   13    3 D11R0102   cave           kanto  SEQ_GS_D_KOORINONUKE     cave_2      274  4  0 Seafoam Islands
+hg  seafoam_islands_b2f                     454  104   83  409  139    3 D11R0103   cave           kanto  SEQ_GS_D_KOORINONUKE     cave_3      399  4  0 Seafoam Islands
+hg  seafoam_islands_b3f                     455  104   84  410  139    3 D11R0104   cave           kanto  SEQ_GS_D_KOORINONUKE     cave_3      399  4  0 Seafoam Islands
+hg  seafoam_islands_b4f                     456  104   85  411   14    3 D11R0105   cave           kanto  SEQ_GS_D_KOORINONUKE     cave_3      275  4  0 Seafoam Islands
+hg  seafoam_islands_cinnabar_gym            457   81  264  412   15   53 -          cave           kanto  SEQ_GS_GYM               cave_3      276  4  0 Seafoam Islands
+hg  seafoam_islands_unused                  458   70  264    0  139    3 -          cave           kanto  SEQ_GS_D_KOORINONUKE     cave_1      399  4  0 Seafoam Islands
+hg  mount_silver_cave_upper_mountainside    459   96  266  413  139    3 D41R0102   cave           johto  SEQ_GS_TO_TOUDAI         snow        399  4  0 Mt. Silver Cave
+hg  mount_silver_cave_lower_mountainside    460  102  267  414  139    3 D41R0103   cave           johto  SEQ_GS_TO_TOUDAI         mountain    399  4  0 Mt. Silver Cave
+hg  mount_silver_cave_expert_belt_chamber   461   80  268  415  139    3 D41R0104   cave           johto  SEQ_GS_TO_TOUDAI         cave_2      399  4  0 Mt. Silver Cave
+hg  mount_silver_cave_moltres_chamber       462   80  269  416  106    3 D41R0105   cave           johto  SEQ_GS_TO_TOUDAI         cave_2      367  4  0 Mt. Silver Cave
+hg  mount_silver_cave_2f                    463   80  270  417  139    3 D41R0106   cave           johto  SEQ_GS_TO_TOUDAI         cave_1      399  4  0 Mt. Silver Cave
+hg  mount_silver_cave_3f                    464   80  271  418  139    3 D41R0107   cave           johto  SEQ_GS_TO_TOUDAI         cave_1      399  4  0 Mt. Silver Cave
+hg  mount_silver_cave_summit                465   96  272  419  107  126 -          cave           johto  SEQ_SILENCE_FIELD        snow        368  4  0 Mt. Silver Cave
+hg  route_10_pokecenter_1f                  466   26   73  420  192  342 -          interior       kanto  SEQ_GS_POKESEN           building_1  437  9  4 Route 10
+hg  route_10_power_plant_repaired           467   44  251  421  195  344 -          interior       kanto  SEQ_GS_C_NIBI            building_1  440  9  4 Power Plant
+hg  route_5_unused                          468   44  252    0  139    3 -          interior       kanto  SEQ_GS_R_12_03           building_1  399  9  4 Route 5
+hg  route_5_underground_path_gate           469   44  253  422  180  330 -          interior       kanto  SEQ_GS_D_IWAYAMA         building_1  425  9  4 Route 5
+hg  route_6_underground_path_gate           470   44  253  423  139    3 -          interior       kanto  SEQ_GS_D_IWAYAMA         building_1  399  9  4 Route 6
+hg  pewter_museum_of_science                471   44  242  424  755  464 -          interior       kanto  SEQ_GS_C_NIBI            building_1  528  9  4 Pewter City
+hg  pewter_northeast_house                  472   25   66  425  756  465 -          interior       kanto  SEQ_GS_C_NIBI            building_1  529  9  4 Pewter City
+hg  pewter_gym                              473   54  260  426  752  462 -          interior       kanto  SEQ_GS_GYM               building_1  525  9  0 Pewter City
+hg  pewter_pokemart                         474   27  104  427  751  461 -          interior       kanto  SEQ_GS_FS                building_1  524  9  4 Pewter City
+hg  pewter_pokecenter_1f                    475   26   73  428  753  463 -          interior       kanto  SEQ_GS_POKESEN           building_1  526  9  4 Pewter City
+hg  pewter_pokecenter_b1f                   476   26   77  429  754    3 -          interior       kanto  SEQ_GS_POKESEN           building_1  527  9  4 Pewter City
+hg  pewter_southwest_house                  477   25   66  430  757  466 -          interior       kanto  SEQ_GS_C_NIBI            building_1  530  9  4 Pewter City
+hg  fuchsia_pokemart                        478   27  104  431  808  513 -          interior       kanto  SEQ_GS_FS                building_1  581  9  4 Fuchsia City
+hg  fuchsia_pal_park_entrance               479   44  243  432  812  516 -          interior       kanto  SEQ_GS_C_SEKICHIKU       building_1  585  9  4 Pal Park
+hg  fuchsia_gym                             480   53  259  433  809  514 -          interior       kanto  SEQ_GS_GYM               building_1  582  9 14 Fuchsia City
+hg  fuchsia_southwest_house                 481   25   96  434  813  517 -          interior       kanto  SEQ_GS_C_SEKICHIKU       building_1  586  9  4 Fuchsia City
+hg  fuchsia_pokecenter_1f                   482   26   73  435  810  515 -          interior       kanto  SEQ_GS_POKESEN           building_1  583  9  4 Fuchsia City
+hg  fuchsia_safari_zone_warden_house        483   25   97  436  814  518 -          interior       kanto  SEQ_GS_C_SEKICHIKU       building_1  587  9  4 Fuchsia City
+hg  route_10_pokecenter_b1f                 484   26   77  437  193    3 -          interior       kanto  SEQ_GS_POKESEN           building_1  438  9  4 Route 10
+hg  fuchsia_pokecenter_b1f                  485   26   77  438  811    3 -          interior       kanto  SEQ_GS_POKESEN           building_1  584  9  4 Fuchsia City
+hg  whirl_islands_b3f                       486   98  275  439  139    3 D40R0106   cave           johto  SEQ_GS_D_CHIKATSUURO     cave_3      399  4 10 Whirl Islands
+hg  national_park_bug_catching_contest      487   71   27  440   26   63 D22R0102   city_town      johto  SEQ_GS_TAIKAI            general     287  7  0 National Park
+hg  national_park_unused                    488   71   27    0  139    3 -          city_town      johto  SEQ_GS_D_KOUEN           general     399  7  0 National Park
+hg  route_10_power_plant_broken             489   44  276  441  196  345 -          interior       kanto  SEQ_GS_C_NIBI            building_1  441  9  4 Power Plant
+hg  ruins_of_alph_underground_hall_sinjoh_event  490  105   37  442   53   84 D24R0216   cave           johto  SEQ_GS_D_UNKNOWN_ISEKI   building_3  314  4  0 Ruins of Alph
+hg  ruins_of_alph_hall_entrance_sinjoh_event  491  105  181  443   54   85 D24R0217   cave           johto  SEQ_GS_D_UNKNOWN_ISEKI   building_3  315  4  4 Ruins of Alph
+hg  ruins_of_alph_underground_hall_sinjoh_event_2  492  105   37  444   55   86 D24R0218   cave           johto  SEQ_GS_D_UNKNOWN_ISEKI   building_3  316  4  0 Ruins of Alph
+hg  route_7_saffron_gatehouse               493   63   70  445  187  337 -          interior       kanto  SEQ_GS_R_14_03           building_1  432  9  4 Route 7
+hg  lavender_pokecenter_b1f                 494   26   77  446  770    3 -          interior       kanto  SEQ_GS_POKESEN           building_1  543  9  4 Lavender Town
+hg  cerulean_pokecenter_b1f                 495   26   77  447  762    3 -          interior       kanto  SEQ_GS_POKESEN           building_1  535  9  4 Cerulean City
+hg  viridian_gym                            496   55  261  448  743  454 -          interior       kanto  SEQ_GS_GYM               building_1  516  9  0 Viridian City
+hg  viridian_northeast_house                497   25   96  449  746  456 -          interior       kanto  SEQ_GS_C_TOKIWA          building_1  519  9  4 Viridian City
+hg  viridian_trainer_house_1f               498   43  244  450  747  457 -          interior       kanto  SEQ_GS_C_TOKIWA          building_1  520  9  4 Viridian City
+hg  viridian_trainer_house_b1f              499   43  245  451  748  458 -          interior       kanto  SEQ_GS_C_TOKIWA          building_1  521  9  4 Viridian City
+hg  viridian_pokemart                       500   27  104  452  742  453 -          interior       kanto  SEQ_GS_FS                building_1  515  9  4 Viridian City
+hg  viridian_pokecenter_1f                  501   26   73  453  744  455 -          interior       kanto  SEQ_GS_POKESEN           building_1  517  9  4 Viridian City
+hg  viridian_pokecenter_b1f                 502   26   77  454  745    3 -          interior       kanto  SEQ_GS_POKESEN           building_1  518  9  4 Viridian City
+hg  pallet_town_reds_house_1f               503   43  246  455  736  447 -          interior       kanto  SEQ_GS_T_MASARA          building_1  509  9  4 Pallet Town
+hg  pallet_town_blues_house_1f              504   43  248  456  738  449 -          interior       kanto  SEQ_GS_T_MASARA          building_1  511  9  4 Pallet Town
+hg  pallet_town_oaks_lab                    505   43  250  457  740  451 -          interior       kanto  SEQ_GS_T_MASARA          building_1  513  9  4 Pallet Town
+hg  pallet_town_reds_house_2f               506   43  247  458  737  448 -          interior       kanto  SEQ_GS_T_MASARA          building_1  510  9  4 Pallet Town
+hg  pallet_town_blues_house_2f              507   43  249  459  739  450 -          interior       kanto  SEQ_GS_T_MASARA          building_1  512  9  4 Pallet Town
+hg  cinnabar_island_pokecenter_1f           508   26   73  460  816  520 -          interior       kanto  SEQ_GS_POKESEN           building_1  589  9  4 Cinnabar Island
+hg  cinnabar_island_pokecenter_b1f          509   26   77  461  817    3 -          interior       kanto  SEQ_GS_POKESEN           building_1  590  9  4 Cinnabar Island
+hg  route_28_house                          510   25   66  462  224  372 -          interior       kanto  SEQ_GS_CHAMPROAD         building_1  469  9  4 Route 28
+hg  route_3_pokecenter_1f                   511   26   73  463  176  327 -          interior       kanto  SEQ_GS_POKESEN           building_1  421  9  4 Route 3
+hg  route_3_pokecenter_b1f                  512   26   77  464  177    3 -          interior       kanto  SEQ_GS_POKESEN           building_1  422  9  4 Route 3
+hg  mount_moon_square_clefairy_event        513   97  281  465   10   51 D02R0104   route          kanto  SEQ_GS_OTSUKIMI_EVENT    general     271  4  0 Mt. Moon
+hg  mount_silver_pokecenter_1f              514   26   73  466  950  637 -          interior       johto  SEQ_GS_POKESEN           building_1  723  9  4 Mt. Silver
+hg  mount_silver_pokecenter_b1f             515   26   77  467  951    3 -          interior       johto  SEQ_GS_POKESEN           building_1  724  9  4 Mt. Silver
+hg  wifi_plaza_warp_room                    516   45  280  468  147  212 -          interior       johto  SEQ_GS_POKESEN           building_1  400  9  4 Mystery Zone
+hg  route_5_house                           517   25   66  469  183  333 -          interior       kanto  SEQ_GS_R_12_03           building_1  428  9  4 Route 5
+hg  mount_moon_square_shop                  518   27  139  470    6   48 -          interior       kanto  SEQ_GS_D_CHIKATSUURO     building_1  267  9  4 Mt. Moon
+hg  goldenrod_magnet_train_station_2f_empty  519   48  282  471  895    3 -          interior       johto  SEQ_GS_C_KOGANE          building_1  668  9  4 Goldenrod City
+hg  saffron_magnet_train_station_2f_empty   520   48  283  472  836    3 -          interior       kanto  SEQ_GS_C_YAMABUKI        building_1  609  9  4 Saffron City
+hg  sinjoh_ruins_exterior                   521  100  277  473  130  145 -          route          johto  SEQ_GS_D_SHINTO          general     391  3  0 Sinjoh Ruins
+hg  sinjoh_ruins_mystri_stage               522  101  278  474  131  146 -          cave           johto  SEQ_GS_D_SHINTO          cave_1      392  4  0 Sinjoh Ruins
+hg  sinjoh_ruins_cabin                      523   42  287  475  132  147 -          interior       johto  SEQ_GS_D_SHINTO          building_1  393  9  4 Sinjoh Ruins
+hg  embedded_tower_groudon_room             524   99  279  476  133  148 -          cave           johto  SEQ_GS_D_CHIKATSUURO     cave_1      394  4  0 Embedded Tower
+hg  embedded_tower_kyogre_room              525   99  284  477  134  149 -          cave           johto  SEQ_GS_D_CHIKATSUURO     cave_1      395  4  0 Embedded Tower
+hg  embedded_tower_rayquaza_room            526   99  285  478  135  150 -          cave           johto  SEQ_GS_D_CHIKATSUURO     cave_1      396  4  0 Embedded Tower
+hg  viridian_route_1_gatehouse              527   63   69  479  749  459 -          interior       kanto  SEQ_GS_C_TOKIWA          building_1  522  9  4 Route 1
+hg  frontier_access_pokecenter_1f           528   26   73  480   78  102 -          interior       johto  SEQ_GS_POKESEN           building_1  339  9  4 Frontier Access
+hg  frontier_access_pokecenter_b1f          529   26   77  481   79    3 -          interior       johto  SEQ_GS_POKESEN           building_1  340  9  4 Frontier Access
+hg  frontier_access_pokemart                530   27  104  482   77  101 -          interior       johto  SEQ_GS_FS                building_1  338  9  4 Frontier Access
+hg  frontier_access_move_tutor_house        531   25   97  483   82  105 -          interior       johto  SEQ_GS_BATTLETOWER       building_1  343  9  4 Frontier Access
+hg  route_5_underground_path                532   44  252  484  181  331 -          interior       kanto  SEQ_GS_D_IWAYAMA         building_1  426  9  4 Route 5
+hg  route_12_fishing_brother_house          533   25   66  485  200  349 -          interior       kanto  SEQ_GS_R_13_11           building_1  445  9  4 Route 12
+hg  safari_zone_gate_pokecenter_1f          534   26   73  486  117  134 -          interior       johto  SEQ_GS_POKESEN           building_1  378  9  4 Safari Zone Gate
+hg  safari_zone_gate_pokecenter_b1f         535   26   77  487  118    3 -          interior       johto  SEQ_GS_POKESEN           building_1  379  9  4 Safari Zone Gate
+hg  goldenrod_game_corner                   536   66  286  488  910  603 -          interior       kanto  SEQ_GS_GAME              building_1  683  9  4 Goldenrod City
+hg  celadon_game_corner                     537   66  286  489  806  511 -          interior       kanto  SEQ_GS_GAME              building_1  579  9  4 Celadon City
+hg  unused                                  538    4    0    0  139    3 -          route          johto  SEQ_GS_GAME              building_1  399  6  0 Mystery Zone
+hg  pokemon_league_entrance_wifi_room       539   26   77  490  826    3 -          interior       johto  SEQ_GS_POKESEN           building_1  599  9  4 Pokémon League

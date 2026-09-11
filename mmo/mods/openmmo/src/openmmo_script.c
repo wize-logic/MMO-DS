@@ -8,6 +8,7 @@
 #include "savedata.h"
 #include "save_player.h"
 #include "struct_defs/player_data.h"
+#include "trainer_info.h"
 #include "vars_flags.h"
 
 #include "../../../include/client.h"
@@ -16,10 +17,24 @@
  * this stops compiling here rather than silently truncating a seat. */
 typedef char openmmo_script_flag_fit[
     (MMO_SCRIPT_FLAG_MAX == NUM_FLAGS) ? 1 : -1];
+/* The badge rows and the respawn row sit in the same band (client.h). */
+typedef char openmmo_badge_rows_in_band[
+    (MMO_SCRIPT_FLAG_BADGE_BASE >= OPENMMO_SYNTHETIC_FLAGS_START
+     && MMO_SCRIPT_FLAG_BADGE_BASE + MMO_SCRIPT_BADGE_COUNT
+        <= PORTED_TRAINER_DEFEATED_FLAGS_START
+     && MMO_SCRIPT_VAR_RESPAWN >= OPENMMO_SYNTHETIC_FLAGS_START
+     && MMO_SCRIPT_VAR_RESPAWN
+        < PORTED_TRAINER_DEFEATED_FLAGS_START) ? 1 : -1];
 typedef char openmmo_script_var_fit[
     (MMO_SCRIPT_VAR_MAX == NUM_VARS) ? 1 : -1];
 typedef char openmmo_script_var_base_fit[
     (MMO_SCRIPT_VAR_BASE == VARS_START) ? 1 : -1];
+
+/* And a synthetic id must stay in the band reserved for it. */
+typedef char openmmo_script_synthetic_fit[
+    (MMO_SCRIPT_FLAG_RUNNING_SHOES >= OPENMMO_SYNTHETIC_FLAGS_START
+     && MMO_SCRIPT_FLAG_RUNNING_SHOES
+        < PORTED_TRAINER_DEFEATED_FLAGS_START) ? 1 : -1];
 
 /* At most this many rows leave in one report. A report is not urgent, the
  * server is being told, not asked, and a burst that does not fit is carried
@@ -41,6 +56,12 @@ static int s_watching;        /* the shadow is live and diffs are worth sending 
 static unsigned s_applied;    /* the seat generation already written to the save */
 static int s_reported;        /* rows sent this session, for the one-line summary */
 static int s_countdown;       /* frames until the next diff */
+/* Two things the engine keeps outside VarsFlags and this report carries as
+ * synthetic rows (client.h): the badge bits in TrainerInfo, and the black-out
+ * warp id in FieldOverworldState. Shadows, like the block's, seeded from the
+ * seat so only what the play changes goes out. */
+static unsigned s_shadow_badges;
+static int s_shadow_respawn;
 
 /* A flag the VM keeps but the server must not: MAP_LOCAL_FLAGS (1..64) is
  * scratch the engine memsets on every map change, and MAP_LOCAL_VARS
@@ -63,6 +84,37 @@ static void shadow_sync(const VarsFlags *vf)
     memcpy(s_shadow_vars, vf->vars, sizeof s_shadow_vars);
 }
 
+/* Take the shadow to be the rows that left, once the packet is on the wire. */
+static void shadow_commit(const mmo_script_flag *flags, int nflags,
+                          const mmo_script_var *vars, int nvars)
+{
+    int i;
+
+    for (i = 0; i < nflags; i++) {
+        int id = flags[i].id;
+
+        if (id >= MMO_SCRIPT_FLAG_BADGE_BASE
+            && id < MMO_SCRIPT_FLAG_BADGE_BASE + MMO_SCRIPT_BADGE_COUNT) {
+            s_shadow_badges |= 1u << (id - MMO_SCRIPT_FLAG_BADGE_BASE);
+        } else if (id >= 0 && id < NUM_FLAGS) {
+            u8 bit = (u8)(1u << (id % 8));
+
+            if (flags[i].on)
+                s_shadow_flags[id / 8] |= bit;
+            else
+                s_shadow_flags[id / 8] &= (u8)~bit;
+        }
+    }
+    for (i = 0; i < nvars; i++) {
+        int id = vars[i].id;
+
+        if (id == MMO_SCRIPT_VAR_RESPAWN)
+            s_shadow_respawn = vars[i].value;
+        else if (id >= VARS_START && id < VARS_START + NUM_VARS)
+            s_shadow_vars[id - VARS_START] = vars[i].value;
+    }
+}
+
 void openmmo_script_state_reset(void)
 {
     /* The save blocks this op also carries are reset with it: they share the
@@ -72,6 +124,8 @@ void openmmo_script_state_reset(void)
     openmmo_save_blocks_reset();
     memset(s_shadow_flags, 0, sizeof s_shadow_flags);
     memset(s_shadow_vars, 0, sizeof s_shadow_vars);
+    s_shadow_badges = 0;
+    s_shadow_respawn = 0;
     s_watching = 0;
     s_applied = 0;
     s_reported = 0;
@@ -163,6 +217,18 @@ void openmmo_script_state_tick(void *fieldSystemVoid, openmmo_client *c)
             PlayerData_SetRunningShoes(pd, TRUE);
             printf("openmmo: running shoes seated\n");
         }
+        /* The badges are seated from the world state (openmmo_boot.c
+         * seat_badges); the seat's rows only tell the shadow what the server
+         * already holds, so a seated badge is not reported straight back. */
+        s_shadow_badges = st->badges;
+        /* The respawn: a fresh save answers 1, the bed in Twinleaf, and
+         * FieldOverworldState never crosses on its own. */
+        s_shadow_respawn = st->respawn;
+        if (st->respawn > 0) {
+            FieldOverworldState_SetBlackOutWarpId(
+                SaveData_GetFieldOverworldState(fs->saveData), (u16)st->respawn);
+            printf("openmmo: respawn seated (warp %d)\n", st->respawn);
+        }
         return;
     }
     if (!s_watching)
@@ -181,12 +247,15 @@ void openmmo_script_state_tick(void *fieldSystemVoid, openmmo_client *c)
 
             if ((diff & (1u << bit)) == 0)
                 continue;
-            /* Advance the shadow only for a row that goes out, so a batch that
-             * hits the cap leaves the rest to be found again next frame. */
-            s_shadow_flags[i] = (u8)((s_shadow_flags[i] & ~(1u << bit))
-                                     | (vf->flags[i] & (1u << bit)));
-            if (id == 0 || flag_is_map_local(id))
+            if (id == 0 || flag_is_map_local(id)) {
+                /* Never sent, so nothing waits on the wire for it. */
+                s_shadow_flags[i] = (u8)((s_shadow_flags[i] & ~(1u << bit))
+                                         | (vf->flags[i] & (1u << bit)));
                 continue;
+            }
+            /* Queued. The shadow advances in shadow_commit, so a batch that
+             * hits the cap, or a send that fails, leaves the rest to be
+             * found again next frame. */
             flags[nflags].id = (u16)id;
             flags[nflags].on = (u8)((vf->flags[i] >> bit) & 1);
             nflags++;
@@ -198,12 +267,46 @@ void openmmo_script_state_tick(void *fieldSystemVoid, openmmo_client *c)
 
         if (vf->vars[i] == s_shadow_vars[i])
             continue;
-        s_shadow_vars[i] = vf->vars[i];
-        if (var_is_map_local(id))
+        if (var_is_map_local(id)) {
+            s_shadow_vars[i] = vf->vars[i];
             continue;
+        }
         vars[nvars].id = (u16)id;
         vars[nvars].value = vf->vars[i];
         nvars++;
+    }
+
+    /* Badges: TrainerInfo bits a gym script sets. Nothing else carried them,
+     * so a badge earned online was gone at the next login. Only a newly set
+     * bit goes out; the engine never clears one. */
+    {
+        const TrainerInfo *info = SaveData_GetTrainerInfo(fs->saveData);
+        unsigned now = 0;
+        int b;
+
+        for (b = 0; info != NULL && b < MMO_SCRIPT_BADGE_COUNT; b++) {
+            if (TrainerInfo_HasBadge(info, b))
+                now |= 1u << b;
+        }
+        for (b = 0; b < MMO_SCRIPT_BADGE_COUNT && nflags < REPORT_FLAGS_MAX; b++) {
+            if (((now & ~s_shadow_badges) & (1u << b)) == 0)
+                continue;
+            flags[nflags].id = (u16)(MMO_SCRIPT_FLAG_BADGE_BASE + b);
+            flags[nflags].on = 1;
+            nflags++;
+        }
+    }
+    /* The respawn: the engine sets it on entering a Pokemon Center
+     * (GetMapBlackOutWarpId), and the server keeps it as the heal location. */
+    {
+        int respawn = FieldOverworldState_GetBlackOutWarpId(
+            SaveData_GetFieldOverworldState(fs->saveData));
+
+        if (respawn != s_shadow_respawn && nvars < REPORT_VARS_MAX) {
+            vars[nvars].id = (u16)MMO_SCRIPT_VAR_RESPAWN;
+            vars[nvars].value = (u16)respawn;
+            nvars++;
+        }
     }
 
     nblocks = openmmo_save_blocks_collect(fs, c, blocks, MMO_SAVE_BLOCK_MAX);
@@ -213,6 +316,7 @@ void openmmo_script_state_tick(void *fieldSystemVoid, openmmo_client *c)
     if (openmmo_client_send_script_state(c, flags, nflags, vars, nvars,
                                          blocks, nblocks) != 0)
         return;
+    shadow_commit(flags, nflags, vars, nvars);
     openmmo_save_blocks_commit(fs);
     s_reported += nflags + nvars;
     /* Name the first of each, so a report that should not have happened can be
@@ -228,4 +332,14 @@ void openmmo_script_state_tick(void *fieldSystemVoid, openmmo_client *c)
                " (%d this session)\n",
                nflags, fwhere, nvars, vwhere, s_reported);
     }
+}
+
+/* The last report of a session, on the way out. */
+void openmmo_script_state_flush(void *fieldSystemVoid, openmmo_client *c)
+{
+    extern void openmmo_save_blocks_release_holds(void);
+
+    openmmo_save_blocks_release_holds();
+    s_countdown = 1; /* the tick's own pre-decrement then reaches zero */
+    openmmo_script_state_tick(fieldSystemVoid, c);
 }

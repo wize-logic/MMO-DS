@@ -18,7 +18,7 @@
 #     bin/SDL2.dll             Windows only, the one library a -static exe
 #                              cannot absorb, and it goes beside the window
 #     res/launcher/            the two pictures the launcher draws
-#     rom/                     where the cartridge image goes, empty here
+#     rom/                     where the three cartridge images go, empty here
 #     mods/                    where content packages go, empty here
 #     revision.txt             the install revision, which the launcher reads
 #
@@ -155,11 +155,63 @@ if [[ "$HOST" == linux ]]; then
     INPUTS+=("$raylib_so|bin/$raylib_so|$MK launcher")
 fi
 
+# This script collects; It does not BUILD.
+mksources() {  # mksources <make variable>...
+    local mf=() v
+    [[ "$HOST" == windows ]] && mf=(-f Makefile.win)
+    for v in "$@"; do
+        make -C "$ROOT" "${mf[@]}" -s "print-$v" 2>/dev/null
+    done | tr ' ' '\n' | while read -r f; do
+        [[ -n "$f" && -f "$f" && "$f" != "$ROOT"/build* ]] && printf '%s\n' "$f"
+    done
+}
+
 missing=0
 for spec in "${INPUTS[@]}"; do
     IFS='|' read -r src _dst how <<<"$spec"
     if [[ ! -f "$BUILD/$src" ]]; then
         printf 'package: no %s -- run `%s`\n' "$BUILD/$src" "$how" >&2
+        missing=1
+        continue
+    fi
+    # Which sources each program is made of, because checking all three
+    # against all of them refuses the window for an edit to the game's mod.
+    # The game is the engine plus this tree's mods; the window and the front
+    # door are this tree's own C and nothing else. A staged library, SDL2
+    # from the toolchain, raylib from its own build, is compiled from none
+    # of it and is collected whatever its date.
+    #
+    # Everything named here has to be something make would rebuild that binary
+    # For, or the two disagree and the release does not go out at all. The
+    # window compiles four files from src/, charcode, deflate, devenv,
+    # platform, the ones VIEWSRC names, and the front door fifteen, so
+    # checking either against the whole of src/ refuses a package for a file it
+    # is not made of, and the refusal cannot be acted on: it says `run make
+    # viewer`, make answers that the viewer is up to date because by its own
+    # dependency graph it is, and there is no third thing to try. That stopped
+    # the r1261 publish on 2026-09-10, on a src/creator.c whose mtime a
+    # checkout had moved and whose contents had not changed.
+    #
+    # So those two are asked about the files the Makefile says they are built
+    # from, name by name (mksources above), and a directory is used only where
+    # every file in it really is a source: the game links the whole of
+    # libopenmmo.a and loads every mod, so mods/, src/ and include/ are all
+    # its. src/ therefore stays checked, through the binary that is actually
+    # made of it, and the same edit still refuses the same package.
+    case "$src" in
+    *.dll|*.so|*.so.*) continue;;
+    fused/*)          sources=("$ROOT/mods" "$ROOT/src" "$ROOT/include");;
+    *openmmo-view*)   mapfile -t sources < <(mksources VIEWSRC VIEWHDR)
+                      [[ ${#sources[@]} -gt 0 ]] || sources=("$ROOT/viewer");;
+    *openmmo-launch*) mapfile -t sources < <(mksources LAUNCHSRC LAUNCHHDR)
+                      [[ ${#sources[@]} -gt 0 ]] || sources=("$ROOT/launcher");;
+    *)                sources=("$ROOT/src" "$ROOT/include");;
+    esac
+    stale=$(find "${sources[@]}" \
+        -type f -newer "$BUILD/$src" -print -quit 2>/dev/null || true)
+    if [[ -n "$stale" ]]; then
+        printf 'package: %s is older than %s -- run `%s`\n' \
+            "$BUILD/$src" "$stale" "$how" >&2
         missing=1
     fi
 done
@@ -251,7 +303,7 @@ else
     cat > "$STAGE/$FRONTDOOR" <<'EOF'
 #!/bin/sh
 # The front door. Everything it starts is beside it in bin/; the cartridge
-# image is in rom/ and is not supplied. --help lists the rest.
+# images are in rom/ and are not supplied. --help lists the rest.
 dir=$(cd "$(dirname "$0")" && pwd)
 PC_MODS_DIR="$dir/mods"; export PC_MODS_DIR
 exec "$dir/bin/openmmo-launch" "$@"

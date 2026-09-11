@@ -9,6 +9,7 @@ import de.fiereu.network.SessionPhase
 import de.fiereu.network.Side
 import de.fiereu.network.StaleClientHelloException
 import de.fiereu.network.TypedProtocolHandler
+import de.fiereu.network.UngreetedClientReadyException
 import de.fiereu.network.addBeforeProtocolLogger
 import de.fiereu.network.cipher.AesCtrSessionCipher
 import de.fiereu.network.handlers.ChecksumFrameDecoder
@@ -37,8 +38,9 @@ internal class ServerSessionHandshakeHandler(
 
   init {
     on<ClientHelloPacket> { event ->
-      // One hello to a session. The answer is a signature over a key that does not change, so a
-      // peer that said hello again bought another one for seventeen bytes, before authenticating.
+      // One hello to a session. The answer is an ECDSA signature over a key that does not change
+      // for the life of the handler, so a peer that said hello again bought another one for the
+      // cost of seventeen bytes, as often as it liked and before authenticating.
       if (greeted) {
         throw AlreadyGreetedException()
       }
@@ -51,7 +53,13 @@ internal class ServerSessionHandshakeHandler(
           EcKeys.toUncompressedPoint(
               ephemeralKeyPair.public as java.security.interfaces.ECPublicKey,
           )
-      val signature = EcKeys.sign(rootPrivate, publicBytes)
+      // Signed with the size and the client's own hello timestamp, not the point alone: see
+      // HandshakeSignature. Both are plaintext on the wire and neither used to be covered.
+      val signature =
+          EcKeys.sign(
+              rootPrivate,
+              HandshakeSignature.payload(publicBytes, options.checksumSize, event.packet.timestamp),
+          )
       event.session.send(
           ServerHelloPacket(
               ephemeralPublic = ephemeralKeyPair.public as java.security.interfaces.ECPublicKey,
@@ -62,6 +70,12 @@ internal class ServerSessionHandshakeHandler(
     }
 
     on<ClientReadyPacket> { event ->
+      // In order, or not at all. A ready on its own used to be answered: the server derived a
+      // key against its own ephemeral private, installed the cipher and moved the session to
+      // ESTABLISHED.
+      if (!greeted) {
+        throw UngreetedClientReadyException()
+      }
       val crypto =
           SessionCryptoState.derive(
               localPrivate = ephemeralKeyPair.private,

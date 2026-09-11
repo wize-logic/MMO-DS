@@ -35,9 +35,8 @@ constructor(
   }
 
   /**
-   * Drops every object in the schema and builds it again from the migrations. There is no undo, and
-   * nothing may be connected: the game server writes cached characters back on a timer, so cleaning
-   * underneath a live one puts the rows straight back.
+   * Drops every object in the schema and builds it again from the migrations. Nothing survives, and
+   * there is no undo.
    */
   fun reset() {
     val flyway = flyway(cleanAllowed = true)

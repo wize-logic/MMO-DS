@@ -9,7 +9,6 @@ import de.fiereu.openmmo.net.game.packets.ContactOnlineStatePacket
 import de.fiereu.openmmo.net.game.packets.FriendAppearance
 import de.fiereu.openmmo.net.game.packets.FriendListEntry
 import de.fiereu.openmmo.net.game.packets.FriendListPacket
-import de.fiereu.openmmo.net.game.packets.FriendProfileRequestPacket
 import de.fiereu.openmmo.net.game.packets.PartyMemberJoinPacket
 import de.fiereu.openmmo.net.game.packets.PartyMemberLeavePacket
 import de.fiereu.openmmo.net.game.packets.RemoveFriendPacket
@@ -34,8 +33,11 @@ constructor(
     private val characterStore: CharacterStore,
 ) {
 
-  fun sendFriendList(ctx: SessionContext) {
+  suspend fun sendFriendList(ctx: SessionContext) {
     val state = ctx.attributes[PLAYER_STATE] ?: return
+    // The account's lists are read in here, on the way into the world, because every other path
+    // that reads them cannot wait on a database.
+    socialStore.load(state.userId)
     ctx.send(buildFriendList(state.userId))
   }
 
@@ -50,7 +52,7 @@ constructor(
     }
   }
 
-  fun onAddFriend(event: PacketEvent<AddFriendPacket>) {
+  suspend fun onAddFriend(event: PacketEvent<AddFriendPacket>) {
     val ctx = event.session
     val state = ctx.attributes[PLAYER_STATE] ?: return
     val name = event.packet.username
@@ -59,7 +61,7 @@ constructor(
     ctx.send(buildFriendList(state.userId))
   }
 
-  fun onRemoveFriend(event: PacketEvent<RemoveFriendPacket>) {
+  suspend fun onRemoveFriend(event: PacketEvent<RemoveFriendPacket>) {
     val ctx = event.session
     val state = ctx.attributes[PLAYER_STATE] ?: return
     val name = event.packet.username
@@ -68,7 +70,7 @@ constructor(
     ctx.send(buildFriendList(state.userId))
   }
 
-  fun onBlockPlayer(event: PacketEvent<BlockPlayerPacket>) {
+  suspend fun onBlockPlayer(event: PacketEvent<BlockPlayerPacket>) {
     val ctx = event.session
     val state = ctx.attributes[PLAYER_STATE] ?: return
     val packet = event.packet
@@ -85,17 +87,13 @@ constructor(
         ))
   }
 
-  fun onUnblockPlayer(event: PacketEvent<UnblockPlayerPacket>) {
+  suspend fun onUnblockPlayer(event: PacketEvent<UnblockPlayerPacket>) {
     val ctx = event.session
     val state = ctx.attributes[PLAYER_STATE] ?: return
     val name = event.packet.username
     val removed = socialStore.unblock(state.userId, name)
     log.info { "UnblockPlayer user=${state.userId} name='$name' removed=$removed" }
     ctx.send(PartyMemberLeavePacket(memberId = syntheticId(name)))
-  }
-
-  fun onFriendProfileRequest(event: PacketEvent<FriendProfileRequestPacket>) {
-    log.info { "FriendProfileRequest targetEntityId=${event.packet.targetEntityId}" }
   }
 
   fun onRequestSocialProfile(event: PacketEvent<RequestSocialProfilePacket>) {

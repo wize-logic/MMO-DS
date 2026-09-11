@@ -162,17 +162,13 @@ constructor(
     return character.pokemon.any { it.container == PokemonContainer.PARTY && !it.isEgg }
   }
 
-  /**
-   * Whether the party this character holds now still passes the queue it signed up for. The team
-   * was checked once, at signup, and nothing looked again, so a player could pass a capped tier
-   * with a legal six and swap in level 100s before the round. The fight is run by the two clients,
-   * so nothing downstream ever sees the team either.
-   */
+  /** Whether the party this character holds now still passes the queue it signed up for. */
   private fun stillLegalFor(queue: MatchmakingQueue, charId: Long): Boolean {
     val rules = QueueRules.of(queue) ?: return true
     val character = store.getCharacter(charId) ?: return false
     val party = character.pokemon.filter { it.container == PokemonContainer.PARTY }
-    if (validator.validate(party, rules, character.info.name) is TeamVerdict.Refused) {
+    val verdict = validator.validate(party, rules, character.info.name)
+    if (verdict is TeamVerdict.Refused) {
       log.warn { "char=$charId leaves the $queue queue: its team no longer passes" }
       sessions.getByCharacterId(charId)?.let { withdraw(it, charId) }
       return false
@@ -224,6 +220,14 @@ constructor(
 
     synchronized(lock) { standing[charId] = wanted }
     log.info { "char=$charId signed up for ${wanted.joinToString(", ")}" }
+    // The unranked half takes a team holding a monster brought in from an offline save, and says so
+    // rather than letting the player find out by being turned away from the ranked queue next to
+    // it.
+    if (wanted.any { !it.ranked } && party.any { it.offlineOrigin }) {
+      session.send(
+          notice(
+              "Pokemon brought in from an offline save can battle here, but not in a ranked queue."))
+    }
     session.send(
         MatchmakingSignupResultPacket(
             queueCount = wanted.size.toByte(),

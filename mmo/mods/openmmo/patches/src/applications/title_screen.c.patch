@@ -5,7 +5,7 @@
  extern const ApplicationManagerTemplate Unk_020F8AB4;
  extern const ApplicationManagerTemplate gOpeningCutsceneAppTemplate;
 +void openmmo_title_name(void *string); /* mods/openmmo/src/openmmo_boot.c */
-+int openmmo_title_hold(void);
++int openmmo_title_hold(int exit); /* 0 start menu, 1 clear save, 2 replay */
 +int openmmo_title_present(void);
 +int openmmo_title_leave(void);
 +int openmmo_title_exit(int nextApp, void *saveData);
@@ -29,7 +29,7 @@
 +        }
 +
          if (JOY_NEW_ONLY(PAD_BUTTON_A) || JOY_NEW_ONLY(PAD_BUTTON_START)) {
-+            if (openmmo_title_hold()) {
++            if (openmmo_title_hold(0)) { /* the start menu */
 +                break;
 +            }
              appData->nextApp = NEXT_APP_START_MENU;
@@ -39,7 +39,7 @@
          }
  
          if (JOY_HELD_ONLY(PAD_BUTTON_B | PAD_KEY_UP | PAD_BUTTON_SELECT)) {
-+            if (openmmo_title_hold()) {
++            if (openmmo_title_hold(1)) { /* the clear-save combo */
 +                break;
 +            }
              appData->nextApp = NEXT_APP_CLEAR_SAVE_FILE;
@@ -49,7 +49,7 @@
          }
  
          if (appData->titleScreenTimer > TITLE_SCREEN_REPLAY_OPENING_FRAMES) {
-+            if (openmmo_title_hold()) {
++            if (openmmo_title_hold(2)) { /* the opening replay */
 +                break;
 +            }
              appData->nextApp = NEXT_APP_REPLAY_OPENING;

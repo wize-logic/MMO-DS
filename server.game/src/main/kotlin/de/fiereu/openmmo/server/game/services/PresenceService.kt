@@ -31,9 +31,10 @@ constructor(
   }
 
   /** Despawn the player from its map observers and drop it from the map group. */
-  fun leave(ctx: SessionContext) {
+  fun leave(ctx: SessionContext, announceDeparture: Boolean = true) {
     val key = currentMapKey(ctx) ?: mapKeyFor(ctx) ?: return
     interestManager.leave(ctx, key)
+    if (!announceDeparture) return
     val entityId = entityIdOf(ctx) ?: return
     for (other in observers(ctx, key)) other.send(EntityLeavePacket(entityId))
   }

@@ -2,6 +2,7 @@ package de.fiereu.openmmo.server.game.storage
 
 import de.fiereu.openmmo.common.CharacterInfo
 import de.fiereu.openmmo.common.ContestConditions
+import de.fiereu.openmmo.common.DEFAULT_FRIENDSHIP
 import de.fiereu.openmmo.common.DynamicWarp
 import de.fiereu.openmmo.common.HealLocation
 import de.fiereu.openmmo.common.Pokemon
@@ -54,6 +55,9 @@ interface CharacterRepository {
 
   /** Deletes a character owned by the user. */
   suspend fun deleteById(userId: Int, id: Long): Boolean
+
+  /** Which of [seeds] some character other than [exceptOwner] is holding. */
+  suspend fun seedsHeldElsewhere(seeds: Set<Int>, exceptOwner: Long): Set<Int>
 }
 
 @Singleton private val log = KotlinLogging.logger {}
@@ -112,6 +116,19 @@ constructor(
             .execute() == 1
       }
 
+  override suspend fun seedsHeldElsewhere(seeds: Set<Int>, exceptOwner: Long): Set<Int> {
+    if (seeds.isEmpty()) return emptySet()
+    return withContext(dispatcher) {
+      dsl.selectDistinct(POKEMON.SEED)
+          .from(POKEMON)
+          .where(POKEMON.SEED.`in`(seeds))
+          .and(POKEMON.OWNER_ID.ne(exceptOwner))
+          .fetch()
+          .mapNotNull { it.value1() }
+          .toSet()
+    }
+  }
+
   private fun writeChanges(
       tx: DSLContext,
       previous: StoredCharacter?,
@@ -163,11 +180,12 @@ constructor(
   }
 
   private fun StoredCharacter?.monstersById(): Map<Long, Pokemon> =
-      this?.let { (it.pokemon + it.pcStorage).associateBy { monster -> monster.id } }.orEmpty()
+      this?.let { (it.pokemon + it.pcStorage + it.daycare).associateBy { monster -> monster.id } }
+          .orEmpty()
 
   private fun insert(tx: DSLContext, stored: StoredCharacter) {
     tx.insertInto(CHARACTERS).set(stored.info.toRecord()).execute()
-    val monsters = stored.pokemon + stored.pcStorage
+    val monsters = stored.pokemon + stored.pcStorage + stored.daycare
     if (monsters.isNotEmpty()) {
       tx.batchInsert(monsters.map { it.toRecord() }).execute()
     }
@@ -234,11 +252,20 @@ constructor(
             .mapValues { (_, skins) -> skins.associateBy { it.slot } }
     return rows.map { row ->
       val monsters = monstersByOwner[row.id].orEmpty()
-      val (party, pc) = monsters.partition { it.container == PokemonContainer.PARTY }
+      // Three ways, not two: a boarder at the day care is neither in the party nor in the PC, and
+      // the two-way split that put everything-but-the-party in the PC would have handed the box
+      // screen a monster the day care is still looking after.
+      val party = monsters.filter { it.container == PokemonContainer.PARTY }
+      val daycare = monsters.filter { it.container == PokemonContainer.DAYCARE }
+      val pc =
+          monsters.filter {
+            it.container !in setOf(PokemonContainer.PARTY, PokemonContainer.DAYCARE)
+          }
       StoredCharacter(
           info = row.toInfo(),
           pokemon = party.toMutableList(),
           pcStorage = pc.toMutableList(),
+          daycare = daycare.toMutableList(),
           items = itemsByOwner[row.id].orEmpty().toMutableMap(),
           storyFlags = flagsByOwner[row.id].orEmpty().toMutableSet(),
           storyVars = varsByOwner[row.id].orEmpty().toMutableMap(),
@@ -409,6 +436,7 @@ constructor(
           isRaidEncounter = isRaidEncounter,
           isEgg = isEgg,
           caughtAt = caughtAt,
+          form = form.toShort(),
           condCool = conditions.cool.toShort(),
           condBeauty = conditions.beauty.toShort(),
           condCute = conditions.cute.toShort(),
@@ -419,6 +447,11 @@ constructor(
           caughtRegionId = caughtRegionId.toShort(),
           caughtBankId = caughtBankId.toShort(),
           caughtMapId = caughtMapId.toShort(),
+          caughtLocationLabel = caughtLocationLabel.toShort(),
+          friendship = friendship.toShort(),
+          heldItemId = heldItemId,
+          status = status.toShort(),
+          offlineOrigin = offlineOrigin,
       )
 
   private fun PokemonRecord.toPokemon(): Pokemon =
@@ -451,6 +484,7 @@ constructor(
           isRaidEncounter = isRaidEncounter ?: false,
           isEgg = isEgg ?: false,
           caughtAt = caughtAt,
+          form = (form ?: 0).toInt(),
           conditions =
               ContestConditions(
                   cool = (condCool ?: 0).toInt(),
@@ -464,6 +498,11 @@ constructor(
           caughtRegionId = (caughtRegionId ?: -1).toInt(),
           caughtBankId = (caughtBankId ?: -1).toInt(),
           caughtMapId = (caughtMapId ?: -1).toInt(),
+          caughtLocationLabel = (caughtLocationLabel ?: 0).toInt(),
+          friendship = (friendship ?: DEFAULT_FRIENDSHIP.toShort()).toInt(),
+          heldItemId = heldItemId ?: 0,
+          status = (status ?: 0).toInt(),
+          offlineOrigin = offlineOrigin ?: false,
       )
 
   private fun PokemonRecord.hydrateEvs(): EVs =

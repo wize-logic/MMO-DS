@@ -66,14 +66,27 @@ else
     bad "the two tables are different sizes"
 fi
 
-echo "and the engine's answers past its own data are why this client refuses:"
+# NOTE the run above loads no package.
+echo "and the engine's answers past its own data, now that both are bounded:"
 
-# 2964 members, so 2963 is the last that exists.
-if awk '$1 == "probe" && $4 == "pokegra" && $5 >= 2964 { n++ } END { exit !(n == 4) }' \
+# The two checks below are awk over the probe rows, and awk over no rows agrees
+# with both of them: `n == 0` is true when nothing was counted and `wrong` is
+# unset when nothing was compared. A dump that stopped emitting probes, a
+# renamed variable, a boot that never reached the atexit, would read as a
+# bounded sprite path rather than as no measurement at all.
+probes=$(grep -c '^probe ' "$tmp/engine.log" || true)
+if [ "${probes:-0}" -lt 1 ]; then
+    bad "the boot probed a species past the engine's data at all (no probe rows)"
+fi
+
+# This used to be the other way round: BuildPokemonSpriteTemplate had no
+# ceiling at all, species 496 asked for member 2979 of an archive with 2964,
+# and the read after it was guarded by one assertion this port had discarded.
+if awk '$1 == "probe" && $4 == "pokegra" && $5 >= 2964 { n++ } END { exit !(n == 0) }' \
         "$tmp/engine.log"; then
-    ok "every probed species past the last one indexes past pl_pokegra's end"
+    ok "no probed species indexes past pl_pokegra's end any more ($probes probed)"
 else
-    bad "the battle-sprite path no longer runs off the end, re-read sprite.h"
+    bad "the battle-sprite path runs off the end again, re-read sprite.h"
     grep '^probe ' "$tmp/engine.log" || true
 fi
 
@@ -82,7 +95,7 @@ none_icon=$(awk '$1 == "icon" && $2 == 0 && $3 == 0 { print $4, $5; exit }' "$tm
 if [ -n "$none_icon" ] && awk -v want="$none_icon" \
         '$1 == "probe" { got = $8 " " $9; if (got != want) wrong = 1 } END { exit wrong }' \
         "$tmp/engine.log"; then
-    ok "every probed species draws the placeholder icon instead, and says nothing"
+    ok "all $probes probed species draw the placeholder icon, and say nothing"
 else
     bad "the icon path no longer clamps to SPECIES_NONE, re-read sprite.h"
     grep '^probe ' "$tmp/engine.log" || true

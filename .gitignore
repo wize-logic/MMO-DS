@@ -61,6 +61,17 @@ docker-compose.override.yml
 # has decided they are ignorable.
 /mmo/mods/imports/narc/
 /mmo/mods/imports/port.log
+/mmo/mods/imports/cries.bin
+/mmo/mods/hgss/.cooked/
+/mmo/mods/hgss/port.log
+
+# mmo/mods/followers is written whole by tools/portfollow.py, mod.toml
+# included, out of a Heart Gold or Soul Silver image, so unlike the two above
+# it tracks nothing and the whole directory goes.
+/mmo/mods/followers/
+# mmo/mods/looks is written whole by the launcher (lookcompose.c) or
+# tools/portlooks.py out of three cartridges; nothing in it is ours to commit.
+/mmo/mods/looks/
 
 # The composed sound packages: one per soundtrack/soundfont pair
 # (sound_<tracks>_<font>, slugs pt/hg/bw), each tracking only its mod.toml.

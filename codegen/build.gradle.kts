@@ -34,10 +34,11 @@ val ndsRegionSources =
 
 val mapRegionSources = regionSources + ndsRegionSources
 
-// Maps this game did not ship, which reached the client out of another cartridge and are
-// registered on the wire by hand in maps/PortedMaps.kt.
+// Regions this game did not ship, which reached the client out of another cartridge.
 val portedMapSource = "pokeheartgold"
-val portedMaps = listOf("goldenrod", "goldenrod_pokecenter_1f")
+val portedRegions = listOf("johto", "kanto")
+val portedHeaderBase = 594
+val portedRegionId = 3
 
 // Which checkout of a decompilation this build reads, per tree.
 val decompRoot =
@@ -73,6 +74,9 @@ val ndsDataDir = decompDir(ndsRegionSources.getValue("sinnoh"))
 // differently.
 val itemDataDir = layout.projectDirectory.dir("items")
 
+// The species and moves Black adds that Platinum has no row for: 494..649 and 468..559.
+val gen5DataDir = layout.projectDirectory.dir("gen5")
+
 // Gitignored, and only the manual refresh tasks read them.
 val romsDir = rootProject.layout.projectDirectory.dir("roms")
 
@@ -83,64 +87,71 @@ jteCodegen {
   register("maps") {
     mainClass.set("de.fiereu.openmmo.codegen.maps.Main")
     inputDirs.from(mapRegionSources.values.map { decompDir(it) })
-    if (portedMaps.isNotEmpty()) {
+    if (portedRegions.isNotEmpty()) {
       inputDirs.from(decompDir(portedMapSource))
       inputFiles.from(rootProject.layout.projectDirectory.file("mmo/MAPS"))
+      // The scripted wild fights a cook found, which the ported people are marked from.
+      inputFiles.from(rootProject.layout.projectDirectory.file("mmo/STATIC_SITES"))
       inputFiles.from(rootProject.layout.projectDirectory.file("mmo/TERRAIN_MAP"))
     }
     extraArgs.set(
         mapRegionSources.map { (region, decomp) ->
           "$region|${decompDir(decomp).asFile.absolutePath}"
         } +
-            if (portedMaps.isEmpty()) emptyList()
-            else
-                listOf(
-                    "ported|${decompDir(portedMapSource).asFile.absolutePath}" +
-                        "|${rootProject.layout.projectDirectory.dir("mmo").asFile.absolutePath}" +
-                        "|${portedMaps.joinToString(",")}"))
+            listOf(
+                "ported|${decompDir(portedMapSource).asFile.absolutePath}" +
+                    "|${rootProject.layout.projectDirectory.dir("mmo").asFile.absolutePath}" +
+                    "|${portedRegions.joinToString(",")}|$portedHeaderBase|$portedRegionId"))
   }
   register("item") {
     mainClass.set("de.fiereu.openmmo.codegen.item.Main")
     inputDirs.from(itemDataDir)
     extraArgs.set(listOf(itemDataDir.asFile.absolutePath))
   }
-  // Moves come from the DS decomp: the GBA table stops at 354 and the game has 467.
+  // Moves come from the DS decomp: the GBA table stops at 354 and the game has 467. Black's 92
+  // more join them off the committed Gen 5 table, taking it to 559.
   register("moves") {
     mainClass.set("de.fiereu.openmmo.codegen.move.Main")
     templatesSubdir.set("move")
-    inputDirs.from(ndsDataDir)
-    extraArgs.set(listOf(ndsDataDir.asFile.absolutePath))
+    inputDirs.from(ndsDataDir, gen5DataDir)
+    extraArgs.set(listOf(ndsDataDir.asFile.absolutePath, gen5DataDir.asFile.absolutePath))
   }
   // Species come from the DS decomp for the same reason moves do: the GBA table is emerald's
   // 386, and the region this server hosts has 493. It is also a generation behind on the 386
   // it has, with none of the second abilities gen 4 handed out.
   register("pokemon") {
     mainClass.set("de.fiereu.openmmo.codegen.pokemon.Main")
-    inputDirs.from(ndsDataDir)
-    extraArgs.set(listOf(ndsDataDir.asFile.absolutePath))
+    inputDirs.from(ndsDataDir, gen5DataDir)
+    extraArgs.set(listOf(ndsDataDir.asFile.absolutePath, gen5DataDir.asFile.absolutePath))
   }
   // Evolutions and breeding, which only the DS decomp has: the GBA table has neither the gen 4
   // methods nor the 107 species that use them, and its per species data has no offspring at all.
+  // Black's species bring their own, with the offspring walked back through the whole graph.
   register("evolution") {
     mainClass.set("de.fiereu.openmmo.codegen.evolution.Main")
-    inputDirs.from(ndsDataDir)
-    extraArgs.set(listOf(ndsDataDir.asFile.absolutePath))
+    inputDirs.from(ndsDataDir, gen5DataDir)
+    extraArgs.set(listOf(ndsDataDir.asFile.absolutePath, gen5DataDir.asFile.absolutePath))
   }
   // Learnsets follow the species table: the GBA one covers emerald's 386, so every Sinnoh species
-  // came out of a wild encounter knowing nothing and falling back to Tackle.
+  // came out of a wild encounter knowing nothing and falling back to Tackle. Black's species would
+  // do the same, so theirs come off the Gen 5 table beside their stats.
   register("learnset") {
     mainClass.set("de.fiereu.openmmo.codegen.learnset.Main")
-    inputDirs.from(ndsDataDir)
-    extraArgs.set(listOf(ndsDataDir.asFile.absolutePath))
+    inputDirs.from(ndsDataDir, gen5DataDir)
+    extraArgs.set(listOf(ndsDataDir.asFile.absolutePath, gen5DataDir.asFile.absolutePath))
   }
   // Trainers differ per game, so this is by region like maps rather than from the canonical decomp.
   register("trainer") {
     mainClass.set("de.fiereu.openmmo.codegen.trainer.Main")
     inputDirs.from(mapRegionSources.values.map { decompDir(it) })
+    inputDirs.from(decompDir(portedMapSource))
+    // The ported cartridge's trainers are one table covering both the regions it shipped, so they
+    // are keyed under johto and a ported Kanto map's people use those same ids. Which is what the
+    // cartridge itself does.
     extraArgs.set(
         mapRegionSources.map { (region, decomp) ->
           "$region|${decompDir(decomp).asFile.absolutePath}"
-        })
+        } + listOf("johto|${decompDir(portedMapSource).asFile.absolutePath}"))
   }
   // Per region flag and var key constants for scripts. Names come from each decomp, so this is by
   // region like maps. The generic story store in server.game does not depend on these, they are the
@@ -152,6 +163,13 @@ jteCodegen {
         mapRegionSources.map { (region, decomp) ->
           "$region|${decompDir(decomp).asFile.absolutePath}"
         })
+  }
+  // What one Platinum cartridge can produce by itself, and the most money a playthrough can
+  // hold.
+  register("offline") {
+    mainClass.set("de.fiereu.openmmo.codegen.offline.Main")
+    inputDirs.from(ndsDataDir)
+    extraArgs.set(listOf(ndsDataDir.asFile.absolutePath))
   }
   register("typechart") {
     mainClass.set("de.fiereu.openmmo.codegen.typechart.Main")

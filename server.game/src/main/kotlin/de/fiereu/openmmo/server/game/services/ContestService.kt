@@ -308,6 +308,8 @@ constructor(
       sessions.getByCharacterId(otherId)?.send(out)
     }
     log.info { "char=$charId left link contest ${contest.id} from seat $seat" }
+    // The seat that walked out can be the only one anybody was still waiting on.
+    trySettle(contest)
     if (contest.gone.size >= contest.seats.size) {
       running.remove(contest.id)
       log.info { "Link contest ${contest.id} is empty and is over" }
@@ -332,12 +334,21 @@ constructor(
       return
     }
     contest.reported[seat] = placement
+    trySettle(contest)
+  }
+
+  /** Take the result once there is nothing left to wait for. */
+  private fun trySettle(contest: Contest) {
+    if (contest.settled.get()) return
 
     // Read each seat's answer once and keep it, rather than testing for presence and reading again:
     // a seat can leave between the two, and then the set that decided this was complete is not the
     // set being compared.
-    val present = contest.seats.indices.filter { it !in contest.gone }
-    val answers = present.map { contest.reported[it] ?: return }.distinct()
+    val answered = contest.seats.indices.mapNotNull { s -> contest.reported[s]?.let { s to it } }
+    val heard = answered.map { it.first }.toSet()
+    if (contest.seats.indices.any { it !in heard && it !in contest.gone }) return
+    if (answered.isEmpty()) return
+    val answers = answered.map { it.second }.distinct()
 
     // Exactly one thread settles, whichever gets here first with the set complete.
     if (!contest.settled.compareAndSet(false, true)) return
@@ -351,10 +362,10 @@ constructor(
       // client keeps and reports; what this server does here is agree that the contest happened
       // and say who won it, so a later argument about a record has one place to be checked.
       log.info { "Link contest ${contest.id} agreed: placements ${answers.first()}" }
-      // The ribbon itself is written by each client and arrives on the battle outcome report,
-      // which cannot tell one that was won from one that was typed. This agreement is the only
-      // moment the server can say a contest happened, so it is where the entitlement is issued.
-      for (seat in present) ribbonCredits.award(contest.seats[seat])
+      // The ribbon itself is written by each client into its own record and reaches this
+      // server on the battle outcome report, which had no way of telling a ribbon that was won
+      // from one that was typed.
+      for ((seat, _) in answered) ribbonCredits.award(contest.seats[seat])
     }
     running.remove(contest.id)
     for (id in contest.seats) seatedIn.remove(id)

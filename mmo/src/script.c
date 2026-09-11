@@ -115,8 +115,11 @@ int openmmo_script_parse(const char *text, size_t len, openmmo_script *out,
         if (s == e || text[s] == '#')
             continue;               /* blank or whole-line comment */
 
-        /* Copy the trimmed line into a bounded scratch buffer. */
-        char buf[256];
+        /* Copy the trimmed line into a bounded scratch buffer. It has to hold
+         * the longest thing a line can carry, a chat message at the wire's
+         * cap, which counts characters and so runs to three times as many
+         * bytes, with the verb in front of it. */
+        char buf[MMO_TEXT_BYTES(MMO_CHAT_TEXT_MAX) + 32];
         size_t n = e - s;
         if (n >= sizeof buf) {
             fail(err, err_sz, lineno, "line too long");

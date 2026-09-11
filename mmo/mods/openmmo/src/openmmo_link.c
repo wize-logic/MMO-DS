@@ -19,8 +19,12 @@
 #include "trainer_info.h"
 
 #include "../../../include/charcode.h"
+#include "../../../include/species_port.h"
 #include "../../../include/client.h"
 #include "../../../include/idmap.h"
+
+/* A move past Shadow Force is one only a fill serves. */
+extern int openmmo_move_served(unsigned move);
 
 /* encounter.c, via mods/openmmo/patches: the link-battle door, minus the party
  * order menu and the FieldTask a script would have supplied. */
@@ -220,8 +224,8 @@ int openmmo_link_sync_state(int syncState)
 
 /* A 64-bit id folded to 32 bits. Any stable mixing does; this one is
  * splitmix64's finaliser, which spreads consecutive ids (the server hands them
- * out in sequence) across the whole range so the derived nature bend and the
- * derived shiny bend do not correlate with the order monsters were caught in. */
+ * out in sequence) across the whole range, so the ot id a link battle gives a
+ * monster does not correlate with the order monsters were caught in. */
 static u32 link_mix(s64 id, u32 salt)
 {
     u64 z = (u64)id + 0x9E3779B97F4A7C15ULL + (u64)salt * 0xBF58476D1CE4E5B9ULL;
@@ -232,25 +236,7 @@ static u32 link_mix(s64 id, u32 salt)
     return (u32)(z ^ (z >> 32));
 }
 
-/* Build one battle monster from one server record, with nothing rolled.
- *
- * `species` has already crossed the id map; a record the map cannot name is
- * refused by the caller rather than drawn as some other monster. */
-/*
- * The personality one server record gets: derived from the record's own id, then bent to the
- * nature the server holds, because Gen 4 reads the nature out of the personality (`personality
- * % 25`) and the server's nature is the one the summary screen and the stat calculation have
- * to agree on.
- */
-u32 openmmo_mon_personality(s64 id, int nature)
-{
-    u32 pid = link_mix(id, 1);
-
-    if (nature < 0 || nature >= 25)
-        nature = 0;
-    return pid - (pid % 25) + (u32)nature;
-}
-
+/* Build one battle monster from one server record, with nothing rolled. */
 static int link_build_mon(Pokemon *mon, const openmmo_party_mon *m)
 {
     u32 pid, otid, otlo, x;
@@ -259,7 +245,7 @@ static int link_build_mon(Pokemon *mon, const openmmo_party_mon *m)
     if (m->species == 0 || m->egg)
         return 0;
 
-    pid = openmmo_mon_personality(m->id, m->nature);
+    pid = m->seed;
 
     /*
      * Ot id: derived, then bent to the shiny bit. Gen 4 has no shiny flag, a monster is
@@ -270,8 +256,18 @@ static int link_build_mon(Pokemon *mon, const openmmo_party_mon *m)
     x = otlo ^ (pid >> 16) ^ (pid & 0xFFFF);
     otid = ((m->shiny ? x : (x ^ 0x8000u)) << 16) | otlo;
 
+    {
+        /* The other side's record can name a species this build's tables do
+         * not hold; the seat's bound applies to a foe exactly as to our own
+         * party (openmmo_encounter.c). */
+        extern int openmmo_species_seat_live(int wire);
+
+        if (!openmmo_species_seat_live(m->species))
+            return 0;
+    }
+
     Pokemon_Init(mon);
-    Pokemon_InitWith(mon, m->species,
+    Pokemon_InitWith(mon, (u16)mmo_species_port_engine_id(m->species),
                      m->level < 1 ? 1 : (m->level > 100 ? 100 : m->level),
                      INIT_IVS_RANDOM, TRUE, pid, OTID_SET, otid);
 
@@ -292,6 +288,14 @@ static int link_build_mon(Pokemon *mon, const openmmo_party_mon *m)
         u32 friendship = (u32)(m->friendship < 0 ? 0
                                : (m->friendship > 255 ? 255 : m->friendship));
         Pokemon_SetValue(mon, MON_DATA_FRIENDSHIP, &friendship);
+    }
+    /* What it is carrying. A link battle is where a held item matters most,
+     * a Choice Band or a Focus Sash decides the fight, and both clients build
+     * the monster from the same record, so both write the same item. */
+    {
+        u16 held = m->held_item_engine;
+
+        Pokemon_SetValue(mon, MON_DATA_HELD_ITEM, &held);
     }
     if (m->form > 0) {
         u32 form = (u32)m->form;
@@ -315,7 +319,7 @@ static int link_build_mon(Pokemon *mon, const openmmo_party_mon *m)
         Pokemon_SetValue(mon, MON_DATA_ABILITY, &want);
     }
     for (i = 0; i < 4; i++) {
-        if (m->move[i] == 0)
+        if (m->move[i] == 0 || !openmmo_move_served(m->move[i]))
             continue;
         Pokemon_ResetMoveSlot(mon, m->move[i], (u8)i);
         if (m->move_pp[i] != 0) {
@@ -506,16 +510,25 @@ int openmmo_link_battle_open(FieldSystem *fs, openmmo_client *c)
     FieldBattleDTO_CopyTrainerInfoToBattler(dto, save_trainer, me);
     link_seat_trainer(dto->trainerInfo[them], save_trainer, lb->peer_name,
                       lb->peer_gender, (s64)lb->battle_id * 2 + 1);
-    /* The Trainer record beside each TrainerInfo. */
+    /*
+     * The Trainer record beside each TrainerInfo. The official client fills its own half with
+     * FieldBattleDTO_CopyPlayerInfoToTrainerData and receives the other over the link; the
+     * fields that matter to a link battle are the name and the trainerType the sprite is
+     * picked from.
+     */
     {
+        extern int openmmo_body_trainer_class_or_player(int gfx, int gender);
         int i;
 
         for (i = 0; i < 2; i++) {
             int side = i == 0 ? me : them;
+            int gender = TrainerInfo_Gender(dto->trainerInfo[side]);
+            int gfx = side == me ? openmmo_client_body_gfx(c)
+                                 : lb->peer_body_gfx;
 
             memset(&dto->trainer[side], 0, sizeof dto->trainer[side]);
             dto->trainer[side].header.trainerType =
-                (u8)TrainerInfo_Gender(dto->trainerInfo[side]);
+                (u8)openmmo_body_trainer_class_or_player(gfx, gender);
             CharCode_Copy(dto->trainer[side].name,
                           TrainerInfo_Name(dto->trainerInfo[side]));
         }

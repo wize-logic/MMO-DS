@@ -3,6 +3,7 @@
 #define MMO_PLATFORM_H
 
 #include <stddef.h>
+#include <stdio.h>
 
 /* The longest channel name any of this passes around, Local\ prefix and page
  * suffix included. Channels are "openmmo-<pid>" plus a short suffix. */
@@ -163,6 +164,13 @@ int mmo_plat_log_path(const char *name, char *out, size_t cap);
 void mmo_plat_stamp(char *out, size_t cap);
 
 /*
+ * Seconds since 1970-01-01 00:00:00 utc, from the operating system's clock. Not time(), for
+ * the reason mmo_plat_stamp gives: in the fused binary that name is the DS network library's
+ * and answers 0 for the whole run.
+ */
+long long mmo_plat_unix_time(void);
+
+/*
  * Leave a crash report in the logs folder rather than dying silently: a signal on one host, an
  * unhandled structured exception on the other, and one file either way naming the reason, the
  * faulting address and the return addresses above it.
@@ -203,6 +211,15 @@ int mmo_plat_mkdir(const char *path);
 
 /* Rename `from` onto `to`, replacing `to` if it is already there. 0 or -1. */
 int mmo_plat_rename_over(const char *from, const char *to);
+
+/* Push everything written to `f` down to the disk itself. 0 or -1. */
+int mmo_plat_fsync(FILE *f);
+
+/* One holder at a time for a file two programs would otherwise both write. */
+typedef struct mmo_plat_lock mmo_plat_lock;
+
+int mmo_plat_lock_take(const char *path, mmo_plat_lock **out);
+void mmo_plat_lock_drop(mmo_plat_lock *l);
 
 /*
  * Create or truncate `path` so that only this user can read it, before anything is written to
@@ -245,6 +262,11 @@ int mmo_plat_pick_file(const char *title, const char *start_dir,
                        const char *filter_name, const char *filter_glob,
                        char *out, size_t cap);
 
+/* The same window with the other question: where should this be written. */
+int mmo_plat_pick_save_file(const char *title, const char *start_dir,
+                            const char *suggest, const char *filter_name,
+                            const char *filter_glob, char *out, size_t cap);
+
 /*
  * Fill `buf` with entropy the operating system stands behind. 0 on success, -1 when the
  * machine will not supply it, the caller then fails loudly rather than proceeding with a
@@ -267,6 +289,27 @@ unsigned mmo_plat_pid(void);
  * something against the wall clock, how long since the last one, not what the date is.
  */
 long mmo_plat_seconds(void);
+
+/*
+ * The same clock in nanoseconds, for the things a second is far too coarse for, a frame is
+ * sixteen milliseconds and a display's refresh has to be predicted to a fraction of one.
+ */
+long long mmo_plat_mono_ns(void);
+
+/*
+ * The display'S own clock, and the reason it is in the platform layer rather than in the
+ * window is that the two ends are in different files and, on the desktop, in different
+ * Processes.
+ */
+void mmo_plat_vsync_mark(void);
+int mmo_plat_vsync_next(long long *when_ns, long long *period_ns);
+
+/*
+ * ...And across two processes, which is the desktop and is where the cure above was doing
+ * nothing at all.
+ */
+void mmo_plat_vsync_publish(const char *channel);
+void mmo_plat_vsync_unpublish(void);
 
 /* 1 while that id still belongs to a live process, how a page's publisher or
  * reader is noticed to have gone away without saying so. */

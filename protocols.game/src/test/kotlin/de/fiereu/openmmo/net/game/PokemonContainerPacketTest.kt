@@ -173,18 +173,55 @@ class PokemonContainerPacketTest :
         PokemonCodec.encodeToBytes(placed).size shouldBe PokemonCodec.encodeToBytes(mon).size + 8
       }
 
-      test("a place and a ribbon mask both fit the trailing list") {
-        // Two entries is the case the walk exists for: the reader has to step over the one it is
-        // not looking for by its own length rather than stopping at it.
+      test("the held item rides the same trailing list") {
+        val mon = PokemonContainerPacketCodec.decodeBytes(bytes()).pokemon.single()
+        // Nothing held is 0, and a record with no entry says exactly that, which is what every
+        // record this server sent before the party menu's give reached the record was saying.
+        mon.heldItemId shouldBe 0
+
+        // Leftovers, the wire id the bag and the shop use for it.
+        val holding = mon.copy(heldItemId = 5234)
+        val bytes = PokemonCodec.encodeToBytes(holding)
+        PokemonCodec.decodeBytes(bytes).heldItemId shouldBe 5234
+        // Two bytes for the item, two for its tag and length.
+        bytes.size shouldBe PokemonCodec.encodeToBytes(mon).size + 4
+      }
+
+      test("the location label a save gives rides the trailing list on its own") {
+        val mon = PokemonContainerPacketCodec.decodeBytes(bytes()).pokemon.single()
+        // 0 is the label the game draws as the Mystery Zone, which is exactly what a record with
+        // no entry has always shown, so an absent entry and a zero mean the same thing here.
+        mon.caughtLocationLabel shouldBe 0
+
+        // 34 is a label and not a map id: the two live in separate entries because a label names
+        // up to 46 map headers and neither reads back out of the other.
+        val labelled = mon.copy(caughtLocationLabel = 34)
+        val bytes = PokemonCodec.encodeToBytes(labelled)
+        PokemonCodec.decodeBytes(bytes).caughtLocationLabel shouldBe 34
+        PokemonCodec.decodeBytes(bytes).caughtMapId shouldBe -1
+        // Two bytes for the label, two for its tag and length.
+        bytes.size shouldBe PokemonCodec.encodeToBytes(mon).size + 4
+      }
+
+      test("a place, a ribbon mask and a held item all fit the trailing list") {
+        // Three entries is the case the walk exists for: the reader has to step over the ones it
+        // is not looking for by their own length rather than stopping at them.
         val mon = PokemonContainerPacketCodec.decodeBytes(bytes()).pokemon.single()
         val mask = superContestRibbonBit(ContestType.COOL, ContestRank.GREAT)
         val both =
             mon.copy(
-                superContestRibbons = mask, caughtRegionId = 0, caughtBankId = 3, caughtMapId = 200)
+                superContestRibbons = mask,
+                caughtRegionId = 0,
+                caughtBankId = 3,
+                caughtMapId = 200,
+                caughtLocationLabel = 34,
+                heldItemId = 5234)
         val roundTripped = PokemonCodec.decodeBytes(PokemonCodec.encodeToBytes(both))
         roundTripped.superContestRibbons shouldBe mask
         roundTripped.caughtMapId shouldBe 200
         roundTripped.caughtBankId shouldBe 3
+        roundTripped.caughtLocationLabel shouldBe 34
+        roundTripped.heldItemId shouldBe 5234
       }
 
       test("a two-monster party container round-trips") {

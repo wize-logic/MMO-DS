@@ -37,6 +37,8 @@ import de.fiereu.openmmo.server.game.storage.GTL_STATE_ACTIVE
 import de.fiereu.openmmo.server.game.storage.GTL_STATE_CLOSED
 import de.fiereu.openmmo.server.game.storage.GTL_STATE_SOLD
 import de.fiereu.openmmo.server.game.storage.GtlListing
+import de.fiereu.openmmo.server.game.storage.ImportRecord
+import de.fiereu.openmmo.server.game.storage.InMemoryImportRepository
 import de.fiereu.openmmo.server.game.testsupport.FakeCharacterRepository
 import de.fiereu.openmmo.server.game.testsupport.FakeGtlRepository
 import de.fiereu.openmmo.server.game.testsupport.FakeSession
@@ -56,7 +58,12 @@ private const val TACKLE: Short = 33
 /** The fee the service charges per unit: price / 40, floored at 100, capped at 50000. */
 private fun fee(price: Int): Int = (price / 40).coerceAtLeast(100).coerceAtMost(50_000)
 
-private fun mon(ownerId: Long, dexId: Int, level: Byte = 50): Pokemon =
+private fun mon(
+    ownerId: Long,
+    dexId: Int,
+    level: Byte = 50,
+    offlineOrigin: Boolean = false,
+): Pokemon =
     Pokemon(
         id = EntityIdService().newMonsterId(),
         ownerId = ownerId,
@@ -81,6 +88,7 @@ private fun mon(ownerId: Long, dexId: Int, level: Byte = 50): Pokemon =
         isFatefulEncounter = false,
         isRaidEncounter = false,
         caughtAt = LocalDateTime.now(),
+        offlineOrigin = offlineOrigin,
     )
 
 private class GtlFixture(scope: CoroutineScope) {
@@ -88,7 +96,8 @@ private class GtlFixture(scope: CoroutineScope) {
   val store = CharacterStore(repo, EntityIdService(), scope)
   val sessions = SessionRegistry()
   val shelf = FakeGtlRepository()
-  val gtl = GtlService(sessions, store, shelf, SpeciesRegistry(), BattleRegistry())
+  val imports = InMemoryImportRepository()
+  val gtl = GtlService(sessions, store, shelf, SpeciesRegistry(), BattleRegistry(), imports)
 
   suspend fun seated(
       name: String,
@@ -120,6 +129,32 @@ private class GtlFixture(scope: CoroutineScope) {
   suspend fun claim(session: FakeSession, vararg ids: Long) =
       gtl.onClaim(PacketEvent(GtlClaimPacket(ids.toList()), session))
 
+  /** A standing import on this character, so a test can watch the market seal it. */
+  suspend fun imported(charId: Long, id: Long) =
+      imports.record(
+          ImportRecord(
+              id = id,
+              characterId = charId,
+              importedAt = LocalDateTime.now(),
+              playTimeSeconds = 0,
+              saveSha256 = "c".repeat(64),
+              clientRevision = 7,
+              trainerId = 1,
+              partyCount = 0,
+              boxCount = 0,
+              speciesCount = 0,
+              levelTotal = 0,
+              levelMax = 0,
+              moneyBefore = 0,
+              moneyAfter = 0,
+              badgesBefore = 0,
+              badgesAfter = 0,
+              verdicts = emptyList(),
+              snapshotVersion = 1),
+          ByteArray(0))
+
+  suspend fun sealedReason(charId: Long): String? = imports.newestStanding(charId)?.sealedReason
+
   fun partyDex(charId: Long): List<Int> = store.getCharacter(charId)!!.pokemon.map { it.dexId }
 
   fun money(charId: Long): Int = store.getCharacter(charId)!!.info.money
@@ -148,6 +183,22 @@ class GtlServiceTest :
           row.fee shouldBe fee(5000)
           row.pokemon.shouldNotBeNull().dexId shouldBe 4
           red.results().last().code shouldBe GtlResultPacket.CODE_LISTED
+        }
+      }
+
+      test("a monster brought in from a save cannot be listed") {
+        runTest {
+          val fx = GtlFixture(backgroundScope)
+          val (red, redId) = fx.seated("Red", 1, 1, money = 500)
+          fx.store.addPokemon(redId, mon(redId, 4, offlineOrigin = true))
+          val marked = fx.store.getCharacter(redId)!!.pokemon.first { it.dexId == 4 }
+          fx.listMon(red, marked.id, 5000)
+          red.replies().last() shouldContain "offline save"
+          // Refused before the monster leaves the party, so there is no take-back to get wrong and
+          // no fee to give back.
+          fx.partyDex(redId) shouldBe listOf(1, 4)
+          fx.money(redId) shouldBe 500
+          fx.shelf.rows.values.shouldBeEmpty()
         }
       }
 
@@ -322,6 +373,59 @@ class GtlServiceTest :
           fx.money(redId) shouldBe sellerAfterFee + 5000
           fx.shelf.rows.values.single().state shouldBe GTL_STATE_CLOSED
           red.results().last().code shouldBe GtlResultPacket.CODE_CLAIMED
+        }
+      }
+
+      test("buying seals the buyer's import, because the money has gone to somebody else") {
+        runTest {
+          val fx = GtlFixture(backgroundScope)
+          val (red, redId) = fx.seated("Red", 1, 1, money = 500)
+          val (blue, blueId) = fx.seated("Blue", 2, 25, money = 8000)
+          fx.imported(blueId, 1L)
+          fx.store.addPokemon(redId, mon(redId, 4))
+          val listed = fx.store.getCharacter(redId)!!.pokemon.first { it.dexId == 4 }
+          fx.listMon(red, listed.id, 5000)
+          fx.sealedReason(blueId) shouldBe null
+
+          fx.buy(blue, fx.shelf.rows.values.single().id)
+
+          // The seller is holding the payment and no undo of ours reaches it, so putting the
+          // buyer's wallet back would leave that 5000 behind as a second copy of itself.
+          fx.sealedReason(blueId) shouldBe "money was spent on the market"
+        }
+      }
+
+      test("claiming seals an import that arrived after the listing did") {
+        runTest {
+          val fx = GtlFixture(backgroundScope)
+          val (red, redId) = fx.seated("Red", 1, 1, money = 500)
+          val (blue, _) = fx.seated("Blue", 2, 25, money = 8000)
+          fx.store.addPokemon(redId, mon(redId, 4))
+          val listed = fx.store.getCharacter(redId)!!.pokemon.first { it.dexId == 4 }
+          fx.listMon(red, listed.id, 5000)
+          val listingId = fx.shelf.rows.values.single().id
+          fx.buy(blue, listingId)
+          // Listed on Monday, imported on Tuesday: the listing sealed nothing, because there was
+          // nothing yet to seal, and the monster is already with the buyer.
+          fx.imported(redId, 1L)
+          fx.sealedReason(redId) shouldBe null
+
+          fx.claim(red, listingId)
+
+          fx.sealedReason(redId) shouldBe "money was claimed from the market"
+        }
+      }
+
+      test("listing a stack seals the import that may have brought it") {
+        runTest {
+          val fx = GtlFixture(backgroundScope)
+          val (red, redId) = fx.seated("Red", 1, 1, money = 1000)
+          fx.imported(redId, 1L)
+          fx.store.addItem(redId, 17, 5)
+
+          fx.listItem(red, 17, 5, 900)
+
+          fx.sealedReason(redId) shouldBe "goods were listed on the market"
         }
       }
 

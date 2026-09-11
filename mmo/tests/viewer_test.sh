@@ -101,6 +101,47 @@ rc=$(present "$TMP/none.ppm" --wait 1000)
 [ "$rc" = 2 ] && ok "no channel at all is a different failure from a bad one" \
                || bad "a missing channel exited $rc, not 2"
 
+# The in-game UI, over a page that says where the guest is. The bar is the
+# window's only way into the bag, the card, the dex and the Menu, and the one
+# button that hides and restores the touch screen is on it, so "is it drawn"
+# is worth a picture rather than an argument. The page is the same two solid
+# screens, so any pixel that is neither is the UI.
+echo "the window's own UI is drawn where the guest says the field is up:"
+
+# The control first: a page whose session has not reached the world. Offline
+# is the only difference between this and the next, so what the next one draws
+# is the offline arm and nothing else, there is no chat box offline, the
+# party is empty and no frame is open, so the bar is the whole of it.
+"$DRIVE" publish --hud poketch --hud-state 0 "$CHAN"
+rc=$(present "$TMP/nobar.ppm" --wait 10000)
+if [ "$rc" = 0 ] && [ -f "$TMP/nobar.ppm" ]; then
+    "$DRIVE" shotcheck "$TMP/nobar.ppm" nobar || fails=$((fails + 1))
+else
+    bad "the window did not present a page with a lobby session (exit $rc)"
+    sed 's/^/       /' "$TMP/err"
+fi
+
+# The same page, offline, where there is no session for that state to be
+# about: the field is up, so the bar is. Without this arm the offline window
+# drew no bar at all, and the one button that restores the touch screen is
+# on it, so nothing could bring it back for the whole session.
+rc=$(present "$TMP/offbar.ppm" --offline --wait 10000)
+if [ "$rc" = 0 ] && [ -f "$TMP/offbar.ppm" ]; then
+    "$DRIVE" shotcheck "$TMP/offbar.ppm" bar || fails=$((fails + 1))
+else
+    bad "the window did not present an offline page (exit $rc)"
+fi
+
+# A field that is not up takes it down again offline too: the title, a battle
+# and the Underground all say the guest owns the second screen.
+"$DRIVE" publish --hud guest --hud-state 0 "$CHAN"
+rc=$(present "$TMP/offnobar.ppm" --offline --wait 10000)
+if [ "$rc" = 0 ] && [ -f "$TMP/offnobar.ppm" ]; then
+    "$DRIVE" shotcheck "$TMP/offnobar.ppm" nobar || fails=$((fails + 1))
+else
+    bad "the window did not present an offline lobby page (exit $rc)"
+fi
+
 # The player's half, through the same page.
 "$DRIVE" input "$CHAN" || fails=$((fails + 1))
 
@@ -122,7 +163,15 @@ else
     bad "the refusal did not name the ROM: $out"
 fi
 
-: > "$TMP/game.nds"
+# Three cartridges, as the front door reads them: the game code at 0x0C of
+# each header. Platinum is the one the plan names; Heart Gold and Black sit
+# beside it, which is where the check looks for them.
+fake_nds() {
+    { head -c 12 /dev/zero; printf '%s' "$2"; } > "$1"
+}
+fake_nds "$TMP/game.nds" CPUE
+fake_nds "$TMP/heartgold.nds" IPKE
+fake_nds "$TMP/black.nds" IRBO
 {
     echo "rom $TMP/game.nds"
     echo "user test"
@@ -148,6 +197,34 @@ if out=$("$LAUNCH" --print-plan 2>&1); then
         || bad "the two halves of the plan do not name one channel"
 else
     bad "a configured launcher would not print a plan: $out"
+fi
+
+# The other row. Printing a launch is how a person reads it before starting
+# it, and the offline one is the launch that most needs reading: it names the
+# save file the game opens and the recording written beside it. Asked for the
+# offline row it printed the online one instead, a session, an account and
+# PC_SAVE=none, so the case checks the four fields that tell them apart.
+OFFROOT="$TMP/offroot"
+if out=$(OPENMMO_ROOT="$OFFROOT" "$LAUNCH" --print-plan --play-offline 2>&1); then
+    miss=""
+    for want in "env OPENMMO_SESSION=0" \
+                "env PC_SAVE=$OFFROOT/save/platinum.sav" \
+                "env PC_RECORD_INPUT=$OFFROOT/save/sessions" \
+                "env PC_RTC="; do
+        printf '%s\n' "$out" | grep -qF "$want" || miss="$miss [$want]"
+    done
+    if [ -z "$miss" ]; then
+        ok "the offline row prints the save it opens and the recording beside it"
+    else
+        bad "the printed offline plan is missing:$miss"
+    fi
+    if printf '%s\n' "$out" | grep -qF "env OPENMMO_USER=test"; then
+        bad "the printed offline plan carried the online account"
+    else
+        ok "the offline row names no account"
+    fi
+else
+    bad "the launcher would not print the offline plan: $out"
 fi
 
 if timeout 60 "$LAUNCH" --shot "$TMP/menu.ppm" >"$TMP/lout" 2>&1 \

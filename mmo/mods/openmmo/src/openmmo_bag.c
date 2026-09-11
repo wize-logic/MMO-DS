@@ -15,6 +15,7 @@
 #include "savedata.h"
 #include "unk_0203D1B8.h"
 
+#include "../../../include/endpoint.h"
 #include "../../../include/client.h"
 #include "../../../include/idmap.h"
 
@@ -135,8 +136,16 @@ void openmmo_bag_registered(void *bag, u32 item)
  */
 int openmmo_bag_gate_add(void *bag, u16 item, u16 count)
 {
-    if (!openmmo_bag_may_write() && is_display_bag(bag))
+    if (!openmmo_bag_may_write() && is_display_bag(bag)) {
         report_bag_delta(item, (int)count);
+        /*
+         * The party menu's take puts the item in the bag and clears the monster's hand, and
+         * only the bag half was ever reported: the item arrived in the bag and the record
+         * still had the monster holding it, so the next reseat put it back in its hand and the
+         * player had two.
+         */
+        openmmo_party_mark_touched();
+    }
     return 1;
 }
 
@@ -601,7 +610,7 @@ void openmmo_bag_try_open(FieldSystem *fs)
 
     if (opened || fs == NULL)
         return;
-    env = getenv("OPENMMO_BAG");
+    env = openmmo_dev_env("OPENMMO_BAG");
     if (env == NULL || env[0] == '\0' || env[0] == '0')
         return;
     if (fs->task != NULL || !FieldSystem_IsRunningFieldMap(fs)

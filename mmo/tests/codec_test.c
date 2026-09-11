@@ -156,6 +156,109 @@ static void test_underflow_is_sticky(void)
     CHECK(r.err, "err stays sticky");
 }
 
+/* The strings that are not ASCII. */
+static void test_utf16_transcodes(void)
+{
+    static const u8 W_ASCII[]  = { 0x4F,0x00, 0x70,0x00, 0x65,0x00, 0x6E,0x00,
+                                   0x4D,0x00, 0x4D,0x00, 0x4F,0x00, 0x00,0x00 };
+    /* "café", U+00E9, one code unit, three UTF-8 bytes it never used to have */
+    static const u8 W_ACCENT[] = { 0x63,0x00, 0x61,0x00, 0x66,0x00, 0xE9,0x00,
+                                   0x00,0x00 };
+    /* "日本語", three CJK code units, whose low bytes alone are nonsense */
+    static const u8 W_CJK[]    = { 0xE5,0x65, 0x2C,0x67, 0x9E,0x8A, 0x00,0x00 };
+    /* U+1F310, above the BMP, so a surrogate pair on the wire */
+    static const u8 W_ASTRAL[] = { 0x3C,0xD8, 0x10,0xDF, 0x00,0x00 };
+    /* "Renée 你好 🌐", all three widths and a pair in one string */
+    static const u8 W_MIXED[]  = { 0x52,0x00, 0x65,0x00, 0x6E,0x00, 0xE9,0x00,
+                                   0x65,0x00, 0x20,0x00, 0x60,0x4F, 0x7D,0x59,
+                                   0x20,0x00, 0x3C,0xD8, 0x10,0xDF, 0x00,0x00 };
+    static const struct {
+        const char *utf8;
+        const u8   *wire;
+        size_t      wire_n;
+        const char *what;
+    } V[] = {
+        { "OpenMMO",                   W_ASCII,  sizeof W_ASCII,  "ASCII" },
+        { "caf\xC3\xA9",               W_ACCENT, sizeof W_ACCENT, "an accent" },
+        { "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E",
+                                       W_CJK,    sizeof W_CJK,    "CJK" },
+        { "\xF0\x9F\x8C\x90",          W_ASTRAL, sizeof W_ASTRAL, "a surrogate pair" },
+        { "Ren\xC3\xA9""e \xE4\xBD\xA0\xE5\xA5\xBD \xF0\x9F\x8C\x90",
+                                       W_MIXED,  sizeof W_MIXED,  "all of them at once" },
+    };
+
+    printf("utf-16 on the wire, utf-8 in the client:\n");
+    for (size_t i = 0; i < sizeof V / sizeof V[0]; i++) {
+        char msg[96];
+        mmo_wbuf w;
+        mmo_rbuf r;
+        char back[64];
+        size_t n;
+
+        mmo_wbuf_init(&w);
+        mmo_put_utf16_nt(&w, V[i].utf8);
+        snprintf(msg, sizeof msg, "%s: written exactly as the server writes it",
+                 V[i].what);
+        CHECK(!w.err && w.len == V[i].wire_n &&
+                  memcmp(w.data, V[i].wire, V[i].wire_n) == 0, msg);
+        snprintf(msg, sizeof msg, "%s: counted in the units the writer wrote",
+                 V[i].what);
+        /* The wire is the units plus the NUL-NUL, two bytes each, which is the
+         * oracle for the counter a cap is checked against. */
+        CHECK(mmo_utf16_units(V[i].utf8) * 2 + 2 == w.len, msg);
+        mmo_wbuf_free(&w);
+
+        mmo_rbuf_init(&r, V[i].wire, V[i].wire_n);
+        n = mmo_get_utf16_nt(&r, back, sizeof back);
+        snprintf(msg, sizeof msg, "%s: read back as the utf-8 it started as",
+                 V[i].what);
+        CHECK(!r.err && mmo_rbuf_remaining(&r) == 0 &&
+                  n == strlen(V[i].utf8) && strcmp(back, V[i].utf8) == 0, msg);
+    }
+
+    /* Malformed UTF-8 in, one replacement character out. */
+    {
+        static const u8 want[] = { 0x61,0x00, 0xFD,0xFF, 0x62,0x00, 0x00,0x00 };
+        mmo_wbuf w;
+
+        mmo_wbuf_init(&w);
+        mmo_put_utf16_nt(&w, "a\xFF" "b");
+        CHECK(!w.err && w.len == sizeof want &&
+                  memcmp(w.data, want, sizeof want) == 0,
+              "a byte that is not utf-8 goes out as one replacement character");
+        CHECK(mmo_utf16_units("a\xFF" "b") == 3,
+              "and the counter charges one unit for it, the way the writer does");
+        mmo_wbuf_free(&w);
+    }
+
+    /* Half a surrogate pair in, one replacement character out. */
+    {
+        static const u8 lone[] = { 0x3C,0xD8, 0x00,0x00 };
+        mmo_rbuf r;
+        char back[16];
+        size_t n;
+
+        mmo_rbuf_init(&r, lone, sizeof lone);
+        n = mmo_get_utf16_nt(&r, back, sizeof back);
+        CHECK(!r.err && n == 3 && strcmp(back, "\xEF\xBF\xBD") == 0,
+              "a surrogate with no partner reads back as one replacement");
+    }
+
+    /* A destination too small cuts between code points, never inside one, and
+     * still says how much the whole string wanted. */
+    {
+        char small[6];
+        mmo_rbuf r;
+        size_t n;
+
+        mmo_rbuf_init(&r, W_CJK, sizeof W_CJK);
+        n = mmo_get_utf16_nt(&r, small, sizeof small);
+        CHECK(!r.err && mmo_rbuf_remaining(&r) == 0 && n == 9 &&
+                  strcmp(small, "\xE6\x97\xA5") == 0,
+              "a short buffer keeps whole characters and reports the full length");
+    }
+}
+
 /* Run the codec suite; returns the number of failed checks. */
 int codec_tests_run(void)
 {
@@ -163,6 +266,7 @@ int codec_tests_run(void)
     test_login_request_body();
     test_framing();
     test_primitive_roundtrip();
+    test_utf16_transcodes();
     test_underflow_is_sticky();
 
     if (failures)

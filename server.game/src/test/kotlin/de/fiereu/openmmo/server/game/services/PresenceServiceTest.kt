@@ -7,6 +7,7 @@ import de.fiereu.openmmo.maps.MapManager
 import de.fiereu.openmmo.net.game.packets.EntityLeavePacket
 import de.fiereu.openmmo.net.game.packets.EntityMovePacket
 import de.fiereu.openmmo.net.game.packets.LoadEntityPacket
+import de.fiereu.openmmo.pokemon.SpeciesRegistry
 import de.fiereu.openmmo.server.game.storage.CharacterStore
 import de.fiereu.openmmo.server.game.storage.EntityIdService
 import de.fiereu.openmmo.server.game.testsupport.FakeCharacterRepository
@@ -35,7 +36,10 @@ class PresenceServiceTest :
             )
         val presence =
             PresenceService(
-                InterestManager(), PassThroughInterestPolicy(), MapLoadService(mapManager), store)
+                InterestManager(),
+                PassThroughInterestPolicy(),
+                MapLoadService(mapManager, SpeciesRegistry()),
+                store)
         return presence to store
       }
 

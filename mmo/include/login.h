@@ -27,12 +27,21 @@
 #define MMO_LOGIN_SERVER_DOWN                 0x08
 #define MMO_LOGIN_ACCOUNT_ISSUE               0x09
 #define MMO_LOGIN_INVALID_SAVED_CREDENTIALS   0x1e
+#define MMO_LOGIN_CLIENT_OUT_OF_DATE          0x22
 
-/* The protocol revision this client speaks, sent as both the client and the
- * installation revision. the official client is the revision of the client the wire format
- * here is taken from.
+/* The protocol revision this client speaks, sent as the client revision and as
+ * the installation revision of a tree that does not say what it is. the official client is
+ * the revision of the client the wire format here is taken from.
  */
 #define MMO_CLIENT_REVISION 31914
+
+/*
+ * What the installation revision says, which is what a login server compares against its
+ * update floor: the number the front door read out of the install's revision.txt, or
+ * MMO_CLIENT_REVISION where there is no such tree to read (a build directory, a client driven
+ * from a checkout).
+ */
+int mmo_login_installation_revision(void);
 
 /* Platform ids carried by the LoginRequest's `os` byte:
  * WINDOWS 0, LINUX 1, MAC 2, IOS 3, ANDROID 4, UNKNOWN 0xFF. The one this

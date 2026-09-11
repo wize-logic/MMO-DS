@@ -1,0 +1,10 @@
+cacert.pem is the bundle of root certificates that curl extracts from
+Mozilla's NSS store (certdata.txt) and publishes at
+https://curl.se/ca/cacert.pem. Mozilla distributes certdata.txt under the
+Mozilla Public License 2.0 (https://www.mozilla.org/MPL/2.0/) and the
+extracted bundle carries the same licence. The file's own header names the
+date of the Mozilla data it was made from; tools/roots.sh refreshes it and
+checks the published sha256 on the way.
+
+The update fetch (launcher/tls.c) compiles it in as the roots a channel's
+certificate must chain to. mmo/FEED.md says what that buys.

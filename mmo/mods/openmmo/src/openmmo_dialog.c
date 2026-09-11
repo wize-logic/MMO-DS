@@ -14,9 +14,11 @@
 #include "field_system.h"
 #include "field_task.h"
 #include "font.h"
+#include "text.h"
 #include "game_options.h"
 #include "generated/text_banks.h"
 #include "heap.h"
+#include "map_header.h"
 #include "menu.h"
 #include "message.h"
 #include "render_window.h"
@@ -28,6 +30,7 @@
 
 #include "../../../include/charcode.h"
 #include "../../../include/client.h"
+#include "../../../include/idmap.h"
 
 #define DIALOG_STRING_CHARS 256
 /* A local prompt's line: a name off this server is up to 32 code points and
@@ -42,6 +45,7 @@ typedef struct {
     MessageLoader *loader;
     Menu *menu;
     u8 printer;
+    u8 printed;         /* FieldMessage_Print was started; the printer may owe a tick */
     u8 added;
     u8 cancel;
     s8 kind;           /* 0 message, 1 yes/no, 2 species, 3 text list */
@@ -128,6 +132,12 @@ static void dialog_free(DialogBox *box)
         Menu_DestroyForExit(box->menu, HEAP_ID_FIELD2);
         box->menu = NULL;
     }
+    /*
+     * The prompt's printer is a SysTask that owes one more tick after
+     * FieldMessage_FinishedPrinting reads true, the final Window_CopyToVRAM flush.
+     */
+    if (box->printed && Text_IsPrinterActive(box->printer))
+        Text_RemovePrinter(box->printer);
     if (box->added)
         Window_Remove(&box->window);
     if (box->str != NULL)
@@ -177,7 +187,7 @@ static int start_menu(FieldSystem *fs, DialogBox *box)
     StringList *list;
     Window *win;
     WindowTemplate wt;
-    int i, n;
+    int i, n, labels;
     u16 bank;
     u32 value;
 
@@ -187,11 +197,30 @@ static int start_menu(FieldSystem *fs, DialogBox *box)
     if (n > 8)
         n = 8;
 
+    /* A list of places: each entry is a map header, named by its label. */
+    labels = (box->kind == 3 && box->choice_bank == MMO_DIALOG_BANK_MAP_LABEL);
+    if (labels) {
+        bank = TEXT_BANK_LOCATION_NAMES;
+    } else if (box->kind == 3) {
+        /*
+         * The wire's own bank. game.c refuses one the archive does not hold, and this asks
+         * again rather than trusting that: the value indexes the archive's member table, and a
+         * bank past its end is a read into whatever follows it.
+         */
+        if (!mmo_id_text_bank_valid(box->choice_bank)) {
+            printf("openmmo: dialog list names text bank %d, which this build's"
+                   " archive does not hold, not drawn\n",
+                   (int)box->choice_bank);
+            return 0;
+        }
+        bank = (u16)box->choice_bank;
+    } else {
+        bank = TEXT_BANK_SPECIES_NAME;
+    }
+
     LoadStandardWindowGraphics(fs->bgConfig, BG_LAYER_MAIN_3,
                                MENU_FRAME_TILE, MENU_FRAME_PAL,
                                STANDARD_WINDOW_SYSTEM, HEAP_ID_FIELD2);
-
-    bank = (box->kind == 3) ? (u16)box->choice_bank : TEXT_BANK_SPECIES_NAME;
     names = MessageLoader_Init(MSG_LOADER_LOAD_ON_DEMAND,
                                NARC_INDEX_MSGDATA__PL_MSG,
                                bank, HEAP_ID_FIELD2);
@@ -205,6 +234,8 @@ static int start_menu(FieldSystem *fs, DialogBox *box)
     for (i = 0; i < n; i++) {
         u16 msg = (u16)box->choices[i];
 
+        if (labels)
+            msg = (u16)MapHeader_GetMapLabelTextID((enum MapHeaderID)box->choices[i]);
         value = (box->kind == 3) ? (u32)i : (u32)(i + 1);
         StringList_AddFromMessageBank(list, names, msg, value);
     }
@@ -269,6 +300,7 @@ static BOOL dialog_task(FieldTask *task)
             FieldMessage_DrawWindow(&box->window, options);
             box->added = 1;
             box->printer = FieldMessage_Print(&box->window, box->str, options, 1);
+            box->printed = 1;
             task->state = 1;
         } else {
             task->state = 2;

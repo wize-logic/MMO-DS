@@ -1,6 +1,6 @@
 --- a/src/map_object.c
 +++ b/src/map_object.c
-@@ -330,8 +330,13 @@
+@@ -331,8 +331,13 @@
  
  void MapObject_Delete(MapObject *mapObj)
  {
@@ -14,3 +14,31 @@
      if (MapObjectMan_IsDrawInitialized(mapObjMan) == TRUE) {
          sub_02062B7C(mapObj);
      }
+@@ -2403,6 +2408,27 @@
+         v0++;
+     } while (v0->unk_00 != 0xffff);
+ 
++    /* openmmo: a cooked id that wears an engine id's rows, a composed
++     * player look, walks with that id's controller: the player's own
++     * walk-and-run, bicycle, surf or cast, not the youngster's four walks
++     * (mods/openmmo/src/openmmo_billboard.c). */
++    {
++        extern int openmmo_billboard_like(int gfx_id);
++        int like = openmmo_billboard_like((int)param0);
++
++        if (like >= 0) {
++            v0 = Unk_ov5_021FB97C;
++
++            do {
++                if (v0->unk_00 == (u32)like) {
++                    return v0->unk_04;
++                }
++
++                v0++;
++            } while (v0->unk_00 != 0xffff);
++        }
++    }
++
+     /* Cooked billboard person: clone youngster's renderer. The four
+      * overlay005 tables are sentinel lists, not sized by the enum. */
+     if (pc_modfs_billboard_nsbtx((int)param0) >= 0) {

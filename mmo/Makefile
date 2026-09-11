@@ -76,9 +76,66 @@ STD    ?= -std=gnu99 -fms-extensions -fno-strict-aliasing -fwrapv -fcommon
 # -MMD -MP emits a .d beside every object listing the headers it read, so editing
 # a header rebuilds what included it. Without this an edited struct leaves stale
 # objects linked against the new one, and the tests report field-by-field garbage.
-CFLAGS ?= $(ABI) $(OPTFLAGS) $(STD) -MMD -MP -Wall -Wextra -Wno-unused-parameter -I$(ROOT)/include -I$(BUILD)/gen
+# mods/openmmo/include is on this path for ONE header: blackcompose.h, the
+# Gen 5 sprite composer shared by the plugin that draws a loop live and the
+# fill that bakes one. It has to live where the ENGINE's mod build can see it,
+# that build gets `<mod>/include` and does not get mmo/include, so the
+# lib and the launcher reach across to it rather than the mod reaching here.
+CFLAGS ?= $(ABI) $(OPTFLAGS) $(STD) -MMD -MP -Wall -Wextra -Wno-unused-parameter -I$(ROOT)/include -I$(ROOT)/mods/openmmo/include -I$(BUILD)/gen
 LDFLAGS?= $(ABI) -no-pie
 LDLIBS ?= -lm
+
+# ------------------------------------------- the toolchain's own system headers
+#
+# ASKED AT PARSE TIME, BECAUSE THE ANSWER IS NOT A CLIENT BUG AND MUST NOT
+# ARRIVE AS ONE. Every object here is built for a guest ABI the host compiler
+# reaches by a second set of headers, and when those are missing gcc does not
+# say so: it drops the directory from its search path and carries on, so the
+# first translation unit that includes <errno.h> dies with
+#
+#     /usr/include/linux/errno.h:1:10: fatal error: asm/errno.h: No such file
+#
+# several hundred lines into a build log, naming a header nobody in this
+# repository wrote. Two releases died there on 2026-09-10: `apt install
+# gcc-arm-linux-gnueabihf` took gcc-multilib out as a conflict, and
+# gcc-multilib's ONE file is the symlink /usr/include/asm that made -m32 find
+# the kernel headers at all. It then sat latent for a day behind a warm build
+# tree, the publish that followed recompiled nothing and went out fine, and
+# the next one, which had sources to rebuild, did not. So the probe is one TU
+# on the real CC and the real ABI, and it runs before make builds anything.
+#
+# $(ABI) is whatever the including makefile set, so this asks mingw and the ARM
+# cross about their own headers rather than about i386's.
+#
+# -include on an empty TU rather than a here-string, because make strips a
+# comment from the middle of a $(shell ...) like any other: a probe written as
+# printf '#include <errno.h>' is silently truncated at the #, runs nothing and
+# passes on every host.
+HOSTPROBE_GOALS := $(if $(MAKECMDGOALS),\
+                     $(filter-out clean status cflags where print-%,$(MAKECMDGOALS)),all)
+ifneq ($(strip $(HOSTPROBE_GOALS)),)
+HOSTPROBE := $(shell $(CC) $(ABI) -E -include errno.h -x c /dev/null -o /dev/null 2>&1 \
+                     | grep -m1 'fatal error')
+ifneq ($(strip $(HOSTPROBE)),)
+$(info )
+$(info ======================================================================)
+$(info  hostcheck: $(CC) $(ABI) cannot compile <errno.h> on this machine, so)
+$(info  nothing here can be built. This is the toolchain, not the tree:)
+$(info    $(HOSTPROBE))
+ifneq ($(filter -m32,$(ABI)),)
+$(info  A -m32 build wants the 32-bit kernel headers, which Ubuntu ships as a)
+$(info  separate architecture:)
+$(info    sudo apt-get install -y linux-libc-dev:i386)
+$(info  Do NOT reinstall gcc-multilib to fix it -- apt takes the arm cross)
+$(info  compiler back out, and mmo/Makefile.arm needs that.)
+else
+$(info  That is this toolchain's own sysroot, not the tree: install or repair)
+$(info  the cross compiler named above before building again.)
+endif
+$(info ======================================================================)
+$(error hostcheck: the toolchain cannot compile a system header)
+endif
+endif
 
 # ---------------------------------------------------------------- the server
 #
@@ -113,6 +170,16 @@ SERVER_GAME_PORT  ?= 7777
 SERVER_SETTABLE   ?= 1
 SERVER_ROOT_KEY   ?= 04f2f15c9a2d16be5bfead5329af7a9d1841e68431d1e680261b31cdfc7461dffce4b255957915a51ed70147583ecdc7c243f39c2f7d5f172a69073112e9d4b56b
 
+# DEV_FEATURES is the other seam. A release is a Sinnoh client: the screens
+# that belong to the ported regions, travel between PCs, HeartGold's
+# Pokegear, the Johto and Kanto card, are in the working build for the
+# people porting them and in no release. 1 here, 0 under RELEASE=1 (which is
+# what mmo/dist.sh builds), and then the window has no button for them and
+# the guest refuses their command; nothing at run time turns them back on.
+# Written into the pin header with the rest so the objects that read it are
+# rebuilt when it moves.
+DEV_FEATURES      ?= $(if $(filter 1,$(RELEASE)),0,1)
+
 # Written rather than passed as -D so that changing one of the five rebuilds
 # exactly the objects that carry it: a -D that make cannot see is a stale
 # endpoint.o pointing at the previous server.
@@ -124,7 +191,11 @@ OBJS   := $(LIBOBJS) $(BUILD)/obj/main.o
 # tests/view_drive.c is not one of these: it is SDL and native, the other end of
 # the window rather than a suite that links the client, and it is built by the
 # VIEWDRIVE rule below.
-TESTSRC:= $(filter-out $(ROOT)/tests/view_drive.c,$(wildcard $(ROOT)/tests/*.c))
+# tests/blackanim_harness.c has a main of its own, a host tool over the
+# compositor, built by hand, and linked in here it collides with tests/main.c.
+# tests/hud_push.c is the same shape: a main of its own, built by the HUDPUSH
+# rule below for offline_test.sh to press the in-game menu with.
+TESTSRC:= $(filter-out $(ROOT)/tests/view_drive.c $(ROOT)/tests/blackanim_harness.c $(ROOT)/tests/hud_push.c,$(wildcard $(ROOT)/tests/*.c))
 # viewer/view_geom.c is the window's geometry, and it is SDL-free on purpose so
 # the -m32 suite can hold it to the properties a picture must not lose. It is
 # compiled twice, here for the tests, and natively for the window itself.
@@ -153,12 +224,24 @@ TESTOBJ:= $(patsubst $(ROOT)/tests/%.c,$(BUILD)/obj/tests/%.o,$(TESTSRC)) \
           $(BUILD)/obj/viewer/view_ui.o \
           $(BUILD)/obj/viewer/view_ui_game.o \
           $(BUILD)/obj/viewer/view_ui_theme.o \
+          $(BUILD)/obj/viewer/view_ui_skin.o \
           $(BUILD)/obj/launcher/launch_plan.o $(BUILD)/obj/launcher/launch_menu.o \
           $(BUILD)/obj/launcher/feed.o \
-          $(BUILD)/obj/launcher/feed_verify.o
+          $(BUILD)/obj/launcher/feed_verify.o \
+          $(BUILD)/obj/android/mmo_device_rules.o
 DEPS   := $(OBJS:.o=.d) $(TESTOBJ:.o=.d)
 
+# WHAT ONE OF THIS FILE'S VARIABLES HOLDS, for a script that has to agree with
+# this file rather than keep a second copy of it: `make -s print-LAUNCHSRC`.
+# mmo/package.sh reads the window's and the front door's source lists this way,
+# so a file added to a program here is a file its staleness check knows about
+# and there is no list to remember to update twice, the two disagreeing is
+# what stopped a release on 2026-09-10. Builds nothing.
+print-%:
+	@printf '%s\n' '$($*)'
+
 .PHONY: all lib status cflags clean test abicheck fused enginecheck patchcheck viewcheck \
+        world worldcheck where \
         viewer launcher package dist porttest portbench portasan portubsan portmelon \
         portroot portdiff portreach portscope portbattle enginewip pincheck \
         datacheck tablediff import soundtrack
@@ -188,10 +271,12 @@ $(PIN): FORCE
 	  '#define OPENMMO_PIN_LOGIN_PORT $(SERVER_LOGIN_PORT)' \
 	  '#define OPENMMO_PIN_GAME_PORT  $(SERVER_GAME_PORT)' \
 	  '#define OPENMMO_PIN_SETTABLE   $(SERVER_SETTABLE)' \
+	  '#define OPENMMO_PIN_DEV_FEATURES $(DEV_FEATURES)' \
 	  "#define OPENMMO_PIN_ROOT_KEY   $$key" \
 	  '#endif' > $@.new
 	@if cmp -s $@.new $@; then rm -f $@.new; else mv -f $@.new $@; fi
 
+$(BUILD)/obj/devenv.o: $(PIN)
 $(BUILD)/obj/endpoint.o: $(PIN)
 $(BUILD)/obj/session.o: $(PIN)
 
@@ -205,7 +290,17 @@ TESTFLAGS := -DMMO_REPO_ROOT='"$(ROOT)/.."' -I$(ROOT)/src
 
 $(BUILD)/obj/tests/%.o: $(ROOT)/tests/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(TESTFLAGS) -I$(ROOT)/viewer -I$(ROOT)/launcher -c -o $@ $<
+	$(CC) $(CFLAGS) $(TESTFLAGS) -I$(ROOT)/viewer -I$(ROOT)/launcher \
+	    -I$(ROOT)/android/src -c -o $@ $<
+
+# android/src/mmo_device_rules.c is the handheld's per-device defaults as
+# arithmetic, panel, cores and driver in, thread count and scales out,
+# with no Android header in it, so the suite holds the table of known devices
+# to it here. The probe that fills the facts in is Android-only and stays in
+# Makefile.android.
+$(BUILD)/obj/android/%.o: $(ROOT)/android/src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD)/obj/viewer/%.o: $(ROOT)/viewer/%.c
 	@mkdir -p $(dir $@)
@@ -460,6 +555,14 @@ status:
 # works. Never pointed at the shared 7777, those characters sit in
 # different regions and a pair there is a map mismatch, not a play path.
 #
+# offline_test.sh is the play path's other half: one character carried out to
+# a save file and back, five times over. Each round boots a session, presses
+# Continue Offline through the HUD page (openmmo-hudpush is that press with no
+# window), plays the image with no server, character select, a walk read off
+# the step lines, SAVE from the menu, and offers the report back through the
+# import door, expecting the same species on the same slots. It SKIPs on the
+# same terms as play_test.sh, plus a fused build and a ROM.
+#
 # playthrough_test.sh is the thirty-seventh and is the story without a
 # person. One developer character against the same scratch game: rival,
 # starter, first wild, each gym, each HM wall, the five rooms, the Hall
@@ -608,7 +711,8 @@ TRACE  := $(ROOT)/traces/login-admin.trace
 test: $(TESTBIN) $(TARGET)
 	@$(TESTBIN)
 	@$(ROOT)/tests/realbin_test.sh $(TARGET) $(TRACE)
-	@$(ROOT)/tests/ci_test.sh $(ROOT)/ci.sh $(ROOT)/../.github/workflows/client.yml
+	@$(ROOT)/tests/ci_test.sh $(ROOT)/ci.sh $(ROOT)/../.github/workflows/client.yml \
+	    $(ROOT)/../start-server.sh
 	@$(ROOT)/tests/package_test.sh $(ROOT)
 	@$(ROOT)/tests/viewer_test.sh $(ROOT) $(BUILD)
 	@$(ROOT)/tests/crowd_test.sh $(ROOT) $(BUILD) $(ENGINE)
@@ -630,6 +734,7 @@ test: $(TESTBIN) $(TARGET)
 	@$(ROOT)/tests/battle_seam_test.sh $(ROOT) $(BUILD) $(ENGINE)
 	@$(ROOT)/tests/boot_test.sh $(ROOT) $(BUILD) $(ENGINE)
 	@$(ROOT)/tests/play_test.sh $(ROOT) $(BUILD)
+	@$(ROOT)/tests/offline_test.sh $(ROOT) $(BUILD) $(ENGINE)
 	@$(ROOT)/tests/contest_test.sh $(ROOT) $(BUILD)
 	@$(ROOT)/tests/playthrough_test.sh $(ROOT) $(BUILD)
 	@$(ROOT)/tests/datacheck_test.sh $(ROOT) $(ENGINE)
@@ -707,6 +812,20 @@ VIEWER  ?= $(BUILD)/openmmo-view$(EXE)
 # src/platform.c is the fifth of these and the reason the window has no #ifdef
 # in it: the shared page, the child processes and the two or three directories
 # a program has to be told about are one file (include/platform.h).
+# THE WINDOW'S OWN FACE, COMPILED IN. A font read out of a folder beside the
+# program is a font that can go missing, and this one is half the difference
+# between a finished window and a debug overlay, so it is part of the binary
+# rather than something to install. Noto Sans Medium, SIL Open Font License
+# 1.1 (res/fonts/OFL.txt), which is the family the official client draws these same
+# surfaces with. The theme's own face still wins where a player pointed at an
+# extracted client, because that one carries CJK and this one does not.
+NOTOTTF := $(ROOT)/res/fonts/NotoSans-Medium.ttf
+NOTOSRC := $(BUILD)/gen/view_font_noto.c
+
+$(NOTOSRC): $(NOTOTTF) $(ROOT)/tools/bin2c.py
+	@mkdir -p $(dir $@)
+	@python3 $(ROOT)/tools/bin2c.py $(NOTOTTF) $@ view_ui_noto
+
 VIEWSRC := $(ROOT)/viewer/viewer.c $(ROOT)/viewer/view_geom.c \
            $(ROOT)/viewer/view_font.c $(ROOT)/viewer/view_input.c \
            $(ROOT)/viewer/view_status.c $(ROOT)/viewer/view_hud.c \
@@ -716,9 +835,12 @@ VIEWSRC := $(ROOT)/viewer/viewer.c $(ROOT)/viewer/view_geom.c \
            $(ROOT)/viewer/view_ui_wins.c $(ROOT)/viewer/view_ui_party.c \
            $(ROOT)/viewer/view_ui_gtl.c $(ROOT)/viewer/view_ui_mail.c \
            $(ROOT)/viewer/view_ui_theme.c \
+           $(ROOT)/viewer/view_ui_skin.c \
            $(ROOT)/src/charcode.c \
            $(ROOT)/src/deflate.c \
-           $(ROOT)/src/platform.c
+           $(ROOT)/src/devenv.c \
+           $(ROOT)/src/platform.c \
+           $(NOTOSRC)
 VIEWHDR := $(ROOT)/viewer/view_geom.h $(ROOT)/viewer/view_font.h \
            $(ROOT)/viewer/view_input.h $(ROOT)/viewer/view_status.h \
            $(ROOT)/viewer/view_hud.h \
@@ -728,9 +850,12 @@ VIEWHDR := $(ROOT)/viewer/view_geom.h $(ROOT)/viewer/view_font.h \
            $(ROOT)/viewer/view_ui_party.h $(ROOT)/viewer/view_ui_gtl.h \
            $(ROOT)/viewer/view_ui_mail.h \
            $(ROOT)/viewer/view_ui_theme.h \
+           $(ROOT)/viewer/view_ui_skin.h \
            $(ROOT)/include/view_channel.h $(ROOT)/include/text_channel.h \
            $(ROOT)/include/status_channel.h $(ROOT)/include/hud_channel.h \
-           $(ROOT)/include/charcode.h $(ROOT)/include/platform.h
+           $(ROOT)/include/vsync_channel.h \
+           $(ROOT)/include/charcode.h $(ROOT)/include/platform.h \
+           $(ROOT)/include/deflate.h
 SDL2_CONFIG ?= sdl2-config
 VIEWFLAGS ?= $(VIEWOPT) -std=gnu99 -Wall -Wextra -Wno-unused-parameter \
              -I$(ROOT)/include -I$(ROOT)/viewer -I$(ROOT)/src
@@ -745,7 +870,12 @@ VIEWLINK        ?= $(SDL_LIBS) $(FREETYPE_LIBS) $(FREETYPE_RPATH) -lm
 
 viewer: $(VIEWER)
 
-$(VIEWER): $(VIEWSRC) $(VIEWHDR)
+# The pin header is a prerequisite because the bar reads DEV_FEATURES out of
+# it (viewer/view_ui_game.h). Its -I is on this rule and not in VIEWFLAGS: the
+# launcher shares those flags and finds its feed pin by include order, so a
+# gen directory ahead of $(dir $(FEEDPIN)) would hand a pinned build the
+# unpinned header (update_test.sh caught exactly that).
+$(VIEWER): $(VIEWSRC) $(VIEWHDR) $(PIN)
 	@if [ -z "$(SDL_LIBS)" ]; then \
 	   echo "viewer: *** SDL2 not found, install its development package,"; \
 	   echo "viewer:     or set SDL2_CONFIG=/path/to/sdl2-config ***"; \
@@ -757,7 +887,7 @@ $(VIEWER): $(VIEWSRC) $(VIEWHDR)
 	   exit 1; \
 	 fi
 	@mkdir -p $(BUILD)
-	$(CC) $(VIEWFLAGS) $(FREETYPE_CFLAGS) $(SDL_CFLAGS) -o $@ $(VIEWSRC) \
+	$(CC) $(VIEWFLAGS) $(FREETYPE_CFLAGS) $(SDL_CFLAGS) -I$(BUILD)/gen -o $@ $(VIEWSRC) \
 	    $(VIEWLINK)
 	@echo "viewer: ok ($(VIEWER))"
 
@@ -768,22 +898,45 @@ $(VIEWER): $(VIEWSRC) $(VIEWHDR)
 LAUNCHER  ?= $(BUILD)/openmmo-launch$(EXE)
 LAUNCHSRC := $(ROOT)/launcher/launcher.c $(ROOT)/launcher/launch_gui.c \
              $(ROOT)/launcher/launch_plan.c \
+             $(ROOT)/launcher/nitrorom.c \
+             $(ROOT)/launcher/speciescompose.c \
+             $(ROOT)/src/blackcompose.c \
              $(ROOT)/launcher/soundcompose.c \
+             $(ROOT)/launcher/followcompose.c \
+             $(ROOT)/launcher/lookcompose.c \
              $(ROOT)/launcher/launch_menu.c \
              $(ROOT)/launcher/xp_stat_compat.c \
              $(ROOT)/launcher/feed.c $(ROOT)/launcher/feed_verify.c \
              $(ROOT)/launcher/fetch.c $(ROOT)/launcher/update.c \
+             $(ROOT)/launcher/tls.c \
              $(ROOT)/src/sockets.c \
-             $(ROOT)/src/crypto.c $(ROOT)/src/platform.c \
+             $(ROOT)/src/crypto.c $(ROOT)/src/devenv.c \
+             $(ROOT)/src/platform.c \
              $(ROOT)/src/token.c \
              $(ROOT)/src/cartridge.c $(ROOT)/src/imports.c \
+             $(ROOT)/src/charcode.c \
+             $(ROOT)/src/offline_import.c $(ROOT)/src/offline_chain.c \
+             $(ROOT)/src/save_bundle.c \
+             $(ROOT)/src/codec.c \
              $(ROOT)/viewer/view_font.c
 LAUNCHHDR := $(ROOT)/launcher/launch_plan.h $(ROOT)/launcher/launch_menu.h \
+             $(ROOT)/include/save_bundle.h \
+             $(ROOT)/launcher/nitrorom.h \
+             $(ROOT)/launcher/speciescompose.h \
+             $(ROOT)/mods/openmmo/include/blackcompose.h \
+             $(ROOT)/src/species_port.gen.h \
+             $(ROOT)/include/species_port.h \
              $(ROOT)/launcher/soundcompose.h $(ROOT)/src/soundtables.gen.h \
+             $(ROOT)/launcher/followcompose.h \
+             $(ROOT)/launcher/lookcompose.h $(ROOT)/include/appearance.h \
+             $(ROOT)/src/follower_fill.gen.h \
+             $(ROOT)/src/follower_index.gen.h \
              $(ROOT)/include/cartridge.h $(ROOT)/include/imports.h \
+             $(ROOT)/include/charcode.h $(ROOT)/src/charcode_glyphs.gen.h \
              $(ROOT)/launcher/launch_gui.h \
              $(ROOT)/launcher/feed.h \
              $(ROOT)/launcher/fetch.h $(ROOT)/launcher/update.h \
+             $(ROOT)/launcher/tls.h $(ROOT)/launcher/mmo_mbedtls_config.h \
              $(ROOT)/viewer/view_font.h \
              $(ROOT)/include/platform.h \
              $(ROOT)/include/status_channel.h \
@@ -840,9 +993,65 @@ RAYLIB_RPATH  ?= $(shell brew --prefix raylib 2>/dev/null)/lib
 LAUNCHLINK    ?= $(RAYLIB_LIBS) -Wl,-rpath,'$$ORIGIN' \
                  -Wl,-rpath,$(RAYLIB_RPATH) -lm
 
+# ------------------------------------------------------------------ mbedTLS
+#
+# The TLS the update fetch speaks, built from
+# the submodule pinned at third_party/mbedtls under our own configuration,
+# launcher/mmo_mbedtls_config.h, the library's own mbedtls_config.h is never
+# read, into one archive. Every library file is compiled; the ones the
+# configuration leaves out compile to nothing. The flags are the launcher's
+# own (native here, because the launcher is), so the archive and tls.o agree
+# on every struct; Makefile.android sets MBEDTLS_FLAGS for the device's ABI.
+MBEDTLS        := $(ROOT)/third_party/mbedtls
+MBEDTLS_LIB    ?= $(BUILD)/libmbedtls-openmmo.a
+MBEDTLS_FLAGS  ?= $(VIEWOPT) -std=gnu99 -w
+MBEDTLS_CONF   := $(ROOT)/launcher/mmo_mbedtls_config.h
+MBEDTLS_CFLAGS := -I$(MBEDTLS)/include -I$(ROOT)/launcher \
+                  -DMBEDTLS_CONFIG_FILE='"mmo_mbedtls_config.h"'
+ifeq ($(wildcard $(MBEDTLS)/library/ssl_tls.c),)
+# The submodule is not checked out. Fetch the pinned commit, shallow, once,
+# and read this makefile again, because the object list below is a
+# wildcard over files that did not exist when make read it the first time.
+$(MBEDTLS_LIB): FORCE
+	@echo "mbedtls: third_party/mbedtls is empty; fetching the pinned submodule"
+	@git -C $(ROOT)/.. submodule update --init --depth 1 -- mmo/third_party/mbedtls || { \
+	   echo "mbedtls: *** git submodule update --init, mmo/third_party/mbedtls failed"; \
+	   echo "mbedtls: *** (a network is needed once; the pin is in .gitmodules)"; \
+	   exit 1; }
+	@$(MAKE) -f $(firstword $(MAKEFILE_LIST)) $@
+else
+MBEDTLS_SRC := $(wildcard $(MBEDTLS)/library/*.c)
+MBEDTLS_OBJ := $(patsubst $(MBEDTLS)/library/%.c,$(BUILD)/obj/mbedtls/%.o,$(MBEDTLS_SRC))
+
+$(BUILD)/obj/mbedtls/%.o: $(MBEDTLS)/library/%.c $(MBEDTLS_CONF)
+	@mkdir -p $(dir $@)
+	@$(CC) $(MBEDTLS_FLAGS) $(MBEDTLS_CFLAGS) -I$(MBEDTLS)/library -c -o $@ $<
+
+$(MBEDTLS_LIB): $(MBEDTLS_OBJ)
+	@rm -f $@
+	@$(AR) rcs $@ $^
+	@echo "mbedtls: ok ($@, $(words $(MBEDTLS_OBJ)) objects)"
+endif
+
+# The roots a channel's certificate must chain to, as one C string: Mozilla's
+# store as curl publishes it (third_party/cacert.pem; tools/roots.sh refreshes
+# it), the certificates alone, the bundle's labels and comments are dropped,
+# so nothing outside a base64 block reaches a string literal.
+ROOTSGEN := $(BUILD)/gen/tls_roots.gen.h
+
+$(ROOTSGEN): $(ROOT)/third_party/cacert.pem
+	@mkdir -p $(dir $@)
+	@{ echo '/* generated by mmo/Makefile from third_party/cacert.pem, do not edit, do not commit */'; \
+	   echo 'static const char mmo_tls_roots_pem[] ='; \
+	   sed -n '/^-----BEGIN CERTIFICATE-----$$/,/^-----END CERTIFICATE-----$$/p' $< | \
+	       sed 's/^/"/; s/$$/\\n"/'; \
+	   echo ';'; } > $@.new
+	@if cmp -s $@.new $@; then rm -f $@.new; else mv -f $@.new $@; fi
+	@echo "roots: $$(grep -c 'BEGIN CERTIFICATE' $<) certificates compiled in ($@)"
+
 launcher: $(LAUNCHER)
 
-$(LAUNCHER): $(LAUNCHSRC) $(LAUNCHHDR) $(FEEDPIN)
+$(LAUNCHER): $(LAUNCHSRC) $(LAUNCHHDR) $(PIN) $(FEEDPIN) $(ROOTSGEN) $(MBEDTLS_LIB)
 	@if [ -z "$(RAYLIB_LIBS)" ]; then \
 	   echo "launcher: *** raylib not found, brew install raylib (or put it on PKG_CONFIG_PATH)"; \
 	   exit 1; \
@@ -850,8 +1059,9 @@ $(LAUNCHER): $(LAUNCHSRC) $(LAUNCHHDR) $(FEEDPIN)
 	@mkdir -p $(BUILD)
 	$(CC) $(VIEWFLAGS) -I$(ROOT)/launcher -I$(ROOT)/third_party \
 	    -I$(ROOT)/src -I$(dir $(FEEDPIN)) -I$(BUILD)/gen \
-	    $(RAYLIB_CFLAGS) -o $@ \
-	    $(LAUNCHSRC) $(LAUNCHLINK)
+	    -I$(ROOT)/mods/openmmo/include \
+	    $(RAYLIB_CFLAGS) $(MBEDTLS_CFLAGS) -o $@ \
+	    $(LAUNCHSRC) $(MBEDTLS_LIB) $(LAUNCHLINK)
 	@echo "launcher: ok ($(LAUNCHER))"
 	@# Beside the binary, for package.sh to carry. Under the SONAME the
 	@# loader will ask for, brew's file is libraylib.so.6.0.0 and the
@@ -894,12 +1104,24 @@ $(LAUNCHER): $(LAUNCHSRC) $(LAUNCHHDR) $(FEEDPIN)
 # rather than a copy, so it exercises what the window ships.
 VIEWDRIVE    := $(BUILD)/openmmo-viewdrive
 VIEWDRIVESRC := $(ROOT)/tests/view_drive.c $(ROOT)/viewer/view_input.c \
-                $(ROOT)/viewer/view_geom.c $(ROOT)/src/platform.c
+                $(ROOT)/viewer/view_geom.c $(ROOT)/src/platform.c \
+                $(ROOT)/src/devenv.c
 
-$(VIEWDRIVE): $(VIEWDRIVESRC) $(VIEWHDR)
+$(VIEWDRIVE): $(VIEWDRIVESRC) $(VIEWHDR) $(PIN)
 	@mkdir -p $(BUILD)
-	$(CC) $(VIEWFLAGS) $(SDL_CFLAGS) -o $@ $(VIEWDRIVESRC) \
+	$(CC) $(VIEWFLAGS) $(SDL_CFLAGS) -I$(BUILD)/gen -o $@ $(VIEWDRIVESRC) \
 	    $(SDL_LIBS) -lm
+
+# One HUD command into a running fused client's page: the press behind
+# offline_test.sh's Continue Offline. -m32 like the game, because the page is
+# that binary's struct; no SDL, no client library.
+HUDPUSH := $(BUILD)/openmmo-hudpush
+
+$(HUDPUSH): $(ROOT)/tests/hud_push.c $(ROOT)/include/hud_channel.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+
+test: $(HUDPUSH)
 
 # Where SDL2 is installed, `make test` builds these three and viewer_test.sh
 # drives them; where it is not, that script says SKIP. Declared here rather than
@@ -988,7 +1210,7 @@ enginecheck:
 	   echo "enginecheck: ok (engine at pinned `echo $$pin | cut -c1-10`)"; \
 	 elif [ $$st -eq 0 ]; then \
 	   echo "enginecheck: engine is `git -C $(ENGINE) rev-list --count $$pin..$$head 2>/dev/null` commit(s) past the pin"; \
-	   echo " and none of them reached this build's surface, context, not an action."; \
+	   echo "  and none of them reached this build's surface, context, not an action."; \
 	 else \
 	   echo "======================================================================"; \
 	   echo " enginecheck: DRIFT, the engine moved under the fused build, and it"; \
@@ -1100,8 +1322,8 @@ ABI_SHAPED_PFX := -fpack-struct= -D_TIME_BITS= -mfloat-abi= -mabi= -mfpmath=
 # nothing and being told every day that it passed.
 abicheck:
 	@ec=0; mk='$(ENGINE_MAKEFILE)'; \
-	 if [ ! -d '$(ENGINE)' ]; then \
-	   echo "abicheck: SKIP ($(ABI_NAME)) -- no engine checkout at $(ENGINE);"; \
+	 if [ ! -d '$(ENGINE)/pc' ]; then \
+	   echo "abicheck: SKIP ($(ABI_NAME)), no engine checkout at $(ENGINE);"; \
 	   echo "abicheck:      these flags were compared with nothing: $(ABI)"; \
 	   exit 0; \
 	 fi; \
@@ -1272,6 +1494,13 @@ portscope:
 # (PC_LAB_BATTLE / PC_LAB_USE_ITEM); this is the one way this tree drives
 # it. BATTLE, BATTLE_AT, BATTLE_FRAMES and USE_ITEM are this rule's knobs
 # and are not repeated as defaults anywhere else.
+# A STATION IS RE-MINTED WHENEVER THE BINARY MOVES. The save is a save of THIS
+# game, written by the port through the game's own setters, so a build that
+# changes the save layout, or the new-game script, or the party the recipe
+# mints, leaves the old one meaning something else. It does not fail: it
+# BOOTS, and on 2026-09-01 a base.sav from 08-16 booted the Rowan intro under a
+# battle station and the fight simply never started, which reads as the lab
+# being broken. Cheap to remint, and never wrong.
 BATTLE        ?= wild 25 5
 BATTLE_AT     ?= 2600
 BATTLE_FRAMES ?= 3000
@@ -1279,7 +1508,8 @@ USE_ITEM      ?=
 portbattle:
 	@set -e; $(call port_guard,$(FUSED),portbattle,fused); \
 	 mkdir -p $(BUILD)/battle-lab; \
-	 if [ ! -f $(BUILD)/battle-lab/base.sav ]; then \
+	 if [ ! -f $(BUILD)/battle-lab/base.sav ] \
+	     || [ $(FUSED) -nt $(BUILD)/battle-lab/base.sav ]; then \
 	     $(ROOT)/tools/battle_lab.sh mint $(ROOT) $(BUILD) $(ENGINE) \
 	         $(BUILD)/battle-lab/base.sav; \
 	 fi; \
@@ -1309,6 +1539,26 @@ import:
 	   echo "import: IMPORT_ROM=<other-game.nds> is required" >&2; exit 2; \
 	 fi
 	@$(ROOT)/tools/modport.sh $(ENGINE) $(IMPORT_PKG) $(IMPORT_ROM) $(OUT)
+
+# A PORTED WORLD, checked and then stood in. `mods/hgss` is 538 maps out of a
+# Heart Gold cartridge, and loading one of them proves nothing about the other
+# 537, so `worldcheck` boots a landmark of every kind headless and says what
+# each drew, and `world` fills whatever needs filling, starts whatever is down
+# and opens the window there. `tools/world.sh --where` is the list on its own.
+# Neither is in `make test`: both need a filled package, and the payload is the
+# player's cartridge's rather than this repository's.
+#
+#   make -C mmo worldcheck IMPORT_ROM=~/pokeheartgold.us.nds
+#   make -C mmo world      IMPORT_ROM=~/pokeheartgold.us.nds USER=me PASS=...
+worldcheck:
+	@OPENMMO_IMPORT_ROM=$(IMPORT_ROM) $(ROOT)/tools/world.sh --check
+
+world:
+	@OPENMMO_IMPORT_ROM=$(IMPORT_ROM) $(ROOT)/tools/world.sh --play \
+	    $(if $(USER),--user $(USER)) $(if $(PASS),--pass $(PASS))
+
+where:
+	@$(ROOT)/tools/world.sh --where
 
 # The soundtrack packages: Sinnoh against another cartridge's whole sound.
 # Two passes per game, both from the player's own image. The FONT pass

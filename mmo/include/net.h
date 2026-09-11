@@ -54,6 +54,15 @@ size_t mmo_net_recv(mmo_net *n, void *out, size_t max);
 /* Received bytes waiting to be drained by mmo_net_recv(). */
 size_t mmo_net_available(const mmo_net *n);
 
+/* Bytes queued by mmo_net_send() that the socket has not taken yet. */
+size_t mmo_net_pending(const mmo_net *n);
+
+/* Wait, up to ms milliseconds, for the queue to actually reach the socket.
+ * Returns what is still queued, so 0 means everything went. Anything sent in
+ * the same breath as a close needs this: close() frees the queue rather than
+ * sending it, and a pump only writes on a poll that says the socket is ready. */
+size_t mmo_net_drain(mmo_net *n, int ms);
+
 /* Close the socket and free buffers, returning to MMO_NET_IDLE. */
 void mmo_net_close(mmo_net *n);
 

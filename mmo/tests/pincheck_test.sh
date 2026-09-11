@@ -1,29 +1,154 @@
 #!/bin/sh
-# The content half of the engine pin, checked the only way
-# it can be: by breaking it.
+# The two guards over the engine boundary, checked the only
+# way either can be, by breaking them.
 set -eu
 
 ROOT=${1:?usage: pincheck_test.sh <mmo-root> <engine-dir>}
 ENGINE=${2:-$ROOT/../engine/pokeplatinum}
 
 SURFACE="$ROOT/tools/engine_surface.sh"
-
-if [ ! -d "$ENGINE/include" ]; then
-    echo "pincheck: SKIP (no engine checkout at $ENGINE)"
-    exit 0
-fi
+SITES="$ROOT/tools/patch_sites.py"
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 M=$tmp/manifest
 fail=0
 
-check() {
-    sh "$SURFACE" --engine "$ENGINE" --root "$ROOT" --manifest "$M" --check >"$tmp/out" 2>&1
-}
-
 say() {
     if [ "$1" = 0 ]; then echo "  ok   $2"; else echo "  FAIL $2"; fail=1; fi
+}
+
+# ---------------------------------------------------------------------------
+# The patch-context guard. `patch` finds a hunk by its context and not by the
+# line in its `@@` header, so a hunk whose context occurs twice can land on the
+# wrong one of them with nothing printed anywhere. These are the shapes.
+# ---------------------------------------------------------------------------
+echo "the patch-context guard, one shape at a time:"
+
+# Two functions with identical bodies, which is what makes the question real.
+cat >"$tmp/twice.c" <<'EOF'
+static void a(void)
+{
+    one();
+    two();
+}
+
+static void b(void)
+{
+    one();
+    two();
+}
+EOF
+
+sites() {
+    python3 "$SITES" "$1" "$2" >"$tmp/sites.out" 2>&1
+}
+
+# One hunk, two candidate sites: the case that has to fail.
+cat >"$tmp/ambiguous.patch" <<'EOF'
+--- a/twice.c
++++ b/twice.c
+@@ -1,4 +1,5 @@
+ {
+     one();
++    hooked();
+     two();
+ }
+EOF
+if sites "$tmp/ambiguous.patch" "$tmp/twice.c"; then
+    say 1 "a hunk whose context occurs twice is refused"
+    cat "$tmp/sites.out"
+else
+    grep -q "2 sites" "$tmp/sites.out" &&
+        say 0 "a hunk whose context occurs twice is refused, and both sites named" ||
+        { say 1 "a hunk whose context occurs twice names its sites"; cat "$tmp/sites.out"; }
+fi
+
+# Two candidate sites and two byte-identical hunks: whichever way patch deals
+# them out the file ends up the same, so this one passes.
+cat >"$tmp/paired.patch" <<'EOF'
+--- a/twice.c
++++ b/twice.c
+@@ -1,4 +1,5 @@
+ {
+     one();
++    hooked();
+     two();
+ }
+@@ -7,4 +8,5 @@
+ {
+     one();
++    hooked();
+     two();
+ }
+EOF
+if sites "$tmp/paired.patch" "$tmp/twice.c"; then
+    say 0 "two identical hunks over two identical sites are allowed"
+else
+    say 1 "two identical hunks over two identical sites are allowed"
+    cat "$tmp/sites.out"
+fi
+
+# The same hook carried out to the function signature: one site, and it passes.
+cat >"$tmp/named.patch" <<'EOF'
+--- a/twice.c
++++ b/twice.c
+@@ -1,5 +1,6 @@
+ static void a(void)
+ {
+     one();
++    hooked();
+     two();
+ }
+EOF
+if sites "$tmp/named.patch" "$tmp/twice.c"; then
+    say 0 "the same hook carried out to the signature names one site"
+else
+    say 1 "the same hook carried out to the signature names one site"
+    cat "$tmp/sites.out"
+fi
+
+# A hunk that lands on an earlier hunk's result matches nowhere in the file as
+# it stands. That is legal, and whether it applies is patch's own answer.
+cat >"$tmp/stacked.patch" <<'EOF'
+--- a/twice.c
++++ b/twice.c
+@@ -1,5 +1,6 @@
+ static void a(void)
+ {
+     one();
++    hooked();
+     two();
+ }
+@@ -2,5 +2,6 @@
+ {
+     one();
+     hooked();
++    later();
+     two();
+ }
+EOF
+if sites "$tmp/stacked.patch" "$tmp/twice.c"; then
+    grep -q "matches nowhere" "$tmp/sites.out" &&
+        say 0 "a hunk that lands on an earlier one is reported and not failed" ||
+        { say 1 "a hunk that lands on an earlier one is reported"; cat "$tmp/sites.out"; }
+else
+    say 1 "a hunk that lands on an earlier one is not failed"
+    cat "$tmp/sites.out"
+fi
+
+if [ ! -d "$ENGINE/include" ]; then
+    echo "pincheck: SKIP the manifest half (no engine checkout at $ENGINE)"
+    if [ "$fail" -eq 0 ]; then
+        echo "pincheck: all checks passed"
+    else
+        echo "pincheck: FAILED"
+    fi
+    exit "$fail"
+fi
+
+check() {
+    sh "$SURFACE" --engine "$ENGINE" --root "$ROOT" --manifest "$M" --check >"$tmp/out" 2>&1
 }
 
 echo "the engine surface manifest, broken one way at a time:"

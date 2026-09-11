@@ -1,9 +1,59 @@
---- a/src/sound_playback.c
-+++ b/src/sound_playback.c
-@@ -105,10 +105,20 @@
+--- a/src/sound_playback.c	2026-09-03 00:15:39.970710316 -0400
++++ b/src/sound_playback.c	2026-09-03 00:15:39.995544842 -0400
+@@ -94,23 +94,72 @@
+     SoundSystem_LoadSequence(seqID);
+     SoundSystem_SaveHeapState(SoundSystem_GetParam(SOUND_SYSTEM_PARAM_HEAP_STATE_BGM));
+ 
+-    return NNS_SndArcPlayerStartSeq(SoundSystem_GetSoundHandle(handleType), seqID);
++    {
++        extern void openmmo_bgm_channels_widen(int seqID);
++        BOOL started = NNS_SndArcPlayerStartSeq(SoundSystem_GetSoundHandle(handleType), seqID);
++
++        /* openmmo: a carried track plays on the channels its own game gave
++         * it (mods/openmmo/src/openmmo_mixer.c). */
++        openmmo_bgm_channels_widen(seqID);
++        return started;
++    }
+ }
+ 
+ static BOOL Sound_Impl_PlayFieldBGM(u16 seqID, u8 playerID, enum SoundHandleType handleType)
+ {
+-    UNUSED(SoundSystem_GetParam(SOUND_SYSTEM_PARAM_FIELD_BGM_BANK_STATE));
++    u8 *bankState = SoundSystem_GetParam(SOUND_SYSTEM_PARAM_FIELD_BGM_BANK_STATE);
+     u16 *newFieldBGM = SoundSystem_GetParam(SOUND_SYSTEM_PARAM_FIELD_BGM);
+ 
      int currentSeqID = Sound_GetSequenceIDFromSoundHandle(SoundSystem_GetSoundHandle(SOUND_HANDLE_TYPE_FIELD_BGM));
++
++    /* A crossfade, walking over the line between a town and its route,
++     * getting on the bicycle, surfing, fades the old track out and starts
++     * the new one with the bank state left IDLE, because in Sinnoh every
++     * field track's bank is already resident and there is nothing to load.
++     * A carried track's bank is not, and the load below then sat ABOVE the
++     * BGM heap mark; every sub screen pops the heap back to that mark
++     * (Sound_Impl_LoadSubSceneSoundData), so opening the summary after
++     * walking from Route 34 into Goldenrod freed the bank out from under the
++     * player and the music stopped for good (owner, r1018; measured on the
++     * audio ring 2026-09-03). A bank that is not resident takes the switch
++     * path, which is the map change's own: the heap is rebuilt from the
++     * persistent mark and the mark is saved above what the track needs. The
++     * old track is already stopped by the time the fade hands over here. */
++    {
++        const NNSSndArcBankInfo *bankInfo = Sound_GetBankInfoForSequence(seqID);
++
++        if (*bankState == FIELD_BGM_BANK_STATE_IDLE && bankInfo != NULL
++            && NNS_SndArcGetFileAddress(bankInfo->fileId) == NULL) {
++            Sound_SetFieldBGMBankState(FIELD_BGM_BANK_STATE_SWITCH);
++        }
++    }
++
      Sound_LoadSoundDataForFieldBGM(seqID, Sound_GetBankIDFromSequenceID(currentSeqID));
  
+-    return NNS_SndArcPlayerStartSeqEx(
+-        SoundSystem_GetSoundHandle(handleType),
+-        -1,
+-        Sound_GetBankIDFromSequenceID(*newFieldBGM),
+-        -1,
+-        seqID);
 +    /* The official client starts every field sequence through the FIELD BGM's bank, which
 +     * works because Sinnoh's two field banks are supersets of the shared set
 +     * every field track selects from, surf over a town keeps its sound. A
@@ -14,11 +64,54 @@
 +     * already is: the loader reuses a registered file. */
 +    SoundSystem_LoadSequenceEx(seqID, NNS_SND_ARC_LOAD_BANK | NNS_SND_ARC_LOAD_WAVE);
 +
-     return NNS_SndArcPlayerStartSeqEx(
-         SoundSystem_GetSoundHandle(handleType),
-         -1,
--        Sound_GetBankIDFromSequenceID(*newFieldBGM),
-+        Sound_GetBankIDFromSequenceID(seqID),
-         -1,
-         seqID);
++    {
++        extern void openmmo_bgm_channels_widen(int seqID);
++        BOOL started = NNS_SndArcPlayerStartSeqEx(
++            SoundSystem_GetSoundHandle(handleType),
++            -1,
++            Sound_GetBankIDFromSequenceID(seqID),
++            -1,
++            seqID);
++
++        /* openmmo: as above, the crossfade and the scripted start come
++         * through here without the scene switch's channel reset. */
++        openmmo_bgm_channels_widen(seqID);
++        return started;
++    }
  }
+ 
+ BOOL Sound_SetBGM(u8 scene, u16 seqID)
+@@ -337,6 +386,15 @@
+ 
+     if (waveID != shaymin_forms_sky_cry_swar) {
+         if (waveID > MAX_SPECIES || waveID == SPECIES_NONE) {
++            /* openmmo: the same door as the Ex form, centred and full. */
++            {
++                extern int openmmo_cry_play(int species, int pan, int volume);
++
++                if (waveID > MAX_SPECIES
++                        && openmmo_cry_play((int)waveID, 0, 127)) {
++                    return TRUE;
++                }
++            }
+             waveID = bulbasaur_cry_swar;
+         }
+     }
+@@ -427,6 +485,17 @@
+ 
+     if (species != shaymin_forms_sky_cry_swar) {
+         if (species > MAX_SPECIES || species == SPECIES_NONE) {
++            /* openmmo: a ported species' cry comes off the imports fill and
++             * plays through the recorded-cry door instead of clamping to
++             * Bulbasaur's (mods/openmmo/src/openmmo_cries.c). */
++            {
++                extern int openmmo_cry_play(int species, int pan, int volume);
++
++                if (species > MAX_SPECIES
++                        && openmmo_cry_play((int)species, pan, volume)) {
++                    return TRUE;
++                }
++            }
+             species = SPECIES_BULBASAUR;
+         }
+     }

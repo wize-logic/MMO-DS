@@ -8,13 +8,21 @@
 #     --limit N   sample at most N of the revisions that touched each patched
 #                 file (newest first; default 40)
 #     --head      only the engine's current HEAD
-#     --gate      --head, and exit non-zero unless every hunk landed on exact
-#                 context.  This is the case worth failing on: the engine's own
-#                 compile rule applies our diffs with `patch --forward` at the
-#                 default fuzz, so a hunk whose context has rotted still lands,
-#                 somewhere, and the build says nothing.  A hunk that stops
-#                 applying altogether is already loud, the object is dropped
-#                 and the link fails on its symbols.  This covers the other one.
+#     --gate      --head, and exit non-zero on the two cases that are silent.
+#                 The engine's own compile rule applies our diffs with `patch
+#                 --forward` at the default fuzz, so a hunk whose context has
+#                 rotted still lands, somewhere, and the build says nothing;
+#                 and `patch` finds a hunk by its context rather than by the
+#                 line in its `@@` header, so a hunk whose context occurs more
+#                 than once in the file can land on the wrong one of them and
+#                 the build says nothing about that either.  Both fail here.
+#                 An offset does not: its context matched exactly, at another
+#                 line, which is what an engine that gained a line above our
+#                 hunk looks like.  It is counted and printed, because a hunk
+#                 that has drifted far is worth reading, but it is the ordinary
+#                 case and failing on it would be daily wallpaper.  A hunk that
+#                 stops applying altogether is already loud: the object is
+#                 dropped and the link fails on its symbols.
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -43,6 +51,28 @@ fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
+# The revision the compile actually consumes for one file.  The build patches
+# the engine checkout and not a commit, so where the engine's own work has left
+# a target dirty, the committed blob is a file this build never sees and every
+# verdict about it is about the wrong bytes.  `:worktree` is the pseudo-revision
+# that says so, and it is what the gate reads.
+head_rev() {
+    if [ -n "$(git -C "$engine" status --porcelain -- "$1" 2>/dev/null)" ]; then
+        echo ":worktree"
+    else
+        git -C "$engine" rev-parse HEAD
+    fi
+}
+
+# The name to print for a revision, pseudo or real.
+rev_label() {
+    if [ "$1" = ":worktree" ]; then
+        echo "worktree"
+    else
+        git -C "$engine" rev-parse --short "$1"
+    fi
+}
+
 # One patch file at one revision.  Prints the verdict word.
 #
 # The two steps the compile takes before ours, strip_asm.py and the engine's
@@ -52,7 +82,12 @@ verdict() {
     _patch=$1 _file=$2 _rev=$3
     rm -rf "$tmp/w"
     mkdir -p "$tmp/w/$(dirname "$_file")"
-    if ! git -C "$engine" show "$_rev:$_file" >"$tmp/w/$_file" 2>/dev/null; then
+    if [ "$_rev" = ":worktree" ]; then
+        if ! cp "$engine/$_file" "$tmp/w/$_file" 2>/dev/null; then
+            echo "absent"
+            return
+        fi
+    elif ! git -C "$engine" show "$_rev:$_file" >"$tmp/w/$_file" 2>/dev/null; then
         echo "absent"
         return
     fi
@@ -61,8 +96,11 @@ verdict() {
         return
     fi
     # -F0: context must match exactly.  Offsets are still allowed and are
-    # reported by patch itself, so they are picked out of the log.
-    if (cd "$tmp/w" && patch -p1 --dry-run -F0 --silent <"$_patch" >"$tmp/log" 2>&1); then
+    # reported by patch itself, so they are picked out of the log, which means
+    # NOT --silent: it keeps the log empty, and an empty log reads as "clean"
+    # however far the hunk moved.  --batch so a question can never be answered
+    # out of the patch file on stdin.
+    if (cd "$tmp/w" && patch -p1 --dry-run --batch -F0 <"$_patch" >"$tmp/log" 2>&1); then
         if grep -q "with fuzz" "$tmp/log"; then
             echo "fuzz"
         elif grep -q "offset" "$tmp/log"; then
@@ -74,7 +112,7 @@ verdict() {
     fi
     # Exact context failed.  Does the engine's default fuzz let it land anyway?
     # That is the dangerous answer: it applies, somewhere, and says nothing.
-    if (cd "$tmp/w" && patch -p1 --dry-run --silent <"$_patch" >/dev/null 2>&1); then
+    if (cd "$tmp/w" && patch -p1 --dry-run --batch --silent <"$_patch" >/dev/null 2>&1); then
         echo "fuzz-only"
     else
         echo "fail"
@@ -84,6 +122,8 @@ verdict() {
 echo "engine: $engine at $(git -C "$engine" rev-parse --short HEAD)"
 overall_fuzz=0
 overall_bad=0
+overall_offset=0
+overall_ambiguous=0
 
 for p in $(find "$patches" -name '*.patch' | sort); do
     rel=${p#"$patches"/}
@@ -106,11 +146,18 @@ for p in $(find "$patches" -name '*.patch' | sort); do
         continue
     fi
     if [ "$head_only" = 1 ]; then
-        revs=$(git -C "$engine" rev-parse HEAD)
+        revs=$(head_rev "$file")
     else
         revs=$(git -C "$engine" log --format=%H -n "$limit" -- "$file")
-        revs="$(git -C "$engine" rev-parse HEAD)
+        # Both, in history mode: the working tree is what the compile reads, and
+        # HEAD is where the sweep over the file's own history starts.  The awk
+        # below drops the duplicate when the target is not dirty.
+        revs="$(head_rev "$file")
+$(git -C "$engine" rev-parse HEAD)
 $revs"
+    fi
+    if [ "$(head_rev "$file")" = ":worktree" ]; then
+        printf '%s: read from the WORKING TREE, uncommitted in the engine, and the working tree is what the compile patches\n' "$file"
     fi
     n=0 clean=0 offset=0 fuzz=0 fail=0 absent=0 basegone=0
     for r in $(echo "$revs" | awk '!seen[$0]++'); do
@@ -124,11 +171,22 @@ $revs"
         absent) absent=$((absent + 1)) ;;
         base-gone) basegone=$((basegone + 1)) ;;
         esac
-        if [ "$v" != clean ] && [ "$head_only" = 1 ]; then
+        if [ "$v" = offset ] && [ "$head_only" = 1 ]; then
+            overall_offset=$((overall_offset + 1))
+        elif [ "$v" != clean ] && [ "$head_only" = 1 ]; then
             overall_bad=$((overall_bad + 1))
         fi
         if [ "$v" != clean ]; then
-            printf '  %-40s %s  %s\n' "$file" "$(git -C "$engine" rev-parse --short "$r")" "$v"
+            printf '  %-40s %s  %s\n' "$file" "$(rev_label "$r")" "$v"
+        fi
+        # The question `patch` never answers: how many places in this file could
+        # that hunk have landed on?  One is the only safe answer, and the source
+        # to ask it about is the one verdict() just prepared.
+        if [ "$head_only" = 1 ] && [ "$v" != absent ] && [ "$v" != base-gone ]; then
+            if ! python3 "$root/tools/patch_sites.py" "$p" "$tmp/w/$file"; then
+                overall_ambiguous=$((overall_ambiguous + 1))
+                printf '  %-40s %s  %s\n' "$file" "$(rev_label "$r")" "ambiguous context"
+            fi
         fi
     done
     printf '%s: %d revisions, %d clean, %d offset, %d fuzz, %d fail, %d absent, %d base-gone\n' \
@@ -138,13 +196,26 @@ done
 if [ "$overall_fuzz" -gt 0 ]; then
     echo "note: a hunk that lands only with fuzz has matched partial context, read it before trusting it"
 fi
+if [ "$overall_offset" -gt 0 ]; then
+    echo "note: $overall_offset patch(es) landed at an offset: exact context, another line."
+    echo "  That is an engine that has gained or lost lines above the hunk, and it is fine."
+fi
 
 if [ "$gate" = 1 ]; then
+    if [ "$overall_ambiguous" -gt 0 ]; then
+        echo "patchcheck: FAIL. $overall_ambiguous patch(es) have a hunk whose context names"
+        echo "  more than one site in the file. \`patch\` finds a hunk by its context, so a"
+        echo "  shift can land that hunk on the wrong site and nothing anywhere says so."
+        echo "  Carry the context out to something that occurs once. The function"
+        echo "  signature is usually the nearest. Keep the two sides of it the same"
+        echo "  length, or the hunk needs fuzz 1 and fails here for the other reason."
+        exit 1
+    fi
     if [ "$overall_bad" -gt 0 ]; then
         echo "patchcheck: FAIL, $overall_bad patch(es) no longer land on exact context."
         echo "  Re-cut the diff against what the compile consumes (strip_asm.py, then"
         echo "  the engine's own pc/patches diff, then ours) before trusting the build."
         exit 1
     fi
-    echo "patchcheck: ok (every hunk on exact context)"
+    echo "patchcheck: ok (every hunk on exact context, and every hunk's context names one site)"
 fi

@@ -3,7 +3,6 @@ package de.fiereu.openmmo.server.game.services
 import de.fiereu.network.PacketEvent
 import de.fiereu.network.SessionContext
 import de.fiereu.openmmo.common.MAX_PARTY_SIZE
-import de.fiereu.openmmo.common.Pokemon
 import de.fiereu.openmmo.common.enums.PokemonContainer
 import de.fiereu.openmmo.net.game.packets.DuelInvitePacket
 import de.fiereu.openmmo.net.game.packets.PokemonContainerPacket
@@ -16,7 +15,9 @@ import de.fiereu.openmmo.net.game.packets.TradeStatePacket
 import de.fiereu.openmmo.server.game.session.PLAYER_STATE
 import de.fiereu.openmmo.server.game.session.SessionRegistry
 import de.fiereu.openmmo.server.game.storage.CharacterStore
+import de.fiereu.openmmo.server.game.storage.ImportRepository
 import io.github.oshai.kotlinlogging.KotlinLogging
+import java.time.LocalDateTime
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -35,7 +36,7 @@ private const val TABLE_IDLE_MS = 180_000L
 /** The official invite packet carries a request type; 0 is a duel, so a trade offer is 1. */
 private const val REQUEST_TYPE_TRADE: Byte = 1
 
-/** The widest trade scene message the receiving client will accept. */
+/** `MMO_TRADE_COMM_MAX`, the widest trade scene message the receiving client will accept. */
 private const val MAX_TRADE_COMM_BYTES = 4096
 
 /**
@@ -65,11 +66,7 @@ private class TradeTable(val aId: Long, val bId: Long) {
   val selected = ConcurrentHashMap<Long, Long>()
   val confirmed = ConcurrentHashMap.newKeySet<Long>()
 
-  /**
-   * Held while a settlement is in flight, so exactly one runs. Both sides confirming at once is a
-   * read and then a call, and the two arrive on different threads: both settled, the store refused
-   * the second, and its refusal was what the players saw.
-   */
+  /** Held while a settlement is in flight, so exactly one runs. */
   val settling = java.util.concurrent.atomic.AtomicBoolean(false)
 
   @Volatile var lastTouch: Long = System.currentTimeMillis()
@@ -95,6 +92,7 @@ constructor(
     private val store: CharacterStore,
     private val battles: BattleService,
     private val duels: DuelService,
+    private val imports: ImportRepository,
 ) {
   /** Standing offers, keyed by the character they were made to. */
   private val offers = ConcurrentHashMap<Long, PendingOffer>()
@@ -189,7 +187,8 @@ constructor(
     val charId = event.session.attributes[PLAYER_STATE]?.characterId ?: return
     val table = tables[charId] ?: return
     val peerId = table.peerOf(charId) ?: return
-    // The client refuses a message past its own buffer, so a wider one is undeliverable anyway.
+    // `MMO_TRADE_COMM_MAX` is the receiving client's own buffer, so a wider message is one the peer
+    // would refuse anyway; the codec would carry sixteen times it.
     if (event.packet.payload.size > MAX_TRADE_COMM_BYTES) {
       log.warn {
         "char=$charId relayed ${event.packet.payload.size} trade bytes, past the engine's own" +
@@ -216,6 +215,12 @@ constructor(
         }
     if (mon == null) {
       session.send(notice("That slot is empty."))
+      return
+    }
+    // The chair, not the settlement: a monster out of a save file never reaches the table at all,
+    // so each side is refused its own pick and neither learns anything about the other's party.
+    if (mon.offlineOrigin) {
+      session.send(notice(refusedForOfflineOrigin(mon)))
       return
     }
     table.selected[charId] = mon.id
@@ -292,7 +297,8 @@ constructor(
     val table = TradeTable(aId, bId)
     tables[aId] = table
     tables[bId] = table
-    // Neither seat may move a monster between containers while the table stands.
+    // Both seats stop being able to move a monster between containers for as long as the table
+    // stands; PlayerState.atTradeTable carries why.
     seated(aId, true)
     seated(bId, true)
     // Role 0 is the chair whose ask opened the table; the engine scene answers it as its comm
@@ -395,10 +401,25 @@ constructor(
       bSession?.send(notice("An offered monster moved; the trade was cancelled."))
       return
     }
+    // Read again at the write. Each pick was refused when it was made, and the only way a marked
+    // monster can be sitting on the table now is an import that landed between the two, which is
+    // the one moment a trade could carry one across.
+    val marked = listOf(aMon, bMon).firstOrNull { it.offlineOrigin }
+    if (marked != null) {
+      close(table)
+      aSession?.send(stateOnly(TradeStatePacket.STATE_CANCELLED))
+      bSession?.send(stateOnly(TradeStatePacket.STATE_CANCELLED))
+      aSession?.send(notice(refusedForOfflineOrigin(marked)))
+      bSession?.send(notice(refusedForOfflineOrigin(marked)))
+      log.warn {
+        "Trade char=$aId<->$bId cancelled: monster=${marked.id} came from an offline save"
+      }
+      return
+    }
     val fromA = store.swapPartyMonster(aId, aMon.id, bMon)
     if (fromA == null) {
       close(table)
-      refuse(aSession, bSession)
+      refuse(aSession, aId, bSession, bId)
       return
     }
     val fromB = store.swapPartyMonster(bId, bMon.id, fromA)
@@ -409,9 +430,15 @@ constructor(
       if (store.swapPartyMonster(aId, bMon.id, fromA) == null) {
         log.error { "Trade char=$aId<->$bId: half-applied and the undo did not persist" }
       }
-      refuse(aSession, bSession)
+      refuse(aSession, aId, bSession, bId)
       return
     }
+    // Both sides have now given a monster away, so neither can quietly undo the save import that
+    // may have brought it: putting the old record back would make a second copy of something the
+    // other player is holding.
+    val at = LocalDateTime.now()
+    imports.seal(aId, at, "a trade with ${b.info.name}")
+    imports.seal(bId, at, "a trade with ${a.info.name}")
     aSession?.let { resendParty(it, aId) }
     bSession?.let { resendParty(it, bId) }
     aSession?.send(TradeStatePacket(TradeStatePacket.STATE_COMPLETED, 0, 0, b.info.name))
@@ -424,11 +451,17 @@ constructor(
     }
   }
 
-  private fun refuse(aSession: SessionContext?, bSession: SessionContext?) {
+  /**
+   * A settlement that could not be written, told to both screens along with the parties the record
+   * now holds.
+   */
+  private fun refuse(aSession: SessionContext?, aId: Long, bSession: SessionContext?, bId: Long) {
     aSession?.send(stateOnly(TradeStatePacket.STATE_CANCELLED))
     bSession?.send(stateOnly(TradeStatePacket.STATE_CANCELLED))
     aSession?.send(notice("The trade could not be written."))
     bSession?.send(notice("The trade could not be written."))
+    aSession?.let { resendParty(it, aId) }
+    bSession?.let { resendParty(it, bId) }
   }
 
   private fun resendParty(session: SessionContext, charId: Long) {
@@ -480,6 +513,4 @@ constructor(
       lapsed
     }
   }
-
-  private fun Pokemon.nick(): String = nickname.ifEmpty { "No. $dexId" }
 }

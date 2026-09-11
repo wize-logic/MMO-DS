@@ -156,7 +156,7 @@ class EndToEndHandshakeTest :
         val clientApp = CollectingHandler(Side.CLIENT)
 
         // 16 is what the game server negotiates, and a compressed protocol is its shape, so this
-        // pair is the deployed stack.
+        // pair is the deployed stack: the keyed frame tag over the cipher, with compression inside.
         val options = PipelineOptions(checksumSize = 16, frameLogging = true)
 
         val serverChannel =
@@ -191,5 +191,38 @@ class EndToEndHandshakeTest :
         serverChannel.attr(SESSION_KEY).get().send(Echo(0xBABE))
         drain(serverChannel, clientChannel)
         clientApp.received shouldBe listOf(Echo(0xBABE))
+      }
+
+      test("a client refuses a session whose frame tag could not authenticate it") {
+        val rootKeyPair = EcKeys.generateEphemeralKeyPair()
+        val rootPrivate = rootKeyPair.private as ECPrivateKey
+        val rootPublic = rootKeyPair.public as ECPublicKey
+
+        // The keyless CRC-16. The server signs it, so the refusal is not about the signature: it
+        // is the client declining to open a session on a tag that says nothing about who wrote it.
+        val options = PipelineOptions(checksumSize = 2)
+
+        val serverChannel =
+            embedded(
+                Side.SERVER,
+                SessionIdentity.ServerRoot(rootPrivate),
+                EchoProtocol,
+                CollectingHandler(Side.SERVER),
+                options,
+            )
+        val clientChannel =
+            embedded(
+                Side.CLIENT,
+                SessionIdentity.ClientTrust(rootPublic),
+                EchoProtocol,
+                CollectingHandler(Side.CLIENT),
+                options,
+            )
+
+        drain(clientChannel, serverChannel)
+        drain(serverChannel, clientChannel)
+
+        clientChannel.attr(SESSION_KEY).get().phase shouldBe SessionPhase.HANDSHAKE
+        clientChannel.isOpen shouldBe false
       }
     })

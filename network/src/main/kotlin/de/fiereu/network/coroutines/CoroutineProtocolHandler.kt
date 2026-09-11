@@ -12,8 +12,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 private val log = KotlinLogging.logger {}
+
+/**
+ * How long the mailbox may take to finish what is already in it once the channel has gone. Long
+ * enough for a database write, short enough that a handler which will never finish is noticed.
+ */
+private const val DRAIN_TIMEOUT_MS = 5_000L
 
 abstract class CoroutineProtocolHandler<P : Protocol>(
     protocol: P,
@@ -63,10 +70,17 @@ abstract class CoroutineProtocolHandler<P : Protocol>(
         }
   }
 
+  /** Let the mailbox finish what is already in it. */
   override fun handlerRemoved(ctx: ChannelHandlerContext) {
     mailbox.close()
-    consumerJob?.cancel()
+    val job = consumerJob ?: return
     consumerJob = null
+    coroutineScope.launch {
+      if (withTimeoutOrNull(DRAIN_TIMEOUT_MS) { job.join() } == null) {
+        log.warn { "Packet handlers did not finish within $DRAIN_TIMEOUT_MS ms; cancelling" }
+        job.cancel()
+      }
+    }
   }
 
   override fun isRegistered(type: KClass<*>): Boolean =

@@ -2,7 +2,7 @@
 #ifndef MMO_SOUNDTABLES_GEN_H
 #define MMO_SOUNDTABLES_GEN_H
 
-#define MMO_SOUNDTABLES_HASH 0xC71CC0089A127BA5ULL
+#define MMO_SOUNDTABLES_HASH 0xEA4220239845A3B7ULL
 
 /* One row per replaced Platinum track: its SEQ name and the donor
  * SEQ name per game; "" where a game has no cell. */

@@ -6,8 +6,11 @@ import de.fiereu.openmmo.server.game.GameServer
 import de.fiereu.openmmo.server.game.config.GameServerConfig
 import de.fiereu.openmmo.server.game.db.DatabaseBootstrap
 import de.fiereu.openmmo.server.game.handler.GameAppHandler
+import de.fiereu.openmmo.server.game.offline.verify.ReplayRunner
+import de.fiereu.openmmo.server.game.offline.verify.ReplayWorker
 import de.fiereu.openmmo.server.game.session.SessionRegistry
 import de.fiereu.openmmo.server.game.storage.CharacterStore
+import de.fiereu.openmmo.server.game.storage.GuildStore
 import javax.inject.Provider
 import javax.inject.Singleton
 
@@ -24,6 +27,12 @@ interface GameServerComponent {
   fun databaseBootstrap(): DatabaseBootstrap
 
   fun characterStore(): CharacterStore
+
+  fun guildStore(): GuildStore
+
+  fun replayRunner(): ReplayRunner
+
+  fun replayWorker(): ReplayWorker
 
   @Component.Factory
   fun interface Factory {

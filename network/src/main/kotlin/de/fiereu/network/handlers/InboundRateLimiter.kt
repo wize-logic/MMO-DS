@@ -11,13 +11,6 @@ private const val NANOS_PER_SECOND = 1_000_000_000.0
 
 /**
  * Holds one session's inbound frames to a sustained rate, by not reading rather than by refusing.
- *
- * Everything behind this is work a peer can ask for, and most of the game protocol hops onto a
- * mailbox the socket fills faster than the handlers drain it. A token bucket decides when to stop
- * pulling from the socket. Frames already read are always passed on, so nothing is dropped and no
- * session is closed for being quick: when the bucket runs dry the channel stops reading until a
- * token accrues, and TCP carries that back to the sender. A join burst is spent from [burst] and at
- * worst delayed by a few milliseconds.
  */
 class InboundRateLimiter(
     private val burst: Int,
@@ -32,7 +25,7 @@ class InboundRateLimiter(
   override fun channelRead(ctx: ChannelHandlerContext, msg: Any) {
     refill()
     tokens = (tokens - 1.0).coerceAtLeast(0.0)
-    // Passed on either way. This decides what is read next, never what is answered.
+    // Passed on either way. This handler decides what is read next, never what is answered.
     ctx.fireChannelRead(msg)
     if (tokens < 1.0) pause(ctx)
   }
@@ -57,8 +50,8 @@ class InboundRateLimiter(
   private fun resume(ctx: ChannelHandlerContext) {
     if (!paused) return
     refill()
-    // The wait covered one token, so a clock that moved less would leave the channel readable with
-    // an empty bucket.
+    // The wait was computed to cover exactly one token, so a clock that has not moved as far as it
+    // was told to would otherwise leave the channel readable with an empty bucket.
     if (tokens < 1.0) {
       val wait = ((1.0 - tokens) / perSecond * NANOS_PER_SECOND).toLong().coerceAtLeast(1L)
       ctx.channel().eventLoop().schedule({ resume(ctx) }, wait, TimeUnit.NANOSECONDS)

@@ -1,0 +1,11 @@
+--- a/src/battle/trainer_ai/trainer_ai.c
++++ b/src/battle/trainer_ai/trainer_ai.c
+@@ -459,7 +459,7 @@
+     move = battleCtx->battleMons[AI_CONTEXT.attacker].moves[moveSlot];
+ 
+     // Override targets as needed
+-    if (AI_CONTEXT.moveTable[move].range == RANGE_USER_OR_ALLY
++    if (MOVE_DATA(move).range == RANGE_USER_OR_ALLY
+         && BattleSystem_GetBattlerSide(battleSys, AI_CONTEXT.selectedTarget[AI_CONTEXT.attacker]) == 0) {
+         AI_CONTEXT.selectedTarget[AI_CONTEXT.attacker] = AI_CONTEXT.attacker;
+     }

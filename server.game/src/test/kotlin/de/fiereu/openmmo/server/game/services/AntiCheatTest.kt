@@ -14,7 +14,7 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import java.time.Duration
 
-/** The anti-cheat pieces, tested where each can be tested alone. One file rather than six. */
+/** The pieces the anti-cheat work added, tested where each can be tested alone. */
 class AntiCheatTest :
     FunSpec({
       context("a reported capture is the server's monster, not the client's") {
@@ -48,7 +48,11 @@ class AntiCheatTest :
           }
         }
 
-        /** A thousand captures at one in 8,192 turn up a handful. The claim cannot buy one. */
+        /**
+         * The claim cannot buy a shiny. A thousand captures at one in 8,192 turn up a handful at
+         * most, and the point of the assertion is that it is nowhere near a thousand: before this
+         * the client said so and every one of them was.
+         */
         test("shininess is a rare draw rather than something the report decides") {
           (1..1000).count { roller.forToken(1, 1, it).isShiny } shouldBeLessThan 10
         }
@@ -170,7 +174,10 @@ class AntiCheatTest :
           CharacterNames.refuse("Anne-Marie O'Hara").shouldBeNull()
         }
 
-        /** Escapes so this file stays ascii: a Cyrillic A, an acute e, a right to left override. */
+        /**
+         * Written as escapes so this file stays ascii: a Cyrillic A in front of dmin, an acute e,
+         * and a right to left override, all of which draw as something they are not.
+         */
         test("anything outside the alphabet a client can draw is refused") {
           CharacterNames.refuse("\u0410dmin").shouldNotBeNull()
           CharacterNames.refuse("Barr\u00e9").shouldNotBeNull()

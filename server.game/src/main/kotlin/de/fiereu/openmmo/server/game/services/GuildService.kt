@@ -36,26 +36,21 @@ import javax.inject.Singleton
 
 private val log = KotlinLogging.logger {}
 
+/** What founding a team costs the founder. Taken, not just checked: the team outlives them. */
 private const val GUILD_FOUND_COST = 15000
 
 // The entries list is length-prefixed with a single byte, so a page holds at most 255 entries.
 private const val MAX_ACTIVITY_LOG_ENTRIES = 255
 
-/** What the text fields hold. Each is decoded with no ceiling and copied to every member. */
+/**
+ * What the text fields hold. Every one of them is decoded as a null-terminated string with no
+ * ceiling and then copied to every member of the guild, so without these one member could give a
+ * guild a 32,000 character name.
+ */
 private const val MAX_GUILD_NAME_CHARS = 24
 private const val MAX_GUILD_TAG_CHARS = 8
 private const val MAX_GUILD_MOTD_CHARS = 200
 private const val MAX_RANK_LABEL_CHARS = 16
-
-/** The ranks [Guild.permMasks] carries, in its order. The Boss is absent: they hold the guild. */
-private val PERM_MASK_ORDER =
-    listOf(
-        GuildRank.EXECUTIVE,
-        GuildRank.COMMANDER,
-        GuildRank.OFFICER,
-        GuildRank.MEMBER,
-        GuildRank.GRUNT,
-    )
 
 @Singleton
 class GuildService
@@ -107,10 +102,22 @@ constructor(
       log.info { "Insufficient funds to found a guild (need $GUILD_FOUND_COST)" }
       return
     }
-    if (!characterStore.addMoney(charId, -GUILD_FOUND_COST)) return
-    val after = characterStore.getCharacter(charId)
-    if (after != null) ctx.send(LocalCharacterDeltaPacket(money = after.info.money))
-    val guild = guildStore.createGuild(name, tag, charId, stored.info.name)
+    // Taken before the guild is written, because addMoney is what refuses a wallet that cannot
+    // afford it: the check above is only what lets the refusal be logged as one.
+    if (!characterStore.addMoney(charId, -GUILD_FOUND_COST)) {
+      log.info { "char=$charId could not be charged $GUILD_FOUND_COST to found a guild" }
+      return
+    }
+    val guild =
+        runCatching { guildStore.createGuild(name, tag, charId, stored.info.name) }
+            .getOrElse { failure ->
+              log.error(failure) { "char=$charId was charged for a guild that was not written" }
+              if (!characterStore.addMoney(charId, GUILD_FOUND_COST)) {
+                log.error { "char=$charId lost $GUILD_FOUND_COST, the refund did not persist" }
+              }
+              return
+            }
+    ctx.send(LocalCharacterDeltaPacket(money = characterStore.getCharacter(charId)?.info?.money))
     ctx.send(buildMembership(guild))
     ctx.send(buildMemberSync(guild))
   }
@@ -130,7 +137,7 @@ constructor(
     ctx.send(packet)
   }
 
-  fun onGuildInvite(event: PacketEvent<GuildInvitePacket>) {
+  suspend fun onGuildInvite(event: PacketEvent<GuildInvitePacket>) {
     val ctx = event.session
     val state = ctx.attributes[PLAYER_STATE] ?: return
     val charId = state.characterId ?: return
@@ -159,14 +166,16 @@ constructor(
     broadcastMembers(guild)
   }
 
-  fun onRankAssign(event: PacketEvent<GuildMemberRankAssignPacket>) {
+  suspend fun onRankAssign(event: PacketEvent<GuildMemberRankAssignPacket>) {
     val ctx = event.session
     val state = ctx.attributes[PLAYER_STATE] ?: return
     val charId = state.characterId ?: return
     val (guild, self) = seatOf(charId) ?: return
     val rank = GuildRank.entries.getOrNull(event.packet.rankOrdinal) ?: return
-    // Who holds which seat is the leader's to decide. Every other member sending this packet was
-    // promoting themselves.
+    // Who holds which seat is the leader's to decide. There is no permission for it in
+    // GuildPermission because the official client's window only offers it to the Boss, and every
+    // other member
+    // sending this packet was promoting themselves.
     if (!isLeader(guild, self)) return
     val targetId = event.packet.memberEntityId
     if (targetId == charId) {
@@ -187,7 +196,7 @@ constructor(
     broadcastMembers(guild)
   }
 
-  fun onKick(event: PacketEvent<GuildMemberKickPacket>) {
+  suspend fun onKick(event: PacketEvent<GuildMemberKickPacket>) {
     val ctx = event.session
     val state = ctx.attributes[PLAYER_STATE] ?: return
     val charId = state.characterId ?: return
@@ -200,7 +209,9 @@ constructor(
       log.info { "char=$charId asked to kick $targetId, who is not in guild ${guild.id}" }
       return
     }
-    // Walking out is Leave, the leader cannot be removed, and a kick only reaches downwards.
+    // Walking out is Leave, and the leader cannot be removed by anyone. A kick also only reaches
+    // downwards: without this an Officer with the permission could kick every other Officer, and
+    // the Executives above them.
     if (targetId == charId) return
     if (target.leader || target.rank.ordinal >= self.rank.ordinal) {
       log.info {
@@ -213,7 +224,7 @@ constructor(
     broadcastMembers(guild)
   }
 
-  fun onLeave(event: PacketEvent<GuildLeavePacket>) {
+  suspend fun onLeave(event: PacketEvent<GuildLeavePacket>) {
     val ctx = event.session
     val state = ctx.attributes[PLAYER_STATE] ?: return
     val charId = state.characterId ?: return
@@ -224,7 +235,7 @@ constructor(
     if (guild != null) broadcastMembers(guild)
   }
 
-  fun onDisband(event: PacketEvent<GuildDisbandPacket>) {
+  suspend fun onDisband(event: PacketEvent<GuildDisbandPacket>) {
     val ctx = event.session
     val state = ctx.attributes[PLAYER_STATE] ?: return
     val charId = state.characterId ?: return
@@ -246,18 +257,18 @@ constructor(
     }
   }
 
-  fun onMotdUpdate(event: PacketEvent<GuildMotdUpdatePacket>) {
+  suspend fun onMotdUpdate(event: PacketEvent<GuildMotdUpdatePacket>) {
     val ctx = event.session
     val state = ctx.attributes[PLAYER_STATE] ?: return
     val charId = state.characterId ?: return
     val (guild, self) = seatOf(charId) ?: return
     if (!may(guild, self, GuildPermission.TEAM_MESSAGES)) return
-    guild.message = event.packet.motdText.take(MAX_GUILD_MOTD_CHARS)
+    guildStore.setMotd(guild, event.packet.motdText.take(MAX_GUILD_MOTD_CHARS))
     log.info { "GuildMotdUpdate char=$charId guild=${guild.id} motd='${guild.message}'" }
     broadcastProfile(guild)
   }
 
-  fun onRankLabelUpdate(event: PacketEvent<GuildRankLabelUpdatePacket>) {
+  suspend fun onRankLabelUpdate(event: PacketEvent<GuildRankLabelUpdatePacket>) {
     val ctx = event.session
     val state = ctx.attributes[PLAYER_STATE] ?: return
     val charId = state.characterId ?: return
@@ -265,19 +276,19 @@ constructor(
     if (!isLeader(guild, self)) return
     val ordinal = event.packet.rankOrdinal
     if (ordinal !in guild.rankNames.indices) return
-    guild.rankNames[ordinal] = event.packet.rankLabel.take(MAX_RANK_LABEL_CHARS)
+    guildStore.setRankLabel(guild, ordinal, event.packet.rankLabel.take(MAX_RANK_LABEL_CHARS))
     log.info {
       "GuildRankLabelUpdate char=$charId guild=${guild.id} rank=$ordinal label='${event.packet.rankLabel}'"
     }
     broadcastProfile(guild)
   }
 
-  fun onRankPermissionUpdate(event: PacketEvent<GuildRankPermissionUpdatePacket>) {
+  suspend fun onRankPermissionUpdate(event: PacketEvent<GuildRankPermissionUpdatePacket>) {
     val state = event.session.attributes[PLAYER_STATE] ?: return
     val charId = state.characterId ?: return
     val (guild, self) = seatOf(charId) ?: return
-    // This table is what every check above reads. Any member could rewrite it, which made them all
-    // decorative.
+    // The table this writes is the one every check above reads. Any member could rewrite it, which
+    // made all of them decorative: a Grunt could grant Grunts every permission and then use them.
     if (!isLeader(guild, self)) return
     val sanitized =
         event.packet.permissions.mapValues { (rank, perms) ->
@@ -288,44 +299,22 @@ constructor(
             perms
           }
         }
-    guild.permissions.clear()
-    guild.permissions.putAll(sanitized)
-    val order =
-        listOf(
-            GuildRank.EXECUTIVE,
-            GuildRank.COMMANDER,
-            GuildRank.OFFICER,
-            GuildRank.MEMBER,
-            GuildRank.GRUNT,
-        )
-    for (i in order.indices) {
-      val mask =
-          sanitized[order[i]].orEmpty().fold(0) { acc, p -> acc or (1 shl p.ordinal) }.toShort()
-      if (i < guild.permMasks.size) guild.permMasks[i] = mask
-    }
+    guildStore.setPermissions(guild, sanitized)
     log.info { "RankPermUpdate char=$charId perms=$sanitized" }
     broadcastProfile(guild)
   }
 
-  /**
-   * The guild [charId] belongs to and the seat they hold in it. Every verb starts here. They used
-   * to start at "which guild is this character in" and then act on whatever id the packet named.
-   */
+  /** The guild [charId] belongs to and the seat they hold in it, or null if they hold none. */
   private fun seatOf(charId: Long): Pair<Guild, GuildMember>? {
     val guild = guildStore.getGuildForChar(charId) ?: return null
     val member = guild.members.firstOrNull { it.id == charId } ?: return null
     return guild to member
   }
 
-  /**
-   * What a rank may do, read from the guild's own table. It is the copy the client is sent, so a
-   * refusal is what that player's window drew as unavailable. Only the leader may edit it.
-   */
+  /** What a rank may do, read from the guild's own table. */
   private fun permissionsOf(guild: Guild, rank: GuildRank): Set<GuildPermission> {
     if (rank == GuildRank.BOSS) return GuildPermission.entries.toSet()
-    val index = PERM_MASK_ORDER.indexOf(rank)
-    if (index < 0 || index >= guild.permMasks.size) return emptySet()
-    val mask = guild.permMasks[index].toInt()
+    val mask = guild.maskOf(rank).toInt()
     return GuildPermission.entries.filterTo(mutableSetOf()) { (mask shr it.ordinal) and 1 == 1 }
   }
 

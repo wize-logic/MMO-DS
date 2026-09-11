@@ -20,6 +20,33 @@ struct launch_gui_host {
     unsigned             conn_colour;
     /* Return 0 if the session ran, -1 if it would not start. */
     int                (*play)(void *ctx);
+    /* The second row: the same, with no server, no update and no feed gate. */
+    int                (*play_offline)(void *ctx);
+    /* The earlier saved games kept beside the offline one, newest first, and
+     * putting one of them back. Both NULL in a host that has no save folder. */
+    int                (*saves)(void *ctx, char out[][MMO_LAUNCH_STAMP],
+                                int max);
+    int                (*restore)(void *ctx, const char *stamp);
+    /*
+     * The offline save, when it is newer than the copy the server was last handed. `offer`
+     * fills in the two play times and returns 1 when there is one worth taking online; the
+     * window then draws the box that asks, and `take` carries the answer back.
+     */
+    int                (*offer)(void *ctx, mmo_launch_import *out);
+    void               (*take)(void *ctx, int yes);
+    /*
+     * Which of this install's saved games every row above is about, and the press that changes
+     * it.
+     */
+    int                (*slot)(void *ctx);
+    void               (*set_slot)(void *ctx, int slot);
+    /*
+     * The whole of a slot, out to a file and back: the save, the report beside it and the
+     * sessions behind it, so the game can be carried to another machine with the play that
+     * produced it.
+     */
+    int                (*save_export)(void *ctx);
+    int                (*save_import)(void *ctx);
     void                 *ctx;
 };
 

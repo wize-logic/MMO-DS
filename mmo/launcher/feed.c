@@ -294,6 +294,13 @@ int mmo_feed_sanitize(const char *entry, char *out, size_t cap)
     }
     if (nseg == 0)                  /* resolves to the root itself */
         return -1;
+    /*
+     * save/ is the player's, and an update never writes there. The whole of an offline game is
+     * under it, the image, the stamped copies, the session recordings, and none of it can
+     * be fetched again from anywhere.
+     */
+    if (strcasecmp(seg[0], "save") == 0)
+        return -1;
     for (i = 0; i < nseg; i++) {
         size_t tl = strlen(seg[i]);
 

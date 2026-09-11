@@ -28,13 +28,22 @@
 # decomp 21f93dee0d5f38ef1dd5560d42065561b0826599, verified identical on all
 # five trees (14,582 files) on 2026-08-15. res/trainers joined them on
 # 2026-08-18 when the trainer generator grew a DS reader, taking the guarded
-# set to six trees and 17,480 files.
+# set to six trees and 17,480 files. Four more joined on 2026-09-04: res/items
+# and res/npc_trades, which the machine list and the in-game trades are read
+# from, and src and include, which the fossil, starter, roamer and prize money
+# tables live in, there is no data file for any of those four, so the only
+# alternative to guarding a source tree was not reading them, which would have
+# taken the starters out of the table an import is measured against.
 
-readers: maps moves pokemon evolution learnset text story trainer
+readers: maps moves pokemon evolution learnset text story trainer offline
 
-res/field     maps story
-res/moves     moves
-res/pokemon   pokemon evolution learnset
-res/text      text
-res/trainers  trainer
-generated     maps moves pokemon evolution learnset text story trainer
+res/field      maps story offline
+res/items      learnset
+res/moves      moves
+res/npc_trades offline
+res/pokemon    pokemon evolution learnset offline
+res/text       text
+res/trainers   trainer offline
+src            offline
+include        trainer offline
+generated      maps moves pokemon evolution learnset text story trainer offline

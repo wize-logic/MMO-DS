@@ -19,8 +19,9 @@ enum {
 #define OPENMMO_ENTITY_NETID_CEIL 12
 #define OPENMMO_ENTITY_LOCALID_BASE 0x100 /* 0xff + slot + 1, the remote-avatar local-id band */
 
-/* Bytes kept for a peer's display name, terminator included. */
-#define OPENMMO_ENTITY_NAME_MAX 48
+/* Bytes kept for a peer's display name, terminator included: the server's cap
+ * counts characters, so the buffer is three UTF-8 bytes per one of them. */
+#define OPENMMO_ENTITY_NAME_MAX MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)
 
 /* Per-entity appearance the glue draws from. Gender picks one of the two
  * trainer models; has_body/gfx seat an object-event sprite on top when the
@@ -30,15 +31,32 @@ typedef struct {
     uint8_t gender;  /* passed to PlayerAvatar_New as TrainerInfo_Gender would be */
     uint8_t version; /* 0 or 1, the game-version split CommPlayer_Add derives */
     /*
-     * The peer's display name, exactly as LoadEntity carried it: the codec keeps the server's
-     * UTF-16 name as the low byte of each code unit (codec.c, mmo_get_utf16_nt), so this is
-     * Latin-1 and NUL-terminated.
+     * The peer's display name, exactly as LoadEntity carried it: the codec transcodes the
+     * server's UTF-16 to UTF-8 (codec.c, mmo_get_utf16_nt), so this is NUL-terminated UTF-8.
      */
     char name[OPENMMO_ENTITY_NAME_MAX];
     uint8_t has_body; /* 1 when gfx is an explicit catalog body, not the gender default */
     int     gfx;      /* object-event graphics id to seat; meaningful when has_body */
     mmo_skin_set skins; /* kept verbatim from LoadEntity */
+    /*
+     * The Pokemon walking behind this peer, already resolved to the graphics id a filled
+     * package planted (mmo_follower_gfx). Resolved where the packet is read rather than where
+     * the object is seated, so the glue never has to know what a dex id is.
+     */
+    uint8_t has_follower;
+    int     follower_gfx;
 } openmmo_entity_appearance;
+
+/* Move speeds, the engine's CommPlayerLocation.moveSpeed. Each is an index into
+ * the frames-per-tile table (comm_player_manager.c:677) and, on the drawing
+ * side, picks the movement action a peer crosses the tile with, the two have
+ * to agree or the animation is cut short or left hanging. */
+enum {
+    OPENMMO_ENTITY_SPEED_FASTEST = 0, /* 2 frames a tile */
+    OPENMMO_ENTITY_SPEED_RUN = 1,     /* 4, MOVEMENT_ACTION_RUN */
+    OPENMMO_ENTITY_SPEED_WALK = 2,    /* 8, MOVEMENT_ACTION_WALK_NORMAL */
+    OPENMMO_ENTITY_SPEED_SLOW = 3,    /* 16, MOVEMENT_ACTION_WALK_SLOW */
+};
 
 /* What the model asks the glue to do to a real avatar this frame. */
 typedef enum {
@@ -46,6 +64,7 @@ typedef enum {
     OPENMMO_ENTITY_EV_STEP,      /* commit one tile: (x,z) is the new tile, dir the heading */
     OPENMMO_ENTITY_EV_TURN,      /* face dir without moving */
     OPENMMO_ENTITY_EV_DESPAWN,   /* delete the avatar */
+    OPENMMO_ENTITY_EV_PLACE,     /* set the avatar down at (x,z); no walk to it */
 } openmmo_entity_ev_kind;
 
 typedef struct {
@@ -54,6 +73,7 @@ typedef struct {
     int localid;     /* OPENMMO_ENTITY_LOCALID_BASE + slot */
     int x, z;        /* tile the event refers to */
     int dir;         /* OPENMMO_DIR_* */
+    int speed;       /* OPENMMO_ENTITY_SPEED_*, the pace this step was timed at */
     openmmo_entity_appearance appearance; /* meaningful on SPAWN */
 } openmmo_entity_event;
 
@@ -66,6 +86,7 @@ typedef struct {
     int tx, tz, tdir; /* server-target tile */
     int speed;        /* 0..4, index into the cadence table */
     int move_timer;   /* frames until the next step is allowed */
+    int pending_place; /* the target was set down at, not walked to */
     openmmo_entity_appearance appearance;
 } openmmo_entity_slot;
 
@@ -89,6 +110,13 @@ int openmmo_entity_spawn(openmmo_entity_mgr *m, uint32_t id, int x, int z, int d
  * or -1 if no slot holds id, the model never auto-spawns from a move. */
 int openmmo_entity_set_target(openmmo_entity_mgr *m, uint32_t id, int x, int z, int dir,
                               int speed);
+
+/*
+ * Put an entity down on (x,z) facing dir rather than walking it there, what a whole-pose
+ * update asks for, and what the game client does with one: it drops the entity's queued walk
+ * and places it. Returns 0, or -1 if no slot holds id.
+ */
+int openmmo_entity_place(openmmo_entity_mgr *m, uint32_t id, int x, int z, int dir);
 
 /* Turn an entity in place to face dir, without moving it (an EntityFaceTurn).
  * Leaves the target tile untouched and only updates the target facing, so the

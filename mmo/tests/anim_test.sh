@@ -49,10 +49,18 @@ else
 fi
 says "the page publishes that overlay count" "**91** names at 1000..1096"
 
-if [ "$max" = 467 ]; then
-    ok "idmap's last engine move is still 467"
+# 467 is the engine's own last move (Shadow Force), the last id StartMove
+# plays as itself. MMO_MOVE_MAX names the last move both halves name, which
+# the Gen 5 port carried past 467 (idmap.h); past the engine's own, the
+# animation is a borrowed one, so the page's number is the engine's.
+# generated/moves.txt is the engine's move list, one name a line, id = line - 1.
+line=$(grep -n '^MOVE_SHADOW_FORCE$' "$ENGINE/generated/moves.txt" | cut -d: -f1 | head -1)
+engine_last=$(( ${line:-0} - 1 ))
+if [ "$engine_last" = 467 ] && [ "${max:-0}" -ge 467 ]; then
+    ok "the engine's last own move is still 467, and idmap names at least that ($max)"
 else
-    bad "idmap's last engine move is still 467" "MMO_MOVE_MAX is $max"
+    bad "the engine's last own move is still 467, and idmap names at least that" \
+        "MOVE_SHADOW_FORCE is ${engine_last:-unreadable}, MMO_MOVE_MAX is $max"
 fi
 says "the page publishes that last id" "**467**"
 

@@ -1,6 +1,7 @@
 /* The engine's own screens, opened from the window's HUD bar. */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "field/field_system.h"
@@ -12,6 +13,7 @@
 #include "savedata.h"
 #include "start_menu.h"
 
+#include "../../../include/endpoint.h"
 #include "../../../include/hud_channel.h"
 #include "../../../include/platform.h"
 
@@ -23,7 +25,8 @@ enum {
     APPS_DIRECT_DEX,
     APPS_DIRECT_TRAINER,
     APPS_DIRECT_OPTIONS,
-    APPS_DIRECT_SUMMARY
+    APPS_DIRECT_SUMMARY,
+    APPS_DIRECT_POKEGEAR
 };
 
 /* How long a press waits, and why it does not wait forever. */
@@ -45,6 +48,7 @@ static const char *screen_name(int screen)
     case OPENMMO_HUD_SCREEN_OPTIONS: return "options";
     case OPENMMO_HUD_SCREEN_START:   return "start menu";
     case OPENMMO_HUD_SCREEN_SUMMARY: return "summary";
+    case OPENMMO_HUD_SCREEN_POKEGEAR: return "pokegear";
     default:                         return "?";
     }
 }
@@ -84,6 +88,7 @@ static int direct_code(int screen)
     case OPENMMO_HUD_SCREEN_TRAINER: return APPS_DIRECT_TRAINER;
     case OPENMMO_HUD_SCREEN_OPTIONS: return APPS_DIRECT_OPTIONS;
     case OPENMMO_HUD_SCREEN_SUMMARY: return APPS_DIRECT_SUMMARY;
+    case OPENMMO_HUD_SCREEN_POKEGEAR: return APPS_DIRECT_POKEGEAR;
     default:                         return -1;
     }
 }
@@ -95,6 +100,8 @@ static int direct_code(int screen)
 static int refused(FieldSystem *fs, int screen)
 {
     extern int openmmo_underground_active(void);
+    extern int openmmo_pokegear_available(void);
+    extern int openmmo_dev_features(void);
 
     /*
      * The Underground opens none of them, and this is a crash rather than a cosmetic refusal.
@@ -102,6 +109,17 @@ static int refused(FieldSystem *fs, int screen)
     if (openmmo_underground_active()) {
         printf("openmmo: the %s screen does not open in the Underground\n",
                screen_name(screen));
+        return 1;
+    }
+    /* The device is HeartGold's: not a Sinnoh release's at all (endpoint.h,
+     * openmmo_dev_features), and in a working build it rides the package
+     * that carries Johto, so a build without one has no device to open. */
+    if (screen == OPENMMO_HUD_SCREEN_POKEGEAR && !openmmo_dev_features()) {
+        printf("openmmo: the pokegear is not in this build; the screen stays shut\n");
+        return 1;
+    }
+    if (screen == OPENMMO_HUD_SCREEN_POKEGEAR && !openmmo_pokegear_available()) {
+        printf("openmmo: no package carries the pokegear; the screen stays shut\n");
         return 1;
     }
     if (screen == OPENMMO_HUD_SCREEN_DEX &&
@@ -137,10 +155,60 @@ static int hold_expired(void)
     return 1;
 }
 
+/* OPENMMO_CARD_AT="<frame>:<region>" opens the trainer card from the field at
+ * that frame, as the window's menu would (hud_channel.h, the TRAINER screen
+ * with the region in the slot byte), a headless film of the card needs no
+ * window to press the button. Read once. */
+static long s_card_at = -1;
+static int s_card_region;
+static long s_card_frames;
+
+static void card_lab(void)
+{
+    static int read_once;
+
+    if (!read_once) {
+        const char *v = openmmo_dev_env("OPENMMO_CARD_AT");
+
+        read_once = 1;
+        if (v != NULL && sscanf(v, "%ld:%d", &s_card_at, &s_card_region) >= 1)
+            printf("openmmo: card lab: region %d at frame %ld\n", s_card_region, s_card_at);
+    }
+    if (s_card_at >= 0 && ++s_card_frames == s_card_at) {
+        openmmo_apps_request(OPENMMO_HUD_SCREEN_TRAINER | (s_card_region << 8));
+        s_card_at = -1;
+    }
+}
+
+/* OPENMMO_POKEGEAR_AT=<frame> opens the Pokegear from the field at that
+ * frame, as the window's button would: a headless film of the device needs
+ * no window to press M. Read once. */
+static long s_gear_at = -1;
+static long s_gear_frames;
+
+static void gear_lab(void)
+{
+    static int read_once;
+
+    if (!read_once) {
+        const char *v = openmmo_dev_env("OPENMMO_POKEGEAR_AT");
+
+        read_once = 1;
+        if (v != NULL && sscanf(v, "%ld", &s_gear_at) == 1)
+            printf("openmmo: pokegear lab: opens at frame %ld\n", s_gear_at);
+    }
+    if (s_gear_at >= 0 && ++s_gear_frames == s_gear_at) {
+        openmmo_apps_request(OPENMMO_HUD_SCREEN_POKEGEAR);
+        s_gear_at = -1;
+    }
+}
+
 void openmmo_apps_pump(FieldSystem *fs)
 {
     if (fs == NULL)
         return;
+    card_lab();
+    gear_lab();
 
     /* The sequence is over when the field map is back with no task on it, 
      * true after the plain close's fade-in, and after a used item's own

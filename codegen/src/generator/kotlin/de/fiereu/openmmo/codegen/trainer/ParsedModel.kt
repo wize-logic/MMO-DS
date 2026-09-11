@@ -18,4 +18,6 @@ data class ParsedTrainer(
     val party: List<ParsedTrainerMon>,
     /** Story flag set once this trainer is beaten, or "" where the region has no such flag. */
     val defeatedFlag: String = "",
+    // The story key of the badge this trainer's defeat earns, or "" for everyone but a leader.
+    val badge: String = "",
 )

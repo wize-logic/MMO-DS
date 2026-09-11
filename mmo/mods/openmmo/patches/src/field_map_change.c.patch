@@ -1,6 +1,11 @@
 --- a/src/field_map_change.c
 +++ b/src/field_map_change.c
-@@ -269,6 +269,11 @@
+@@ -264,16 +264,21 @@
+     if (!noWarp) {
+         sub_020559DC(fieldSystem);
+     }
+ 
+     if (!noWarp) {
          PersistedMapFeatures_Init(MiscSaveBlock_GetPersistedMapFeatures(fieldSystem->saveData));
      }
  
@@ -12,7 +17,17 @@
      VarsFlags *varsFlags = SaveData_GetVarsFlags(fieldSystem->saveData);
      u16 weather = FieldSystem_GetWeather(fieldSystem, mapHeaderID);
  
-@@ -340,7 +345,9 @@
+     if ((weather == OVERWORLD_WEATHER_FOG && SystemFlag_CheckDefogActive(varsFlags) == TRUE)
+         || (weather == OVERWORLD_WEATHER_DARK_FLASH && SystemFlag_CheckFlashActive(varsFlags) == TRUE)) {
+         weather = OVERWORLD_WEATHER_CLEAR;
+     }
+ 
+@@ -335,46 +340,64 @@
+     }
+ 
+     fieldSystem->wildBattleMetadata.encounterAttempts = 0;
+     fieldSystem->wildBattleMetadata.wildMonDefeated = 0;
+ }
  
  static void FieldMapChange_CreateObjects(FieldSystem *fieldSystem)
  {
@@ -23,7 +38,28 @@
  
      int gender = TrainerInfo_Gender(SaveData_GetTrainerInfo(fieldSystem->saveData));
      FieldOverworldState *fieldState = SaveData_GetFieldOverworldState(fieldSystem->saveData);
-@@ -361,7 +368,8 @@
+     PlayerData *playerData = FieldOverworldState_GetPlayerData(fieldState);
+ 
+     fieldSystem->playerAvatar = PlayerAvatar_New(fieldSystem->mapObjMan, fieldSystem->location->x, fieldSystem->location->z, fieldSystem->location->faceDirection, playerData->playerState, gender, 0, playerData);
+ 
++    /* openmmo: the follower is made right after the player and before the
++     * map's own people, where HeartGold's FollowMon_InitMapObject sits in
++     * its map-create (mods/openmmo/src/openmmo_follow.c). */
++    {
++        extern void openmmo_follow_init_map_object(FieldSystem *fs);
++        openmmo_follow_init_map_object(fieldSystem);
++    }
++
+     sub_0203A418(fieldSystem);
+     MapObjectMan_StopAllMovement(fieldSystem->mapObjMan);
+ }
+ 
+ static void FieldMapChange_DeleteObjects(FieldSystem *fieldSystem)
+ {
+     PlayerAvatar_Free(fieldSystem->playerAvatar);
+     MapObjectMan_DeleteAll(fieldSystem->mapObjMan);
+     MapObjectMan_Delete(fieldSystem->mapObjMan);
+ }
  
  static void FieldMapChange_LoadObjects(FieldSystem *fieldSystem)
  {
@@ -33,7 +69,277 @@
      FieldSystem_LoadObjects(fieldSystem);
  
      FieldOverworldState *fieldState = SaveData_GetFieldOverworldState(fieldSystem->saveData);
-@@ -1117,6 +1125,19 @@
+     PlayerData *playerData = FieldOverworldState_GetPlayerData(fieldState);
+     int gender = TrainerInfo_Gender(SaveData_GetTrainerInfo(fieldSystem->saveData));
+ 
+     fieldSystem->playerAvatar = PlayerAvatar_NewLoad(fieldSystem->mapObjMan, playerData, gender);
+ 
++    /* openmmo: the field coming back from a battle or a menu re-homes the
++     * kept follower, HeartGold's FollowMon_ChangeMon on field restore. */
++    {
++        extern void openmmo_follow_change_mon(FieldSystem *fs);
++        openmmo_follow_change_mon(fieldSystem);
++    }
++
+     MapObjectMan_StopAllMovement(fieldSystem->mapObjMan);
+ }
+ 
+ static void FieldMapChange_InitTerrainCollisionManager(FieldSystem *fieldSystem)
+ {
+     sub_020530C8(fieldSystem);
+     GF_ASSERT(fieldSystem->terrainCollisionMan == NULL);
+     MapMatrix_Load(fieldSystem->location->mapHeaderID, fieldSystem->mapMatrix);
+@@ -623,16 +646,27 @@
+ static BOOL FieldTask_ChangeMap(FieldTask *task)
+ {
+     FieldSystem *fieldSystem = FieldTask_GetFieldSystem(task);
+     MapChangeData *mapChangeData = FieldTask_GetEnv(task);
+     Location *location = &mapChangeData->nextLocation;
+ 
+     switch (mapChangeData->state) {
+     case 0:
++        /* openmmo: HeartGold's warp driver (sub_02055DBC states 0-2) first
++         * recalls a follower the destination will not have, waits for the
++         * ball, and notes the map being left. */
++        {
++            extern int openmmo_follow_leave_ready(FieldSystem *fs, int dest, int always);
++            extern void openmmo_follow_left(FieldSystem *fs);
++            if (!openmmo_follow_leave_ready(fieldSystem, location->mapHeaderID, 0)) {
++                break;
++            }
++            openmmo_follow_left(fieldSystem);
++        }
+         Sound_PlayEffect(SEQ_SE_DP_KAIDAN2_sseq);
+         FieldBGM_TryFadeIn(fieldSystem, location->mapHeaderID);
+         FieldTransition_FadeOutAndFinishMap(task);
+         mapChangeData->state++;
+         break;
+     case 1:
+         FieldTask_ChangeMapByLocation(task, &mapChangeData->nextLocation);
+         mapChangeData->state++;
+@@ -642,16 +676,22 @@
+             break;
+         }
+ 
+         FieldBGM_PlayForMapHeader(fieldSystem, location->mapHeaderID);
+         FieldTransition_StartMapAndFadeIn(task);
+         mapChangeData->state++;
+         break;
+     case 3:
++        /* openmmo: HeartGold's warp driver state 7: a map that forbids the
++         * follower keeps it in its ball under the player. */
++        {
++            extern void openmmo_follow_arrived(FieldSystem *fs);
++            openmmo_follow_arrived(fieldSystem);
++        }
+         Heap_Free(mapChangeData);
+         return TRUE;
+     }
+ 
+     return FALSE;
+ }
+ 
+ void FieldSystem_StartChangeMapTask(FieldTask *task, const Location *nextLocation)
+@@ -718,16 +758,25 @@
+ static BOOL FieldTask_ChangeMapFull(FieldTask *task)
+ {
+     FieldSystem *fieldSystem = FieldTask_GetFieldSystem(task);
+     MapChangeSubData *mapChangeSub = FieldTask_GetEnv(task);
+     Location *nextLocation = &mapChangeSub->nextLocation;
+ 
+     switch (mapChangeSub->state) {
+     case 0:
++        /* openmmo: HeartGold's warp driver, as in FieldTask_ChangeMap. */
++        {
++            extern int openmmo_follow_leave_ready(FieldSystem *fs, int dest, int always);
++            extern void openmmo_follow_left(FieldSystem *fs);
++            if (!openmmo_follow_leave_ready(fieldSystem, nextLocation->mapHeaderID, 0)) {
++                break;
++            }
++            openmmo_follow_left(fieldSystem);
++        }
+         FieldBGM_TryFadeIn(fieldSystem, nextLocation->mapHeaderID);
+         FieldTransition_FinishMap(task);
+         mapChangeSub->state++;
+         break;
+     case 1:
+         FieldTask_ChangeMapByLocation(task, &mapChangeSub->nextLocation);
+         mapChangeSub->state++;
+         break;
+@@ -736,16 +785,20 @@
+             break;
+         }
+ 
+         FieldBGM_PlayForMapHeader(fieldSystem, nextLocation->mapHeaderID);
+         FieldTransition_StartMap(task);
+         mapChangeSub->state++;
+         break;
+     case 3:
++        {
++            extern void openmmo_follow_arrived(FieldSystem *fs);
++            openmmo_follow_arrived(fieldSystem);
++        }
+         Heap_Free(mapChangeSub);
+         return TRUE;
+     }
+ 
+     return FALSE;
+ }
+ 
+ void FieldTask_StartMapChangeFull(FieldTask *task, enum MapHeaderID mapHeaderID, int warpId, int x, int z, int dir)
+@@ -791,16 +844,25 @@
+ static BOOL FieldTask_MapChangeFly(FieldTask *task)
+ {
+     FieldSystem *fieldSystem = FieldTask_GetFieldSystem(task);
+     MapChangeFlyData *mapChangeData = FieldTask_GetEnv(task);
+     Location *location = &mapChangeData->location;
+ 
+     switch (mapChangeData->state) {
+     case 0:
++        /* openmmo: Fly always recalls the follower first. */
++        {
++            extern int openmmo_follow_leave_ready(FieldSystem *fs, int dest, int always);
++            extern void openmmo_follow_left(FieldSystem *fs);
++            if (!openmmo_follow_leave_ready(fieldSystem, location->mapHeaderID, 1)) {
++                break;
++            }
++            openmmo_follow_left(fieldSystem);
++        }
+         FieldBGM_TryFadeIn(fieldSystem, location->mapHeaderID);
+         FieldTask_FinishFly(task);
+         mapChangeData->state++;
+         break;
+     case 1:
+         PlayerAvatar_SetPlayerState(fieldSystem->playerAvatar, 0x0);
+         FieldTask_ChangeMapByLocation(task, &mapChangeData->location);
+         mapChangeData->state++;
+@@ -887,16 +949,23 @@
+ }
+ 
+ static BOOL FieldTask_WaitFadeInFly(FieldTask *task)
+ {
+     MapChangeFlyData *mapChangeData = FieldTask_GetEnv(task);
+ 
+     if (FlyLanding_IsAnimFinished(mapChangeData->task) == TRUE) {
+         FlyLanding_SetTaskDone(mapChangeData->task);
++        /* openmmo: once landed, the follower is under the player in its
++         * ball, facing the way the player does (HeartGold's fly landing). */
++        {
++            extern void openmmo_follow_arrived_by_air(FieldSystem *fs, int dir);
++            FieldSystem *fieldSystem = FieldTask_GetFieldSystem(task);
++            openmmo_follow_arrived_by_air(fieldSystem, PlayerAvatar_GetFacingDir(fieldSystem->playerAvatar));
++        }
+         return TRUE;
+     }
+ 
+     return FALSE;
+ }
+ 
+ void FieldTask_ChangeMapByFieldWarp(FieldTask *task, const Location *location, enum FieldWarpType fieldWarpType)
+ {
+@@ -913,16 +982,26 @@
+ static BOOL FieldTask_MapChangeByFieldWarp(FieldTask *task)
+ {
+     FieldSystem *fieldSystem = FieldTask_GetFieldSystem(task);
+     MapChangeFieldWarpData *mapChangeData = FieldTask_GetEnv(task);
+     Location *location = &mapChangeData->location;
+ 
+     switch (mapChangeData->state) {
+     case 0:
++        /* openmmo: a teleport, dig or escape rope always recalls the
++         * follower first (HeartGold's field warp task, ov01_021E9908). */
++        {
++            extern int openmmo_follow_leave_ready(FieldSystem *fs, int dest, int always);
++            extern void openmmo_follow_left(FieldSystem *fs);
++            if (!openmmo_follow_leave_ready(fieldSystem, location->mapHeaderID, 1)) {
++                break;
++            }
++            openmmo_follow_left(fieldSystem);
++        }
+         FieldBGM_TryFadeIn(fieldSystem, location->mapHeaderID);
+         FieldTask_StartFinishFieldMapFieldWarp(task);
+         mapChangeData->state++;
+         break;
+     case 1:
+         PlayerAvatar_SetPlayerState(fieldSystem->playerAvatar, 0x0);
+         FieldTask_ChangeMapByLocation(task, &mapChangeData->location);
+         mapChangeData->state++;
+@@ -941,16 +1020,22 @@
+         } else {
+             GF_ASSERT(FALSE);
+         }
+ 
+         FieldTransition_StartMapAndFadeInFieldWarp(task);
+         mapChangeData->state++;
+         break;
+     case 3:
++        /* openmmo: the follower comes down with the player, in its ball
++         * until the first step (HeartGold's arrival after a field warp). */
++        {
++            extern void openmmo_follow_arrived_by_air(FieldSystem *fs, int dir);
++            openmmo_follow_arrived_by_air(fieldSystem, 1);
++        }
+         Heap_Free(mapChangeData);
+         return TRUE;
+     }
+ 
+     return FALSE;
+ }
+ 
+ static void FieldTask_StartFinishFieldMapFieldWarp(FieldTask *task)
+@@ -1020,16 +1105,25 @@
+ static BOOL FieldTask_MapChangeWarp(FieldTask *task)
+ {
+     FieldSystem *fieldSystem = FieldTask_GetFieldSystem(task);
+     MapChangeWarpData *mapChangeWarpData = FieldTask_GetEnv(task);
+     Location *nextLocation = &mapChangeWarpData->nextLocation;
+ 
+     switch (mapChangeWarpData->state) {
+     case 0:
++        /* openmmo: HeartGold's warp driver, as in FieldTask_ChangeMap. */
++        {
++            extern int openmmo_follow_leave_ready(FieldSystem *fs, int dest, int always);
++            extern void openmmo_follow_left(FieldSystem *fs);
++            if (!openmmo_follow_leave_ready(fieldSystem, nextLocation->mapHeaderID, 0)) {
++                break;
++            }
++            openmmo_follow_left(fieldSystem);
++        }
+         FieldSystem_StartWarpAnimation(fieldSystem, 1, &mapChangeWarpData->warpFinished);
+         mapChangeWarpData->state++;
+         break;
+     case 1:
+         if (mapChangeWarpData->warpFinished) {
+             FieldBGM_TryFadeIn(fieldSystem, nextLocation->mapHeaderID);
+             FieldTransition_FinishMap(task);
+             mapChangeWarpData->state++;
+@@ -1054,16 +1148,20 @@
+         mapChangeWarpData->state++;
+         break;
+     case 5:
+         if (mapChangeWarpData->warpFinished) {
+             mapChangeWarpData->state++;
+         }
+         break;
+     case 6:
++        {
++            extern void openmmo_follow_arrived(FieldSystem *fs);
++            openmmo_follow_arrived(fieldSystem);
++        }
+         Heap_Free(mapChangeWarpData);
+         return 1;
+     }
+ 
+     return FALSE;
+ }
+ 
+ void FieldSystem_StartMapChangeWarpTask(FieldSystem *fieldSystem, int param1, int param2)
+@@ -1112,16 +1210,29 @@
+         ctx->destZ = matrixZ * MAP_TILES_COUNT_Z + z;
+     }
+ 
+     return ctx;
+ }
  
  void FieldTask_SetUndergroundMapChange(FieldSystem *fieldSystem)
  {
@@ -53,3 +359,59 @@
      MapChangeUndergroundContext *ctx = MapChangeUndergroundContext_New(fieldSystem);
  
      if (ctx == NULL) {
+         return;
+     }
+ 
+     FieldSystem_CreateTask(fieldSystem, FieldMapChange_GetMapChangeUndergroundTask(fieldSystem), ctx);
+ }
+@@ -1508,16 +1619,27 @@
+ static BOOL FieldTask_ChangeMapColosseum(FieldTask *task)
+ {
+     FieldSystem *fieldSystem = FieldTask_GetFieldSystem(task);
+     MapChangeData *mapChangeData = FieldTask_GetEnv(task);
+     Location *location = &mapChangeData->nextLocation;
+ 
+     switch (mapChangeData->state) {
+     case 0:
++        /* openmmo: HeartGold's warp driver (sub_02055DBC states 0-2) first
++         * recalls a follower the destination will not have, waits for the
++         * ball, and notes the map being left. */
++        {
++            extern int openmmo_follow_leave_ready(FieldSystem *fs, int dest, int always);
++            extern void openmmo_follow_left(FieldSystem *fs);
++            if (!openmmo_follow_leave_ready(fieldSystem, location->mapHeaderID, 0)) {
++                break;
++            }
++            openmmo_follow_left(fieldSystem);
++        }
+         Sound_PlayEffect(SEQ_SE_DP_KAIDAN2_sseq);
+         FieldBGM_TryFadeIn(fieldSystem, location->mapHeaderID);
+         FieldTransition_FadeOutAndFinishMap(task);
+         mapChangeData->state++;
+         break;
+     case 1:
+         FieldTask_ChangeMapByLocation(task, &mapChangeData->nextLocation);
+         mapChangeData->state++;
+@@ -1527,16 +1649,22 @@
+             break;
+         }
+ 
+         FieldBGM_PlayForMapHeader(fieldSystem, location->mapHeaderID);
+         FieldTransition_StartMap(task);
+         mapChangeData->state++;
+         break;
+     case 3:
++        /* openmmo: HeartGold's warp driver state 7: a map that forbids the
++         * follower keeps it in its ball under the player. */
++        {
++            extern void openmmo_follow_arrived(FieldSystem *fs);
++            openmmo_follow_arrived(fieldSystem);
++        }
+         Heap_Free(mapChangeData);
+         return TRUE;
+     }
+ 
+     return FALSE;
+ }
+ 
+ void FieldTask_StartChangeMapColosseum(FieldTask *task, enum MapHeaderID mapHeaderID, int warpId, int x, int z, int dir)

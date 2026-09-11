@@ -371,7 +371,7 @@ static void test_client_to_server(void)
     mmo_wbuf w;
     mmo_wbuf_init(&w);
     /* The official client's step: from tile (13,2), heading DOWN, walking. */
-    mmo_game_write_movement(&w, 13, 2, 0, 0);
+    mmo_game_write_movement(&w, 13, 2, 0, 0, 1);
     CHECK(n == 5 && w.len == n && memcmp(w.data, want, n) == 0,
           "MovementPacket matches the official body byte for byte");
     mmo_wbuf_free(&w);

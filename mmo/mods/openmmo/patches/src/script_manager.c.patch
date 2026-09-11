@@ -1,6 +1,6 @@
 --- a/src/script_manager.c
 +++ b/src/script_manager.c
-@@ -79,6 +79,12 @@
+@@ -79,6 +79,19 @@
  
  void ScriptManager_Set(FieldSystem *fieldSystem, u16 scriptID, MapObject *object)
  {
@@ -9,11 +9,86 @@
 +    if (!openmmo_allow_local_script(scriptID)) {
 +        return;
 +    }
++    /* An Apricorn tree's press: the bank's first entry starts here, and the
++     * rest of the conversation is the server's answer (openmmo_apricorn.c). */
++    {
++        extern void openmmo_apricorn_script_set(unsigned scriptID, void *object);
++
++        openmmo_apricorn_script_set(scriptID, object);
++    }
 +
      ScriptManager *scriptManager = ScriptManager_New();
  
      ScriptManager_Init(fieldSystem, scriptManager, scriptID, object, NULL);
-@@ -723,6 +729,12 @@
+@@ -229,6 +242,20 @@
+ {
+     u16 retScriptID = scriptID;
+ 
++    /* A ported map's shared routines, the nurse and the rest a CallStd
++     * names, ride in a package bank at ids above every range below. The
++     * packages answer first; a miss changes nothing (openmmo_stdbank.c). */
++    {
++        extern int openmmo_std_bank(unsigned scriptID, int *scriptFile, unsigned *textBank, unsigned *entry);
++        int scriptFile;
++        unsigned textBank, entry;
++
++        if (openmmo_std_bank(retScriptID, &scriptFile, &textBank, &entry)) {
++            ScriptContext_Load(fieldSystem, ctx, scriptFile, textBank);
++            return (u16)entry;
++        }
++    }
++
+     // clang-format off
+ #define SCRIPT_ENTRY(threshold, script, textbank) \
+     else if (retScriptID >= threshold) { \
+@@ -514,19 +541,43 @@
+     return Trainer_LoadParam(trainerID, TRDATA_BATTLE_TYPE) != BATTLE_TYPE_SINGLES;
+ }
+ 
++/* Which flag says a trainer has been beaten.
++ *
++ * The block this game ships is 928 flags for its own 928 trainers and the next
++ * one along is in use, so a PORTED trainer, numbered from 928 up, cannot
++ * have `TRAINER_DEFEATED_FLAGS_START + trainerID`: that walks out of the block
++ * and sets a flag of this game's story. Ported numbers go to a block of their
++ * own at the top of the array instead (include/vars_flags.h). Flag 0 is the
++ * one VarsFlags_GetFlagChunk answers NULL for, so a number past even that
++ * reads false and writes nothing rather than landing somewhere.
++ *
++ * The two ranges never meet: a trainer is 0..927 or it is ported. */
++static u16 openmmo_trainer_defeated_flag(u16 trainerID)
++{
++    u16 shipped = TRAINER_DEFEATED_FLAGS_END - TRAINER_DEFEATED_FLAGS_START;
++
++    if (trainerID <= shipped) {
++        return TRAINER_DEFEATED_FLAGS_START + trainerID;
++    }
++    if (trainerID - (shipped + 1) < OPENMMO_PORTED_TRAINERS_MAX) {
++        return PORTED_TRAINER_DEFEATED_FLAGS_START + (trainerID - (shipped + 1));
++    }
++    return 0;
++}
++
+ BOOL Script_IsTrainerDefeated(FieldSystem *fieldSystem, u16 trainerID)
+ {
+-    return VarsFlags_CheckFlag(SaveData_GetVarsFlags(fieldSystem->saveData), TRAINER_DEFEATED_FLAGS_START + trainerID);
++    return VarsFlags_CheckFlag(SaveData_GetVarsFlags(fieldSystem->saveData), openmmo_trainer_defeated_flag(trainerID));
+ }
+ 
+ void Script_SetTrainerDefeated(FieldSystem *fieldSystem, u16 trainerID)
+ {
+-    VarsFlags_SetFlag(SaveData_GetVarsFlags(fieldSystem->saveData), TRAINER_DEFEATED_FLAGS_START + trainerID);
++    VarsFlags_SetFlag(SaveData_GetVarsFlags(fieldSystem->saveData), openmmo_trainer_defeated_flag(trainerID));
+ }
+ 
+ void Script_ClearTrainerDefeated(FieldSystem *fieldSystem, u16 trainerID)
+ {
+-    VarsFlags_ClearFlag(SaveData_GetVarsFlags(fieldSystem->saveData), TRAINER_DEFEATED_FLAGS_START + trainerID);
++    VarsFlags_ClearFlag(SaveData_GetVarsFlags(fieldSystem->saveData), openmmo_trainer_defeated_flag(trainerID));
+ }
+ 
+ u16 Script_GetHiddenItemFlag(u16 scriptID)
+@@ -723,6 +774,12 @@
      }
  
      if (initScriptType == INIT_SCRIPT_ON_FRAME_TABLE) {

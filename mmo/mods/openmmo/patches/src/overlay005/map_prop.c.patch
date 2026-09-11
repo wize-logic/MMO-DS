@@ -1,0 +1,30 @@
+--- a/src/overlay005/map_prop.c	2026-09-02 22:37:50.948417082 -0400
++++ b/src/overlay005/map_prop.c	2026-09-02 22:38:55.400987516 -0400
+@@ -37,6 +37,15 @@
+ 
+ void MapPropManager_Free(MapPropManager *mapPropManager)
+ {
++    /* openmmo: the props' render objects die here with their chunk; the
++     * animation clones sitting in them are given back first
++     * (map_prop_animation.c), or the slot keeps a dead link and hands it
++     * to the next chunk that places the model. */
++    for (u8 i = 0; i < MAX_LOADED_MAP_PROPS; i++) {
++        if (mapPropManager->loadedProps[i].loaded) {
++            MapPropAnimationManager_ReleaseRenderObj(&mapPropManager->loadedProps[i].renderObj);
++        }
++    }
+     Heap_Free(mapPropManager);
+     mapPropManager = NULL;
+ }
+@@ -62,6 +71,11 @@
+     GF_ASSERT(index < MAX_LOADED_MAP_PROPS);
+     VecFx32 nullVector = { 0, 0, 0 };
+ 
++    /* openmmo: as in MapPropManager_Free, for the one prop. */
++    if (mapPropManager->loadedProps[index].loaded) {
++        MapPropAnimationManager_ReleaseRenderObj(&mapPropManager->loadedProps[index].renderObj);
++    }
++
+     mapPropManager->loadedProps[index].modelID = 0;
+     mapPropManager->loadedProps[index].loaded = FALSE;
+     mapPropManager->loadedProps[index].hidden = FALSE;

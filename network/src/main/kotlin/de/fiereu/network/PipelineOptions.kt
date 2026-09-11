@@ -11,19 +11,16 @@ data class PipelineOptions(
     val compressionThreshold: Int = 256,
     val maxHelloSkew: Duration = 10.seconds,
     val frameLogging: Boolean = false,
-    /**
-     * Inbound frames one session may have read at once, and the rate it is topped back up at. Past
-     * these the channel stops reading rather than dropping anything, so they sit far above what
-     * play reaches. Zero for either turns the limiter off.
-     */
+    /** Inbound frames one session may have read at once, and the rate it is topped back up at. */
     val inboundBurst: Int = 512,
     val inboundPerSecond: Int = 256,
+    /** How long a session may go with no traffic in either direction before it is closed. */
+    val idleTimeout: Duration = 10.minutes,
 )
 
 /**
  * Ceilings on connections themselves, for the one [de.fiereu.network.handlers.ConnectionGuard] a
- * server shares across every channel it accepts. The total is set for a player count in the
- * hundreds and can be raised; the point is that there is one at all.
+ * server builds and shares across every channel it accepts.
  */
 data class ConnectionLimits(
     val maxTotal: Int = 2_000,

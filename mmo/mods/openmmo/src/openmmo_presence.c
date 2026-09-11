@@ -39,29 +39,23 @@ static int g_told_missing;             /* the empty-sweep line is said once */
 static char g_place[MMO_PRESENCE_LINE];
 
 /*
- * The character name arrives as the wire carried it, which client.h records as Latin-1;
- * Discord takes JSON, which is UTF-8. Nothing else in this client has had to bridge those two,
- * because everything else that draws a name hands it to the engine's own glyphs.
+ * The character name arrives as the wire carried it, which is UTF-8, and Discord takes JSON,
+ * which is UTF-8 as well, so this only has to fit the name in the field.
  */
-static void latin1_utf8(const char *src, char *dst, size_t cap)
+static void copy_utf8(const char *src, char *dst, size_t cap)
 {
-    size_t o = 0;
+    size_t n;
 
     if (cap == 0)
         return;
-    for (const unsigned char *s = (const unsigned char *)src; *s != '\0'; s++) {
-        if (*s < 0x80) {
-            if (o + 2 > cap)
-                break;
-            dst[o++] = (char)*s;
-        } else {
-            if (o + 3 > cap)
-                break;
-            dst[o++] = (char)(0xC0u | (*s >> 6));
-            dst[o++] = (char)(0x80u | (*s & 0x3Fu));
-        }
+    n = strlen(src);
+    if (n > cap - 1) {
+        n = cap - 1;
+        while (n > 0 && ((unsigned char)src[n] & 0xC0u) == 0x80u)
+            n--;
     }
-    dst[o] = '\0';
+    memcpy(dst, src, n);
+    dst[n] = '\0';
 }
 
 static void refresh_place(FieldSystem *fs)
@@ -180,7 +174,7 @@ void openmmo_presence_tick(FieldSystem *fs, openmmo_client *c)
         g_header = -1;
         g_place[0] = '\0';
     } else {
-        latin1_utf8(ws->name, who, sizeof who);
+        copy_utf8(ws->name, who, sizeof who);
         refresh_place(fs);
         /* Not until the first map has been asked. */
         if (g_header != -1)

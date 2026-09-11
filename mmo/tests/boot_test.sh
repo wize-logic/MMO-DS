@@ -35,6 +35,27 @@
 #   5. OPENMMO_FAKE_CHARS: the title leaves for the lobby, the
 #      character list is empty (so NEW CHARACTER), and the naming
 #      screen is not launched.
+#   5b. OPENMMO_OFFLINE, the front door's offline row: its front door is this
+#      game's character select, never Platinum's title. With a save the row is
+#      that save's own trainer and the pick is the port's continue, the
+#      seat's NEW SAVE would erase the character. With no save the row is NEW
+#      GAME and the pick is the port's own opening; standing aside there was
+#      the bug a fresh install hit. It also never wanders off: the port replays
+#      its opening after 900 idle frames and our title does not. Without that
+#      variable the same binary is the port's own title, replay and all, which
+#      is what the measurement boots want.
+#   5c. and a save naming a species the loaded packages cannot supply is a
+#      sentence on the character select, not `fatal signal 11`: the pl_personal
+#      read runs off the end of a 508-member archive and the heap it corrupts
+#      takes the next free. Needs the imports package to mint one, so it SKIPs
+#      without it.
+#   6. no session, so grass rustles. In a session the server owns whether
+#      a wild encounter happens and the field's per-step roll is cut; with
+#      nobody to ask, offline play is the cartridge's own game and the
+#      engine rolls again. Measured as a pair on one save: a walk up and
+#      down Route 201's grass reaches a battle, and the same walk with the
+#      roll forced off reaches none while taking the same hundred-odd
+#      steps.
 #
 # SKIPs when there is no fused build or no ROM.
 #
@@ -249,6 +270,238 @@ elif grep -q 'character select: 0 character(s)' "$tmp/chars.log" \
 else
     bad "the title leaves for an empty character select, not the naming screen"
     grep -E 'character select|character lobby|naming|Naming' "$tmp/chars.log" || true
+fi
+
+
+echo "with no server to ask, the grass rolls its own encounters:"
+
+CONT="$ENGINE/pc/replays/lab-continue.txt"
+SETTLE="$ENGINE/pc/replays/lab-settle.txt"
+
+if [ ! -f "$CONT" ] || [ ! -f "$SETTLE" ]; then
+    echo "  SKIP (no input scripts under $ENGINE)"
+else
+    # Route 201, in the wide patch north of the Trainer Tips sign: the column
+    # at x 143 is grass from z 842 to z 851, there is no trainer on the route
+    # to start a fight of its own, and the lead cannot be knocked out. The
+    # recipe's own scan of the tile it landed on is the guard, 02 is the
+    # encounter behavior, so a map that moves under this fails here instead of
+    # passing quietly on bare ground.
+    printf 'name GRASS\nparty 445 100 0\nmap 342 143 845 1\n' > "$tmp/grass.lab"
+    mrc=0
+    env OPENMMO_ASSERT=warn OPENMMO_HUD=0 \
+        PC_ROM="$ROM" PC_SAVE="$tmp/grass.sav" PC_LAB="$tmp/grass.lab" \
+        PC_LAB_AT=1800 PC_PACE=0 PC_INPUT="$SETTLE" \
+        PC_LAB_MAPSCAN="$tmp/grass.scan" PC_LAB_MAPSCAN_R=1 \
+        "$FUSED" > "$tmp/grass.mint.log" 2>&1 || mrc=$?
+    if [ "$mrc" -ne 0 ]; then
+        bad "the lab mints a save standing in Route 201 grass (exit $mrc)"
+        tail -2 "$tmp/grass.mint.log" | sed 's/^/       /'
+    elif grep -q '^player 143 845 dir . behavior 02$' "$tmp/grass.scan"; then
+        ok "the recipe stands the player on a Route 201 encounter tile"
+    else
+        bad "the recipe stands the player on a Route 201 encounter tile"
+        sed -n '2p' "$tmp/grass.scan" | sed 's/^/       /'
+    fi
+
+    # PLAY OFFLINE's front door, on that same save: our title, then the
+    # character select with the save's own trainer on it, then the pick, which
+    # must be the port's CONTINUE and not the seat's NEW SAVE. The two A
+    # presses are the title and the row. A save with nothing in it is the other
+    # half and is checked above: no "offline title" on a plain boot, because a
+    # fresh install has to be able to reach NEW GAME.
+    cp "$tmp/grass.sav" "$tmp/front.sav"
+    printf '120 keys A\n124 keys none\n420 keys A\n424 keys none\n' > "$tmp/front.in"
+    frc=0
+    env OPENMMO_ASSERT=warn OPENMMO_HUD=0 OPENMMO_OFFLINE=1 \
+        PC_ROM="$ROM" PC_SAVE="$tmp/front.sav" PC_FRAMES=2400 PC_PACE=0 \
+        PC_INPUT="$tmp/front.in" \
+        "$FUSED" > "$tmp/front.log" 2>&1 || frc=$?
+    if [ "$frc" -ne 0 ]; then
+        bad "an offline boot with a save opens the character select (exit $frc)"
+        tail -2 "$tmp/front.log" | sed 's/^/       /'
+    elif grep -q 'offline character select: "GRASS"' "$tmp/front.log" \
+            && grep -q 'openmmo: character lobby' "$tmp/front.log"; then
+        ok "an offline boot with a save opens the character select on that save"
+    else
+        bad "an offline boot with a save opens the character select on that save"
+        grep -E 'openmmo: (offline|character|leaving)' "$tmp/front.log" | sed 's/^/       /'
+    fi
+    if grep -q 'leaving the lobby for the offline save' "$tmp/front.log" \
+            && grep -q 'openmmo: step from\|poketch off' "$tmp/front.log"; then
+        ok "and the pick continues that save rather than starting a new one"
+    else
+        bad "and the pick continues that save rather than starting a new one"
+        grep -E 'openmmo: (leaving|offline)' "$tmp/front.log" | sed 's/^/       /'
+    fi
+
+    # And the fresh install, which is the case the first cut of this got wrong.
+    # A player who unzips a build and presses PLAY OFFLINE has no save at all,
+    # and standing aside for the port's title there means the one screen they
+    # were promised is the one they cannot reach. The row is NEW GAME, and A on
+    # it runs the cartridge's own opening rather than four creator steps that
+    # would ask the name the opening is about to ask.
+    nrc=0
+    rm -f "$tmp/fresh.sav"
+    env OPENMMO_ASSERT=warn OPENMMO_HUD=0 OPENMMO_OFFLINE=1 \
+        PC_ROM="$ROM" PC_SAVE="$tmp/fresh.sav" PC_FRAMES=1200 PC_PACE=0 \
+        PC_INPUT="$tmp/front.in" \
+        "$FUSED" > "$tmp/fresh.log" 2>&1 || nrc=$?
+    if [ "$nrc" -ne 0 ]; then
+        bad "an offline boot with no save opens the character select (exit $nrc)"
+        tail -2 "$tmp/fresh.log" | sed 's/^/       /'
+    elif grep -q 'nothing saved here, so NEW GAME' "$tmp/fresh.log" \
+            && grep -q 'openmmo: character lobby' "$tmp/fresh.log" \
+            && grep -q 'leaving the lobby for a new offline game' "$tmp/fresh.log"; then
+        ok "an offline boot with no save opens the character select on NEW GAME"
+    else
+        bad "an offline boot with no save opens the character select on NEW GAME"
+        grep -E 'openmmo: (offline|character|leaving)' "$tmp/fresh.log" | sed 's/^/       /'
+    fi
+
+    # And the same binary with nobody asking for that row is the port's own
+    # title, which is what every measurement boot in this suite wants.
+    env OPENMMO_ASSERT=warn OPENMMO_HUD=0 \
+        PC_ROM="$ROM" PC_SAVE="$tmp/front.sav" PC_FRAMES=400 PC_PACE=0 \
+        "$FUSED" > "$tmp/bare.log" 2>&1 || true
+    if ! grep -q 'openmmo: offline title' "$tmp/bare.log"; then
+        ok "and a boot nobody asked that row for is still the port's own title"
+    else
+        bad "and a boot nobody asked that row for is still the port's own title"
+        grep -E 'openmmo: (offline|character)' "$tmp/bare.log" | sed 's/^/       /'
+    fi
+
+    # And it does not wander off. This run presses nothing at all. The title
+    # hands itself to the character select the way a join does, and then the
+    # row stays on our screens: the port replays its opening cutscene after 900
+    # idle frames, and a player who sat in front of that would watch Nintendo,
+    # GAME FREAK and the Pokemon logo, "it just boots pokemon platinum" as
+    # literally as the sentence can be meant. Read off the display registers
+    # rather than the picture, because these screens are animated and their
+    # digests change every frame while one screen holding still keeps one
+    # powcnt/dispcnt pair. Measured 2026-09-08: the offline row holds one pair
+    # from 950 to 1500, and a boot that is walking the opening changes it four
+    # times over the same span, which is the control below.
+    steady() { # steady DUMPDIR -- "same registers at 950 and 1500" or ""
+        awk '$2 != "-" && $1 + 0 == 950  { a = $3 $4 $5 }
+             $2 != "-" && $1 + 0 == 1500 { b = $3 $4 $5 }
+             END { if (a != "" && a == b) print "same" }' "$1/frames.txt" 2>/dev/null
+    }
+    rm -rf "$tmp/idle" "$tmp/wander"; mkdir -p "$tmp/idle" "$tmp/wander"
+    rm -f "$tmp/idle.sav" "$tmp/wander.sav"
+    env OPENMMO_ASSERT=warn OPENMMO_HUD=0 OPENMMO_OFFLINE=1 \
+        PC_ROM="$ROM" PC_SAVE="$tmp/idle.sav" PC_FRAMES=1510 PC_PACE=0 \
+        PC_DUMP_FRAMES="$tmp/idle" PC_DUMP_FROM=950:50 \
+        "$FUSED" > "$tmp/idle.log" 2>&1 || true
+    env OPENMMO_ASSERT=warn OPENMMO_HUD=0 \
+        PC_ROM="$ROM" PC_SAVE="$tmp/wander.sav" PC_FRAMES=1510 PC_PACE=0 \
+        PC_DUMP_FRAMES="$tmp/wander" PC_DUMP_FROM=950:50 \
+        "$FUSED" > "$tmp/wander.log" 2>&1 || true
+    # That run pressed nothing, which is the other half of the claim: online
+    # the title is a loading screen the join walks through by itself, and
+    # offline the list is known before the title is even enqueued, so the
+    # press was ceremony in front of the one screen this row exists to show.
+    if grep -q 'leaving title for character select' "$tmp/idle.log"; then
+        ok "the offline title goes to the character select with no button press"
+    else
+        bad "the offline title goes to the character select with no button press"
+        grep -E 'openmmo: (offline|character|leaving)' "$tmp/idle.log" | sed 's/^/       /'
+    fi
+    if [ -n "$(steady "$tmp/idle")" ] && [ -z "$(steady "$tmp/wander")" ]; then
+        ok "and it never wanders off into the opening, however long it is left"
+    else
+        bad "and it never wanders off into the opening, however long it is left"
+        awk '$2 != "-" && $1 + 0 > 0 { print "       offline", $1, $3, $4, $5 }' \
+            "$tmp/idle/frames.txt" 2>/dev/null | sed -n '1p;$p'
+        awk '$2 != "-" && $1 + 0 > 0 { print "       plain  ", $1, $3, $4, $5 }' \
+            "$tmp/wander/frames.txt" 2>/dev/null | sed -n '1p;$p'
+    fi
+
+    # And a save this build cannot draw is a sentence, not a crash. Minting one
+    # needs the imports package, whose bytes are the player's cartridge's and
+    # are not in this repository, so this SKIPs without it.
+    if [ -s "$ROOT/mods/imports/mod.toml" ] \
+            && [ -d "$ROOT/mods/imports/narc" ]; then
+        printf 'name GEN5\nparty 634 30 0\n' > "$tmp/gen5.lab"
+        grc=0
+        env OPENMMO_ASSERT=warn OPENMMO_HUD=0 \
+            PC_MODS_DIR="$ROOT/mods" PC_MODS=imports \
+            PC_ROM="$ROM" PC_SAVE="$tmp/gen5.sav" PC_LAB="$tmp/gen5.lab" \
+            PC_LAB_AT=1800 PC_FRAMES=30000 PC_PACE=0 \
+            "$FUSED" > "$tmp/gen5.mint.log" 2>&1 || grc=$?
+        if [ "$grc" -ne 0 ] || [ ! -f "$tmp/gen5.sav" ]; then
+            bad "the lab mints a save with a Gen 5 party (exit $grc)"
+            tail -2 "$tmp/gen5.mint.log" | sed 's/^/       /'
+        else
+            # The mint ran with the package, so it wrote a report of its own
+            # on the way out. Clear it: what this asserts is that the refusing
+            # run writes none.
+            cp "$tmp/gen5.sav" "$tmp/gen5.orig"
+            rm -f "$tmp/gen5.sav.report" "$tmp/gen5.sav.frames"
+            brc=0
+            env OPENMMO_ASSERT=warn OPENMMO_HUD=0 OPENMMO_OFFLINE=1 \
+                PC_ROM="$ROM" PC_SAVE="$tmp/gen5.sav" PC_FRAMES=900 PC_PACE=0 \
+                PC_INPUT="$tmp/front.in" \
+                "$FUSED" > "$tmp/gen5.log" 2>&1 || brc=$?
+            if [ "$brc" -eq 0 ] \
+                    && grep -q 'this save cannot be opened: SPECIES 634 NEEDS YOUR BLACK CARTRIDGE' \
+                        "$tmp/gen5.log" \
+                    && ! grep -q 'leaving the lobby for the offline save' "$tmp/gen5.log"; then
+                ok "a save naming a species no package supplies is refused by name"
+            else
+                bad "a save naming a species no package supplies is refused by name (exit $brc)"
+                tail -3 "$tmp/gen5.log" | sed 's/^/       /'
+            fi
+            if cmp -s "$tmp/gen5.sav" "$tmp/gen5.orig" \
+                    && [ ! -f "$tmp/gen5.sav.report" ]; then
+                ok "and the refusal leaves the save alone and offers no report"
+            else
+                bad "and the refusal leaves the save alone and offers no report"
+            fi
+        fi
+    else
+        echo "  SKIP (no filled mods/imports: make -C mmo import IMPORT_ROM=...)"
+    fi
+
+    # Continue, then up and down the column for the rest of the run.
+    # Alternating is what keeps the player inside the patch.
+    cat "$CONT" > "$tmp/graze.in"
+    gf=2600
+    gd=UP
+    while [ "$gf" -lt 5000 ]; do
+        printf '%d keys %s\n' "$gf" "$gd" >> "$tmp/graze.in"
+        if [ "$gd" = UP ]; then gd=DOWN; else gd=UP; fi
+        gf=$((gf + 32))
+    done
+
+    # graze TAG [LOCAL], one offline boot through that walk, echoing how many
+    # commands the battle scene executed. The seam's trace is only opened when
+    # there is a fight to record, so no file is no fight.
+    graze() {
+        cp "$tmp/grass.sav" "$tmp/$1.sav"
+        env OPENMMO_SESSION=0 OPENMMO_ASSERT=warn OPENMMO_HUD=0 \
+            ${2:+OPENMMO_LOCAL_ENCOUNTERS=$2} \
+            PC_ROM="$ROM" PC_SAVE="$tmp/$1.sav" PC_FRAMES=5000 PC_PACE=0 \
+            PC_INPUT="$tmp/graze.in" OPENMMO_BATTLE_TRACE="$tmp/$1.trace" \
+            "$FUSED" > "$tmp/$1.log" 2>&1 || echo "the $1 walk exited $?" >&2
+        awk '$1 == "present"' "$tmp/$1.trace" 2>/dev/null | wc -l
+    }
+
+    lit=$(graze rustle)
+    dark=$(graze quiet 0)
+    walked=$(awk '/openmmo: step from/' "$tmp/quiet.log" | wc -l)
+
+    if [ "$lit" -gt 0 ]; then
+        ok "an offline walk through the grass meets a wild battle ($lit scene command(s))"
+    else
+        bad "an offline walk through the grass meets a wild battle"
+        tail -2 "$tmp/rustle.log" | sed 's/^/       /'
+    fi
+    if [ "$dark" -eq 0 ] && [ "$walked" -gt 100 ]; then
+        ok "and the same walk with the roll cut takes $walked steps and meets none"
+    else
+        bad "and the same walk with the roll cut meets none ($walked steps, $dark scene command(s))"
+    fi
 fi
 
 if [ "$fail" -eq 0 ]; then

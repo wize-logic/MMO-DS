@@ -18,8 +18,10 @@ import de.fiereu.openmmo.server.game.script.ScriptRegistry
 import de.fiereu.openmmo.server.game.script.ScriptRunner
 import de.fiereu.openmmo.server.game.services.BattleService
 import de.fiereu.openmmo.server.game.services.BlackoutService
+import de.fiereu.openmmo.server.game.services.ChatLimits
 import de.fiereu.openmmo.server.game.services.DialogService
 import de.fiereu.openmmo.server.game.services.EncounterService
+import de.fiereu.openmmo.server.game.services.EncounterVariantService
 import de.fiereu.openmmo.server.game.services.FieldMoveService
 import de.fiereu.openmmo.server.game.services.GrantBudget
 import de.fiereu.openmmo.server.game.services.GuildService
@@ -32,22 +34,28 @@ import de.fiereu.openmmo.server.game.services.MovementService
 import de.fiereu.openmmo.server.game.services.MultiplayerService
 import de.fiereu.openmmo.server.game.services.NpcService
 import de.fiereu.openmmo.server.game.services.PresenceService
+import de.fiereu.openmmo.server.game.services.SafariService
 import de.fiereu.openmmo.server.game.services.ScriptMovementService
 import de.fiereu.openmmo.server.game.services.ScriptWarpService
 import de.fiereu.openmmo.server.game.services.ShopService
 import de.fiereu.openmmo.server.game.services.SocialService
+import de.fiereu.openmmo.server.game.services.StaticEncounterService
 import de.fiereu.openmmo.server.game.services.StoryPlayerService
 import de.fiereu.openmmo.server.game.services.StoryService
 import de.fiereu.openmmo.server.game.services.TrainerSightService
 import de.fiereu.openmmo.server.game.services.ViolationLog
 import de.fiereu.openmmo.server.game.services.WarpService
+import de.fiereu.openmmo.server.game.services.WorldClock
 import de.fiereu.openmmo.server.game.services.WorldStateService
 import de.fiereu.openmmo.server.game.session.SessionRegistry
 import de.fiereu.openmmo.server.game.storage.CharacterStore
 import de.fiereu.openmmo.server.game.storage.EntityIdService
 import de.fiereu.openmmo.server.game.storage.GuildStore
+import de.fiereu.openmmo.server.game.storage.InMemoryGuildRepository
 import de.fiereu.openmmo.server.game.storage.InMemoryMailRepository
+import de.fiereu.openmmo.server.game.storage.InMemoryOfflineItemRepository
 import de.fiereu.openmmo.server.game.storage.InMemorySaveBlockRepository
+import de.fiereu.openmmo.server.game.storage.InMemorySocialRepository
 import de.fiereu.openmmo.server.game.storage.SocialStore
 import de.fiereu.openmmo.server.game.world.interest.InterestManager
 import de.fiereu.openmmo.server.game.world.interest.PassThroughInterestPolicy
@@ -67,7 +75,7 @@ fun movementService(
     /** Pass one holding the scripts the walked map's events name, keyed the way it keys them. */
     scripts: ScriptRegistry = ScriptRegistry(emptyMap()),
 ): MovementService {
-  val mapLoad = MapLoadService(mapManager)
+  val mapLoad = MapLoadService(mapManager, SpeciesRegistry())
   val interest = InterestManager()
   @Suppress("NAME_SHADOWING")
   val presence = presence ?: PresenceService(interest, PassThroughInterestPolicy(), mapLoad, store)
@@ -82,7 +90,13 @@ fun movementService(
       presence,
       mapManager,
       store,
-      EncounterService(store, battles),
+      EncounterService(
+          store,
+          battles,
+          ItemRegistry(),
+          mapManager,
+          EncounterVariantService(WorldClock()),
+          safariService(store, mapManager, presence)),
       MapScriptService(
           entryScripts,
           scriptRunner(store, mapManager, interest, battles, scripts),
@@ -91,6 +105,7 @@ fun movementService(
       ),
       trainerSightService(store, mapManager, interest, battles, scripts),
       fieldMoveService(store, mapManager, presence),
+      safariService(store, mapManager, presence),
       ViolationLog(),
   )
 }
@@ -101,7 +116,10 @@ fun fieldMoveService(
     mapManager: MapManager = MapManager(),
     presence: PresenceService =
         PresenceService(
-            InterestManager(), PassThroughInterestPolicy(), MapLoadService(mapManager), store),
+            InterestManager(),
+            PassThroughInterestPolicy(),
+            MapLoadService(mapManager, SpeciesRegistry()),
+            store),
 ): FieldMoveService =
     FieldMoveService(
         mapManager,
@@ -130,21 +148,25 @@ fun trainerSightService(
  * character-creation handlers touch only the store and the session, so nothing here is faked; the
  * token secret is any non-empty one, since a join is not what this builds.
  */
+/** The secret a [loginService] built here verifies session tokens against. */
+val loginTestSecret: ByteArray = "a test secret".toByteArray()
+
 fun loginService(
     store: CharacterStore,
     mapManager: MapManager = MapManager(),
+    /** Pass one to be able to ask what the service bound while answering. */
+    sessions: SessionRegistry = SessionRegistry(),
 ): LoginService {
-  val mapLoad = MapLoadService(mapManager)
+  val mapLoad = MapLoadService(mapManager, SpeciesRegistry())
   val interest = InterestManager()
   val presence = PresenceService(interest, PassThroughInterestPolicy(), mapLoad, store)
-  val sessions = SessionRegistry()
   val story = StoryService(store)
   return LoginService(
       mapLoad,
       NpcService(mapManager, store),
       MultiplayerService(sessions),
-      SocialService(SocialStore(), sessions, store),
-      GuildService(GuildStore(), store, sessions),
+      SocialService(SocialStore(InMemorySocialRepository()), sessions, store),
+      GuildService(GuildStore(InMemoryGuildRepository()), store, sessions),
       MailService(InMemoryMailRepository(), store, sessions),
       sessions,
       mapManager,
@@ -156,8 +178,8 @@ fun loginService(
           blackoutService(store) { scriptRunner(store, mapManager, interest) },
           fieldMoveService(store, mapManager, presence),
       ),
-      SessionTokenVerifier("a test secret".toByteArray()),
-      WorldStateService(),
+      SessionTokenVerifier(loginTestSecret),
+      WorldStateService(WorldClock()),
       InMemorySaveBlockRepository(),
       fieldMoveService(store, mapManager, presence),
       ViolationLog(),
@@ -169,7 +191,20 @@ fun loginService(
  * start a battle, and the battle service that ends one holds this.
  */
 fun blackoutService(store: CharacterStore, runner: () -> ScriptRunner): BlackoutService =
-    BlackoutService(store, Provider { runner() })
+    BlackoutService(store, storyPlayerService(store), Provider { runner() })
+
+/** A real [StoryPlayerService] over [store]. */
+fun storyPlayerService(store: CharacterStore): StoryPlayerService {
+  val species = SpeciesRegistry()
+  val moves = MoveRegistry()
+  return StoryPlayerService(
+      store,
+      WildMonFactory(species, moves, LearnsetRegistry(), EntityIdService()),
+      species,
+      moves,
+      ItemRegistry(),
+  )
+}
 
 /**
  * A real [ScriptRunner]. It launches on whatever scope the session carries under SCRIPT_SCOPE, so
@@ -181,8 +216,15 @@ fun scriptRunner(
     interest: InterestManager = InterestManager(),
     battles: BattleService = battleService(store, interest),
     scripts: ScriptRegistry = ScriptRegistry(emptyMap()),
+    /**
+     * The white out a script may leave owed. Its own runner factory is never reached from here: the
+     * deferred white out runs on the coroutine that is already inside this runner.
+     */
+    blackout: () -> BlackoutService = {
+      blackoutService(store) { error("this fixture's white out starts no script of its own") }
+    },
 ): ScriptRunner {
-  val mapLoad = MapLoadService(mapManager)
+  val mapLoad = MapLoadService(mapManager, SpeciesRegistry())
   val presence = PresenceService(interest, PassThroughInterestPolicy(), mapLoad, store)
   val npcs = NpcService(mapManager, store)
   val story = StoryService(store)
@@ -200,15 +242,42 @@ fun scriptRunner(
       store,
       mapManager,
       MapEntryScripts(scripts, story),
-      ShopService(store, items),
+      ShopService(store, items, InMemoryOfflineItemRepository()),
       FieldMoveService(mapManager, store, presence, ScriptMovementService(mapManager, npcs, store)),
+      Provider { blackout() },
   )
 }
+
+fun staticEncounterService(
+    store: CharacterStore,
+    mapManager: MapManager = MapManager(),
+    interest: InterestManager = InterestManager(),
+    battles: BattleService = battleService(store, interest, mapManager),
+): StaticEncounterService = StaticEncounterService(NpcService(mapManager, store), battles, store)
+
+/**
+ * A real [SafariService]; its warp out of the marsh needs the same collaborators a script's does.
+ */
+fun safariService(
+    store: CharacterStore,
+    mapManager: MapManager = MapManager(),
+    presence: PresenceService =
+        PresenceService(
+            InterestManager(),
+            PassThroughInterestPolicy(),
+            MapLoadService(mapManager, SpeciesRegistry()),
+            store),
+): SafariService =
+    SafariService(
+        store,
+        ScriptWarpService(
+            mapManager, MapLoadService(mapManager, SpeciesRegistry()), store, presence))
 
 fun battleService(
     store: CharacterStore,
     interest: InterestManager,
     mapManager: MapManager = MapManager(),
+    safari: SafariService = safariService(store, mapManager),
 ): BattleService {
   val species = SpeciesRegistry()
   val moves = MoveRegistry()
@@ -231,11 +300,16 @@ fun battleService(
           blackout = blackout,
           budget = GrantBudget(),
           violations = ViolationLog(),
+          safariService = safari,
+          chatLimits = ChatLimits(ViolationLog()),
       )
   return battles
 }
 
-/** A config for the one thing a unit test wants out of it, the session secret. */
+/**
+ * A config for the one thing a unit test ever wants out of it, the session secret that
+ * [de.fiereu.openmmo.server.game.services.ReportedIndividual] keys its derivation on.
+ */
 fun testGameConfig(secret: String = "test-session-secret"): GameServerConfig =
     GameServerConfig(
         host = "127.0.0.1",

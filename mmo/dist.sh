@@ -6,6 +6,7 @@
 #   mmo/dist.sh                    # build both, package both, check both
 #   mmo/dist.sh --host windows     # just the one (repeat it to name a set)
 #   mmo/dist.sh --host android     # the handheld build, as an APK
+#   mmo/dist.sh --local            # this WSL's address, no update channel
 #   mmo/dist.sh --no-build         # package the trees as they already stand
 #   mmo/dist.sh --out DIR          # somewhere else (default: mmo/build/dist)
 #   mmo/dist.sh --version V        # name them yourself (default: git describe)
@@ -27,6 +28,7 @@ BUILD=1
 KEEP=0
 LOOPBACK_OK=0
 RELEASE=1
+LOCAL=0
 JOBS="$(nproc 2>/dev/null || echo 4)"
 
 usage() { awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"; }
@@ -51,6 +53,12 @@ while [[ $# -gt 0 ]]; do
         --no-build) BUILD=0; shift;;
         --keep)     KEEP=1; shift;;
         --loopback) LOOPBACK_OK=1; shift;;
+        # A release for this machine and nobody else: the address this WSL
+        # carries on its default route (the one Windows reaches), this tree's
+        # own root key, and NO update channel, so the zip cannot fetch the
+        # live build over itself, which is exactly how a local stress build
+        # downgraded away on 2026-08-27.
+        --local)    LOCAL=1; shift;;
         --release)  RELEASE=1; shift;;
         --debug)    RELEASE=0; shift;;
         -h|--help)  usage; exit 0;;
@@ -108,10 +116,17 @@ SERVER_GAME_PORT="${SERVER_GAME_PORT:-}"
 RELEASE_HOST="${RELEASE_HOST:-}"
 RELEASE_ROOT_KEY="${RELEASE_ROOT_KEY:-}"
 SERVER_ROOT_KEY="${SERVER_ROOT_KEY:-}"
-# The update channel a release fetches from, compiled in beside the server pin
-# so a player configures nothing.
+# The update channel a release fetches from, compiled in beside the server
+# pin so a player configures nothing. It is the operator's channel, so set
+# both or a release ships without one.
 RELEASE_FEED_URL="${RELEASE_FEED_URL-}"
 RELEASE_FEED_KEY="${RELEASE_FEED_KEY-}"
+
+# --local: no channel at all, whatever the environment or the defaults say.
+if [[ "$LOCAL" -eq 1 ]]; then
+    RELEASE_FEED_URL=""
+    RELEASE_FEED_KEY=""
+fi
 
 pin_vars() {
     printf 'SERVER_SETTABLE=0'
@@ -219,19 +234,18 @@ build_host() {  # build_host <host>
         # this file for somebody building by hand, and this run already has
         # it. Passing it through twice is how the two would drift.
         #
-        # The channel is pinned here to be read, NOT to be applied. The other
-        # two hosts unpack into a folder their launcher rewrites file by file.
-        # The APK never repairs itself, it is replaced by the package
-        # installer or not at all, and nothing in this build will ever try:
-        # there is no fetch of an inventory, no staging directory and no
-        # in-place patcher on this host, and anyone "finishing" one later is
-        # writing an updater that cannot exist.
-        #
-        # What the app does with the pin is read the one signed document that
-        # names the current revision (main_feed.txt, which publish.sh writes
-        # for the android channel like any other), compare it with the
-        # revision this APK was built at, and if it is behind, offer its
-        # player the download page. A check URL, not an update URL.
+        # The channel is pinned here for the app'S own updater. The other
+        # two hosts unpack into a folder their launcher rewrites file by file;
+        # an APK is replaced by the package installer or not at all, so
+        # there is no in-place patcher on this host. What the app does with
+        # the pin is read the signed document that names the current revision
+        # (main_feed.txt, which publish.sh writes for the android channel like
+        # any other), compare it with the revision this APK was built at, and
+        # if it is behind fetch the one .apk the channel lists, prove it
+        # against the signed inventory, and hand it to the installer
+        #. The update must be signed by
+        # the same key as the installed app: the release key, never the
+        # debug one (Makefile.android, "the release key").
         android) make -C "$ROOT" -f Makefile.android -j"$JOBS" "${pin[@]}" \
                       FEED_URL="$feed_url" FEED_KEY="$feed_key" apk;;
     esac
@@ -352,7 +366,7 @@ check_apk() {  # check_apk <apk>
     local apk="$1" rc=0 so="$WORK/apk-lib.so" names
     # The same default Makefile.android's APKSIGNER has, so a tree that can
     # build an APK can also check the signature on one.
-    local signer="${APKSIGNER:-$HOME/.local/opt/android-sdk/build-tools/34.0.0/apksigner}"
+    local signer="${APKSIGNER:-$HOME/.local/opt/android-sdk/build-tools/35.0.0/apksigner}"
 
     names="$(unzip -Z1 "$apk" 2>/dev/null)" || {
         bad "$(basename "$apk") is not readable as a zip -- aapt2 wrote nothing usable"
@@ -409,6 +423,48 @@ check_apk() {  # check_apk <apk>
                     rc=1
                 fi
             fi
+            # SIXTEEN KILOBYTE PAGES, checked on the bytes that ship rather
+            # than on the flags that built them. Android 15 runs on devices
+            # whose page size is 16 KB, and a library whose LOAD segments are
+            # aligned to the old 4 KB cannot be mapped on one, the app
+            # installs and dies in the linker naming only the library, which
+            # reads like a corrupt download. Two things have to hold and each
+            # fails alone: the link asks for the alignment (Makefile.android's
+            # PAGEALIGN) and the packaging keeps it (stored, never deflated,
+            # so the loader can map it out of the APK, which is what
+            # extractNativeLibs="false" means, and that is the default from
+            # API 30).
+            if command -v readelf >/dev/null 2>&1; then
+                local aln
+                aln="$(readelf -lW "$so" 2>/dev/null \
+                       | awk '/LOAD/ { print $NF }' | sort -u)"
+                if [[ "$aln" != "0x4000" ]]; then
+                    bad "the packaged game's LOAD segments are aligned"
+                    bad "'${aln:-unreadable}', not 0x4000. A 16 KB-page device"
+                    bad "(Android 15 and later) installs it and then fails to"
+                    bad "load it."
+                    rc=1
+                fi
+            fi
+            # The method is read and then compared, rather than grepped for
+            # with the answer inverted: an unreadable listing gives an empty
+            # pipe, and a `grep -q` that finds nothing in one is
+            # indistinguishable from a deflated library. Naming the method
+            # tells those two apart.
+            local method
+            method="$(unzip -lv "$apk" lib/armeabi-v7a/libpokeplatinum.so \
+                      2>/dev/null | awk '$NF == "lib/armeabi-v7a/libpokeplatinum.so" { print $2 }')"
+            case "$method" in
+                Stored) ;;
+                "") bad "the packaged game's zip entry could not be listed, so"
+                    bad "its compression is unknown."
+                    rc=1;;
+                *)  bad "the packaged game is '$method' in the APK, not Stored."
+                    bad "From API 30 the platform maps the library out of the"
+                    bad "package instead of unpacking it, and it can only do"
+                    bad "that with a stored, page-aligned entry."
+                    rc=1;;
+            esac
         else
             bad "the packaged game could not be read back out of $(basename "$apk")"
             rc=1
@@ -441,7 +497,7 @@ fi
 # remembered because WSL2 hands out a new address across reboots. Not gated on
 # the Makefile's default being loopback for the release half: a release is for
 # players whatever this tree happens to be configured to dial.
-if [[ "$RELEASE" -eq 1 && "$BUILD" -eq 1 ]]; then
+if [[ "$RELEASE" -eq 1 && "$BUILD" -eq 1 && "$LOCAL" -eq 0 ]]; then
     if [[ -z "$SERVER_HOST$RELEASE_HOST" || -z "$SERVER_ROOT_KEY$RELEASE_ROOT_KEY" ]]; then
         bad "a release needs the server it is for. Set RELEASE_HOST and"
         bad "RELEASE_ROOT_KEY (a pem path or an 04-hex point), or set"
@@ -449,11 +505,19 @@ if [[ "$RELEASE" -eq 1 && "$BUILD" -eq 1 ]]; then
         exit 1
     fi
 fi
-if [[ "$BUILD" -eq 1 && -z "$SERVER_ROOT_KEY" && "$RELEASE" -eq 1 ]]; then
+if [[ "$BUILD" -eq 1 && -z "$SERVER_ROOT_KEY" && "$RELEASE" -eq 1 && "$LOCAL" -eq 0 ]]; then
     SERVER_ROOT_KEY="$RELEASE_ROOT_KEY"
 fi
 if [[ "$BUILD" -eq 1 && -z "$SERVER_HOST" ]]; then
-    if [[ "$RELEASE" -eq 1 ]]; then
+    if [[ "$LOCAL" -eq 1 ]]; then
+        DETECTED="$(reachable_hint)"
+        if [[ "$DETECTED" == play.example.net ]]; then
+            bad "--local: this machine's address on its default route cannot be"
+            bad "read, so there is nothing to pin. Name it: SERVER_HOST=<ip> $0 ..."
+            exit 2
+        fi
+        SERVER_HOST="$DETECTED"
+    elif [[ "$RELEASE" -eq 1 ]]; then
         SERVER_HOST="$RELEASE_HOST"
     elif is_loopback "$(pin_host)"; then
         DETECTED="$(reachable_hint)"
@@ -466,7 +530,9 @@ fi
 # one server, and a release built with the tree's loopback default is a release
 # nobody can play.
 if [[ "$BUILD" -eq 1 ]]; then
-    if [[ -n "${DETECTED:-}" && "$SERVER_HOST" == "${DETECTED:-}" ]]; then
+    if [[ "$LOCAL" -eq 1 && "$SERVER_HOST" == "${DETECTED:-}" ]]; then
+        say "  server $SERVER_HOST (--local: this machine, no update channel)"
+    elif [[ -n "${DETECTED:-}" && "$SERVER_HOST" == "${DETECTED:-}" ]]; then
         say "  server $SERVER_HOST (this machine's current address; it moves"
         say "  across reboots, which is why a release does not use it)"
     elif [[ "$RELEASE" -eq 1 && "$SERVER_HOST" == "$RELEASE_HOST" ]]; then
@@ -572,6 +638,8 @@ mkdir -p "$OUT" || exit 1
 if [[ "$RELEASE" -eq 1 ]]; then
     if [[ -n "$RELEASE_FEED_URL" ]]; then
         say "updating from $RELEASE_FEED_URL/<host> (the compiled-in channel)"
+    elif [[ "$LOCAL" -eq 1 ]]; then
+        say "no update channel (--local): these releases never fetch"
     else
         warn "NO update channel: these releases will never auto-update"
     fi

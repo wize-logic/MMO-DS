@@ -17,6 +17,11 @@ typedef char sprite_egg_ids_agree[
      && MMO_SPRITE_BAD_EGG_ID == MMO_SPRITE_BAD_EGG) ? 1 : -1];
 typedef char sprite_pokegra_rom_agree[
     (MMO_SPRITE_POKEGRA_ROM_MEMBERS == MMO_SPRITE_POKEGRA_MEMBERS) ? 1 : -1];
+typedef char sprite_pokegra_stride_agree[
+    (MMO_SPRITE_POKEGRA_PER_SPECIES == MMO_SPRITE_POKEGRA_STRIDE) ? 1 : -1];
+typedef char sprite_height_rom_agree[
+    (MMO_SPRITE_HEIGHT_ROM_MEMBERS == MMO_SPRITE_POKEGRA_ROM_MEMBERS
+     / MMO_SPRITE_POKEGRA_STRIDE * MMO_SPRITE_HEIGHT_PER_SPECIES) ? 1 : -1];
 
 static int g_pokegra_members = MMO_SPRITE_POKEGRA_MEMBERS;
 

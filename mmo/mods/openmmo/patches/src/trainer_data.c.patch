@@ -1,0 +1,16 @@
+--- a/src/trainer_data.c
++++ b/src/trainer_data.c
+@@ -163,6 +163,13 @@
+ 
+ u8 TrainerClass_Gender(int trclass)
+ {
++    // openmmo: a class the package appended past this table is answered out
++    // of the package (mods/openmmo/src/openmmo_trainerclass.c); a class
++    // nobody declared reads as male, which is what the stand-in was.
++    extern int openmmo_trainer_class_gender(int trclass, int engineGender);
++    if (trclass < 0 || trclass >= (int)(sizeof(sTrainerClassGender) / sizeof(sTrainerClassGender[0]))) {
++        return (u8)openmmo_trainer_class_gender(trclass, GENDER_MALE);
++    }
+     return sTrainerClassGender[trclass];
+ }
+ 

@@ -1,0 +1,101 @@
+--- a/src/unk_02056B30.c
++++ b/src/unk_02056B30.c
+@@ -204,16 +204,28 @@
+ static BOOL sub_02056CFC(FieldTask *taskMan)
+ {
+     FieldSystem *fieldSystem = FieldTask_GetFieldSystem(taskMan);
+     UnkStruct_02056BDC *v1 = FieldTask_GetEnv(taskMan);
+     Location *v2 = &v1->unk_08;
+ 
+     switch (v1->unk_00) {
+     case 0:
++        /* openmmo: HeartGold's warp driver (sub_02055DBC states 0-2) first
++         * recalls a follower the destination will not have, waits for the
++         * ball, and notes the map being left
++         * (mods/openmmo/src/openmmo_follow_move.c). */
++        {
++            extern int openmmo_follow_leave_ready(FieldSystem *fs, int dest, int always);
++            extern void openmmo_follow_left(FieldSystem *fs);
++            if (!openmmo_follow_leave_ready(fieldSystem, v2->mapHeaderID, 0)) {
++                break;
++            }
++            openmmo_follow_left(fieldSystem);
++        }
+         v1->unk_04 = 0;
+         FieldBGM_TryFadeIn(fieldSystem, v2->mapHeaderID);
+         FieldTask_InitCall(taskMan, Unk_020EC560[v1->unk_20], v1);
+         (v1->unk_00)++;
+         break;
+     case 1:
+         FieldTransition_FinishMap(taskMan);
+         (v1->unk_00)++;
+@@ -238,16 +250,22 @@
+             break;
+         }
+ 
+         FieldBGM_PlayForMapHeader(fieldSystem, v2->mapHeaderID);
+         FieldSystem_RequestLocationName(fieldSystem);
+ 
+         v1->unk_04 = 0;
+         FieldTask_InitCall(taskMan, Unk_020EC544[v1->unk_20], v1);
++        /* openmmo: HeartGold's warp driver state 7: a map that forbids the
++         * follower keeps it in its ball under the player. */
++        {
++            extern void openmmo_follow_arrived(FieldSystem *fs);
++            openmmo_follow_arrived(fieldSystem);
++        }
+         (v1->unk_00)++;
+         break;
+     case 6:
+         Heap_Free(v1);
+         return 1;
+     }
+ 
+     return 0;
+@@ -346,16 +364,23 @@
+ 
+         if (v3 == 2) {
+             LocalMapObj_SetAnimationCode(v2, MOVEMENT_ACTION_WALK_SLOW_WEST);
+         } else if (v3 == 3) {
+             LocalMapObj_SetAnimationCode(v2, MOVEMENT_ACTION_WALK_SLOW_EAST);
+         } else {
+             GF_ASSERT(FALSE);
+         }
++
++        /* openmmo: the follower takes the same step onto the escalator
++         * (HeartGold's sub_0205613C). */
++        {
++            extern void openmmo_follow_escalator_step(FieldSystem *fs, int action);
++            openmmo_follow_escalator_step(fieldSystem, v3 == 2 ? MOVEMENT_ACTION_WALK_SLOW_WEST : MOVEMENT_ACTION_WALK_SLOW_EAST);
++        }
+     }
+         (v1->unk_04)++;
+         break;
+     case 1:
+         v2 = PlayerAvatar_GetMapObject(fieldSystem->playerAvatar);
+ 
+         if (LocalMapObj_CheckAnimationFinished(v2) == 1) {
+             sub_020656AC(v2);
+@@ -561,16 +586,22 @@
+ 
+         (v1->unk_04)++;
+         break;
+     case 1:
+         v2 = PlayerAvatar_GetMapObject(fieldSystem->playerAvatar);
+ 
+         if (LocalMapObj_CheckAnimationFinished(v2) == 1) {
+             sub_020656AC(v2);
++            /* openmmo: off the escalator, the follower is under the player
++             * again, hidden until the next step (HeartGold's sub_02056260). */
++            {
++                extern void openmmo_follow_stepped_out(FieldSystem *fs, int dir);
++                openmmo_follow_stepped_out(fieldSystem, PlayerAvatar_GetFacingDir(fieldSystem->playerAvatar));
++            }
+             (v1->unk_04)++;
+         }
+         break;
+     case 2:
+         if (IsScreenFadeDone()) {
+             (v1->unk_04)++;
+         }
+         break;

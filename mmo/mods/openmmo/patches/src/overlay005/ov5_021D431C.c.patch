@@ -1,0 +1,85 @@
+--- a/src/overlay005/ov5_021D431C.c
++++ b/src/overlay005/ov5_021D431C.c
+@@ -171,6 +171,12 @@
+     case 3:
+         v0 = PlayerAvatar_GetMapObject(fieldSystem->playerAvatar);
+         LocalMapObj_SetAnimationCode(v0, MOVEMENT_ACTION_WALK_NORMAL_NORTH);
++        /* openmmo: the follower steps into the door behind the player
++         * (HeartGold's door entry, ov01_021E9160). */
++        {
++            extern void openmmo_follow_door_step(FieldSystem *fs, int action);
++            openmmo_follow_door_step(fieldSystem, MOVEMENT_ACTION_WALK_NORMAL_NORTH);
++        }
+         (param1->unk_00)++;
+         break;
+     case 4:
+@@ -349,6 +355,13 @@
+ 
+         if (LocalMapObj_CheckAnimationFinished(v0) == 1) {
+             sub_020656AC(v0);
++            /* openmmo: out of the door, the follower is under the player
++             * facing south, hidden until the next step (HeartGold's
++             * ov01_021E9410). */
++            {
++                extern void openmmo_follow_stepped_out(FieldSystem *fs, int dir);
++                openmmo_follow_stepped_out(fieldSystem, 1);
++            }
+ 
+             {
+                 int v13;
+@@ -463,8 +476,15 @@
+     }
+ }
+ 
+-static u8 DoorAnimation_GetSoundEffectType(const int doorModelID)
++static u8 DoorAnimation_GetSoundEffectType(const int modelID)
+ {
++    /* A ported door is found by standing in for one of ours, and the finder
++     * hands back the carried id, which this table has never heard of, so
++     * every automatic door in Johto swung on hinges. Ask what it stands for
++     * (openmmo_propequiv.c); an id of our own answers as itself. */
++    extern int openmmo_prop_equiv(int modelID);
++    const int doorModelID = openmmo_prop_equiv(modelID);
++
+     if (doorModelID == veilstone_dpt_store_door_nsbmd) {
+         return DOOR_SOUND_EFFECT_TYPE_VEILSTONE_DPT_STORE_CHIME;
+     }
+@@ -912,6 +932,12 @@
+ 
+         if (LocalMapObj_CheckAnimationFinished(v0) == 1) {
+             sub_020656AC(v0);
++            /* openmmo: off the stairs, the follower is under the player
++             * again, hidden until the next step (HeartGold's ov01_021E9AA8). */
++            {
++                extern void openmmo_follow_stepped_out(FieldSystem *fs, int dir);
++                openmmo_follow_stepped_out(fieldSystem, PlayerAvatar_GetFacingDir(fieldSystem->playerAvatar));
++            }
+             (v2->unk_00)++;
+         }
+         break;
+@@ -1059,6 +1085,12 @@
+ 
+         if (LocalMapObj_CheckAnimationFinished(v0) == 1) {
+             sub_020656AC(v0);
++            /* openmmo: off the stairs, the follower is under the player
++             * again, hidden until the next step (HeartGold's ov01_021E9AA8). */
++            {
++                extern void openmmo_follow_stepped_out(FieldSystem *fs, int dir);
++                openmmo_follow_stepped_out(fieldSystem, PlayerAvatar_GetFacingDir(fieldSystem->playerAvatar));
++            }
+             (v2->unk_00)++;
+         }
+         break;
+@@ -1112,6 +1144,12 @@
+ 
+         if (LocalMapObj_CheckAnimationFinished(v0) == 1) {
+             sub_020656AC(v0);
++            /* openmmo: off the stairs, the follower is under the player
++             * again, hidden until the next step (HeartGold's ov01_021E9AA8). */
++            {
++                extern void openmmo_follow_stepped_out(FieldSystem *fs, int dir);
++                openmmo_follow_stepped_out(fieldSystem, PlayerAvatar_GetFacingDir(fieldSystem->playerAvatar));
++            }
+             (v2->unk_00)++;
+         }
+         break;

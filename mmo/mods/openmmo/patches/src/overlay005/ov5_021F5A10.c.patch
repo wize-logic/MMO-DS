@@ -1,0 +1,108 @@
+--- a/src/overlay005/ov5_021F5A10.c
++++ b/src/overlay005/ov5_021F5A10.c
+@@ -46,6 +46,19 @@
+     Billboard *unk_40;
+ } UnkStruct_ov5_021F5C4C;
+ 
++/* A THIRD SHEET, AND EVERY ONE PAST IT. This game draws two bubbles over a
++ * person's head and the game a follower Pokemon comes from draws fourteen, so
++ * an index of 2 or more is one of those and its picture comes out of a filled
++ * content package (mods/openmmo/src/openmmo_emote.c). Nothing else about the
++ * effect changes: the rise, the gravity, the thirty-frame hold and the sound
++ * are this routine's own, and they are already step for step what the source
++ * game's own emote does. */
++extern int openmmo_emote_resource(int emote);
++extern void openmmo_emote_acquire(FieldEffectManager *fieldEffMan, int emote);
++extern void openmmo_emote_release(FieldEffectManager *fieldEffMan, int emote);
++
++#define OPENMMO_EMOTE_FIRST 2
++
+ static void ov5_021F5A34(UnkStruct_ov5_021F5A34 *param0);
+ static void ov5_021F5A40(UnkStruct_ov5_021F5A34 *param0);
+ static void ov5_021F5A58(UnkStruct_ov5_021F5A34 *param0);
+@@ -109,6 +122,10 @@
+ 
+ static void ov5_021F5A7C(UnkStruct_ov5_021F5A34 *param0, int param1)
+ {
++    if (param1 >= OPENMMO_EMOTE_FIRST) {
++        return; /* the carried sheets keep their own count */
++    }
++
+     if (param1 == 0) {
+         ov5_021F5A34(param0);
+     } else {
+@@ -118,6 +135,10 @@
+ 
+ static void ov5_021F5A90(UnkStruct_ov5_021F5A34 *param0, int param1)
+ {
++    if (param1 >= OPENMMO_EMOTE_FIRST) {
++        return;
++    }
++
+     if (param1 == 0) {
+         ov5_021F5A40(param0);
+     } else {
+@@ -208,6 +229,11 @@
+ 
+ static void ov5_021F5BF0(UnkStruct_ov5_021F5A34 *param0, int param1)
+ {
++    if (param1 >= OPENMMO_EMOTE_FIRST) {
++        openmmo_emote_acquire(param0->unk_08, param1 - OPENMMO_EMOTE_FIRST);
++        return;
++    }
++
+     if (param1 == 0) {
+         ov5_021F5BB0(param0);
+     } else {
+@@ -217,6 +243,11 @@
+ 
+ static void ov5_021F5C04(UnkStruct_ov5_021F5A34 *param0, int param1)
+ {
++    if (param1 >= OPENMMO_EMOTE_FIRST) {
++        openmmo_emote_release(param0->unk_08, param1 - OPENMMO_EMOTE_FIRST);
++        return;
++    }
++
+     if (param1 == 0) {
+         ov5_021F5BD0(param0);
+     } else {
+@@ -227,7 +258,14 @@
+ static Billboard *ov5_021F5C18(FieldEffectManager *param0, int param1, VecFx32 *param2, u32 param3)
+ {
+     int v0[2] = { 1, 12 };
+-    Billboard *v1 = ov5_021DF84C(param0, v0[param1], param2);
++    int v6 = (param1 >= OPENMMO_EMOTE_FIRST)
++        ? openmmo_emote_resource(param1 - OPENMMO_EMOTE_FIRST)
++        : v0[param1];
++    /* A carried sheet that is not there falls back to this game's own first
++     * bubble rather than to NULL: every caller here dereferences what comes
++     * back on the next line, and one wrong picture is a better answer than a
++     * write through nothing. openmmo_emote.c says so once when it happens. */
++    Billboard *v1 = ov5_021DF84C(param0, v6 < 0 ? v0[0] : v6, param2);
+ 
+     if (param3 == 1) {
+         NNSG3dResMdl *v2 = Billboard_GetModel(v1);
+@@ -409,6 +447,11 @@
+     GF_ASSERT(sub_02062764(v1, v0->unk_08, v0->unk_0C) != 0);
+     ov5_021ECDA0(v1, &v2);
+ 
++    /* 32 is the height of a CELL, and a person fills theirs. A follower
++     * Pokemon does not, HeartGold's own Bulbasaur starts fifteen rows down a
++     * thirty-two row cell, so its bubble comes back down by however much of
++     * its cell is empty above it. The art is what says by how much; 0 for
++     * everything this game already drew a bubble over. */
+     v2.y += (FX32_ONE * 32);
+     v2.z += (FX32_ONE * 1);
+ 
+@@ -472,6 +515,11 @@
+     GF_ASSERT(sub_02062764(v1, v0->unk_08, v0->unk_0C) != 0);
+     ov5_021ECDA0(v1, &v2);
+ 
++    /* 32 is the height of a CELL, and a person fills theirs. A follower
++     * Pokemon does not, HeartGold's own Bulbasaur starts fifteen rows down a
++     * thirty-two row cell, so its bubble comes back down by however much of
++     * its cell is empty above it. The art is what says by how much; 0 for
++     * everything this game already drew a bubble over. */
+     v2.y += (FX32_ONE * 32);
+     v2.z += (FX32_ONE * 1);
+ 

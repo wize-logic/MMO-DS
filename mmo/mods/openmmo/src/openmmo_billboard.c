@@ -125,6 +125,19 @@ int openmmo_billboard_row(int gfx_id, int *model, int *seq,
     return 1;
 }
 
+/*
+ * The engine graphics id whose rows a cooked id wears, renderer row, walk controller, per-
+ * body info, with only the texture its own, or -1.
+ */
+int openmmo_billboard_like(int gfx_id)
+{
+    struct pc_modfs_billboard row;
+
+    if (!pc_modfs_billboard(gfx_id, &row))
+        return -1;
+    return row.like;
+}
+
 /* The mmodel member holding a cooked frame sequence, or -1. */
 int openmmo_billboard_seq_member(int seq_id)
 {

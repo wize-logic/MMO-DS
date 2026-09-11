@@ -83,6 +83,9 @@
 /* The link Super Contest: the queue that fills one, and the engine traffic that runs it. */
 #define MMO_GAME_OP_CONTEST_UP         0xC6 /* c2s ContestComm: queue, relay and result */
 #define MMO_GAME_OP_CONTEST_DOWN       0xCC /* s2c ContestComm: waiting, seat and relay */
+/* A save file coming back online. */
+#define MMO_GAME_OP_OFFLINE_REPORT     0xCA /* c2s OfflineSaveReport: one piece of a blob */
+#define MMO_GAME_OP_OFFLINE_RESULT     0xCE /* s2c OfflineImportResult: the one answer */
 #define MMO_GAME_OP_BAG_DELTA          0xDD /* c2s BagDelta: the engine consumed or gained an item */
 #define MMO_GAME_OP_MONEY_DELTA        0xDE /* c2s MoneyDelta: the engine spent or earned cash */
 #define MMO_GAME_OP_POKEMON_RELEASE    0xDF /* c2s PokemonRelease: the box screen let a monster go */
@@ -218,6 +221,13 @@
  * S16LE message indices. 32 is more than any menu the server sends; a
  * larger count is refused. */
 #define MMO_DIALOG_MENU_MAX 32
+
+/*
+ * A 0x31 bank that is not a bank: each entry is a MAP HEADER and the row is that map's own
+ * label (MapHeader_GetMapLabelTextID), so a list of places names itself and the server never
+ * learns which string a ported town got.
+ */
+#define MMO_DIALOG_BANK_MAP_LABEL 0xFFF
 
 /* The only captured 0x26 trailer (Potion on the starter). Meaning unknown. */
 #define MMO_ITEM_USE_TRAILER           0x00FF0001
@@ -436,10 +446,10 @@ int mmo_game_dir_to_ds(u8 wire_dir);
 
 /*
  * Write a MovementPacket body (no opcode): the from-tile x,y (S16LE each), the tile the
- * player just left, then a packed U8 state = (wire_dir & 0x03) | (running ? 0x80 : 0), where
- * wire_dir is a server Direction ordinal (see mmo_game_dir_from_ds).
+ * player just left, then a packed U8 state = (wire_dir & 0x03) | (running ?
  */
-void mmo_game_write_movement(mmo_wbuf *body, s16 x, s16 y, u8 wire_dir, int running);
+void mmo_game_write_movement(mmo_wbuf *body, s16 x, s16 y, u8 wire_dir,
+                             int running, int tiles);
 
 /* Write a FaceDirectionPacket body (no opcode): one U8 server Direction
  * ordinal. Mirrors FaceDirectionPacketCodec / the official client's the official client. */
@@ -451,6 +461,12 @@ void mmo_game_write_face(mmo_wbuf *body, u8 wire_dir);
  * field is the S64LE id (CharacterInfoCodec).
  */
 int mmo_game_read_first_character_id(const u8 *body, size_t n, s64 *out_id);
+
+/*
+ * Every text cap below counts UTF-16 code units, because that is the unit the far end counts
+ * in: a name column is VARCHAR(32) and a chat line is measured against a Java String's length.
+ */
+#define MMO_TEXT_BYTES(units) ((units) * 3 + 1)
 
 /* The name the server accepts on CreateCharacter, and the twelve cosmetic slots
  * a SkinSet can populate. Type is 10 bits and colour is 6, packed into one
@@ -491,7 +507,7 @@ typedef struct {
 } mmo_skin_set;
 
 typedef struct {
-    const char  *name;             /* Latin-1, at most MMO_CHAR_NAME_MAX */
+    const char  *name;             /* UTF-8; at most MMO_CHAR_NAME_MAX units */
     int          gender;           /* 0 male, 1 female */
     int          starting_region;  /* wire region id */
     mmo_skin_set appearance;
@@ -502,7 +518,7 @@ typedef struct {
 typedef struct {
     int  count;
     s64  id;
-    char name[MMO_CHAR_NAME_MAX + 1];
+    char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
     int  gender;
 } mmo_character_ref;
 
@@ -523,7 +539,7 @@ int mmo_game_read_first_character(const u8 *body, size_t n, mmo_character_ref *o
  * the CharacterInfo ended before those fields. */
 typedef struct {
     s64  id;
-    char name[MMO_CHAR_NAME_MAX + 1];
+    char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
     int  gender; /* rivalSex */
     int  region; /* positionRegionId */
     mmo_skin_set appearance; /* first SkinSet on the list row; empty if none */
@@ -582,8 +598,15 @@ typedef struct {
     int  entity_state;   /* small enum, 0 = none; meaning unestablished */
     int  has_follower;   /* flags & 0x04 */
     int  follower_dex;   /* followerDexId when has_follower, else 0 */
-    char name[64];
-    char name_prefix[32]; /* flags & 0x10; drawn as "[prefix]name" */
+    /* flags & 0x20, which is ours: the official client's follower is a dex id and cannot
+     * say which of a species' pictures walks behind that player. All three are
+     * 0 on a packet that does not carry them, which is a male, ordinary,
+     * non-shiny follower and the picture the official client would have drawn. */
+    int  follower_form;
+    int  follower_gender; /* 0 male, 1 female, as the engine numbers them */
+    int  follower_shiny;
+    char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
+    char name_prefix[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)]; /* flags & 0x10; drawn as "[prefix]name" */
 } mmo_load_entity;
 int mmo_game_read_load_entity(const u8 *body, size_t n, mmo_load_entity *out);
 
@@ -997,8 +1020,8 @@ typedef struct {
     int language;   /* Language ordinal, or -1 on the system short form */
     int unknown;    /* the S8 after language; -1 when omitted */
     s64 sender_id;
-    char sender[MMO_CHAR_NAME_MAX + 1];
-    char text[MMO_CHAT_TEXT_MAX + 1];
+    char sender[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
+    char text[MMO_TEXT_BYTES(MMO_CHAT_TEXT_MAX)];
 } mmo_chat;
 
 /* A ChatMessagePacket (0x09) body. System announcements (type 16) are just
@@ -1222,6 +1245,7 @@ int mmo_game_write_breeding_submit(mmo_wbuf *w, int session,
 /* The most party members LocalPlayerState is read for, the engine's party cap
  * (PARTY_SIZE). A longer wire party is truncated and the true count kept. */
 #define MMO_WS_PARTY_MAX 6
+#define MMO_WS_BADGE_MAX 24 /* three regions of eight: Sinnoh 0..7, Johto 8..15, Kanto 16..23 */
 
 /*
  * The GBA story-variable range 0x4000..0x40ff: 256 entries, keyed on the wire by (gbaVar -
@@ -1244,6 +1268,7 @@ typedef struct {
     int party_count;                 /* stored (<= MMO_WS_PARTY_MAX) */
     int party_total;                 /* on-wire count */
     int badge_count;
+    s16 badges[MMO_WS_BADGE_MAX];
     int var_count;                   /* on-wire var count */
     u16 var_key[MMO_WS_VAR_MAX];     /* gbaVar - 0x4000 */
     s8  var_val[MMO_WS_VAR_MAX];
@@ -1262,7 +1287,13 @@ int mmo_game_read_story_flag(const u8 *body, size_t n,
  * delta: a U16LE-counted list of (U16LE flagID, U8 on), then a U16LE-counted list of (U16LE
  * varID, U16LE value).
  */
-#define MMO_SCRIPT_FLAG_MAX  2912   /* Platinum NUM_FLAGS */
+/*
+ * Platinum NUM_FLAGS, as this client builds it: 2912 of the engine's own, then 160 reserved
+ * for the synthetic ids below, then 768 for ported trainers' defeated flags, then 512 for a
+ * ported region's item balls and hidden items (HeartGold's own item band, carried at its
+ * offsets).
+ */
+#define MMO_SCRIPT_FLAG_MAX  4384
 #define MMO_SCRIPT_VAR_BASE  16384  /* Platinum VARS_START */
 #define MMO_SCRIPT_VAR_MAX   288    /* Platinum NUM_VARS (VARS_END - VARS_START) */
 
@@ -1274,7 +1305,8 @@ typedef struct { u16 id; u16 value; } mmo_script_var;
  * the same op and in the same direction as the two lists above: absolute coming down, only-
  * what-changed going up.
  */
-#define MMO_SAVE_BLOCK_MAX   8      /* blocks one frame may carry */
+/* Blocks one frame may carry. */
+#define MMO_SAVE_BLOCK_MAX   16
 /* The widest block this client will sync. */
 #define MMO_SAVE_BLOCK_BYTES 8192
 
@@ -1291,6 +1323,21 @@ int mmo_game_write_script_state(mmo_wbuf *w,
  * wire land in *out_n* even when more arrived than fit, and *out_*_stored says how many were
  * kept.
  */
+/* OfflineSaveReport (c2s 0xCA), one piece of an encoded save report:
+ * U16LE sequence, U8 last, then the piece with a U16LE byte count. */
+int mmo_game_write_offline_report(mmo_wbuf *w, int sequence, int last,
+                                  const u8 *chunk, size_t len);
+
+/* OfflineImportResult (s2c 0xCE): U8 status, the sentence, then the door's
+ * notes, each a UTF-8 string with a U16LE byte count. `notes` is a flat
+ * array of `note_cap` strings `note_stride` bytes apart; notes past it are
+ * counted in *out_nnotes_sent and dropped. 0 on success, -1 on a short body. */
+int mmo_game_read_offline_result(const u8 *body, size_t n, int *out_status,
+                                 char *message, size_t message_cap,
+                                 char *notes, size_t note_stride, int note_cap,
+                                 int *out_nnotes, int *out_nnotes_sent,
+                                 int *out_wants_chain);
+
 int mmo_game_read_script_state(const u8 *body, size_t n,
                                mmo_script_flag *flags, int flag_cap,
                                int *out_nflags, int *out_flags_stored,
@@ -1334,7 +1381,7 @@ typedef struct {
     int type;
     int humans;                     /* 2..4; the engine fills the rest */
     struct {
-        char name[MMO_CHAR_NAME_MAX];
+        char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
         int gender;
         int flags;                  /* MMO_CONTEST_SEAT_* */
     } seat[MMO_CONTEST_SEATS];
@@ -1413,6 +1460,21 @@ void mmo_game_write_pokemon_release(mmo_wbuf *w, s64 id);
  * the same triple a warp names.
  */
 #define MMO_MON_TLV_CAUGHT_WHERE  2  /* 6 bytes: region, bank, map */
+/* The item the monster is carrying, one U16LE wire item id; absent, not zero,
+ * from a record whose monster carries nothing. The record names it nowhere
+ * else: the official reader crosses every field at its own width and not one of
+ * them is an item, and the summary screen has no held-item label. */
+#define MMO_MON_TLV_HELD_ITEM     3  /* 2 bytes: wire item id */
+/* The engine's own location label for where the monster was caught, one U16LE. */
+#define MMO_MON_TLV_CAUGHT_LABEL  4  /* 2 bytes: engine location label */
+/*
+ * What the monster is suffering from, one U16LE of the engine's own condition word, the value
+ * `MON_DATA_STATUS` holds, bit for bit.
+ */
+#define MMO_MON_TLV_STATUS        5  /* 2 bytes: engine condition word */
+/* The bits of that word the engine defines. A value with anything else in it is
+ * not a condition the engine can be given back, so what crosses is masked. */
+#define MMO_MON_STATUS_MASK       0x0FFFu
 
 /* BattleOutcome (0xCF), c2s only: what an engine-run scene left each party member as. */
 typedef struct {
@@ -1425,6 +1487,11 @@ typedef struct {
     u8  cond[MMO_MON_CONDITIONS]; /* contest conditions, in contest-type order */
     u8  sheen;
     u64 ribbons_super;            /* see MMO_MON_RIBBON_BIT */
+    u16 species;                  /* server id; 0 claims nothing */
+    s16 friendship;               /* 0..255; -1 claims nothing */
+    s16 held_item;                /* wire item id; 0 = nothing, -1 claims nothing */
+    u8  egg;                      /* the engine still holds it as an egg */
+    u16 status;                   /* engine condition word; see MMO_MON_TLV_STATUS */
 } mmo_battle_mon_outcome;
 
 void mmo_game_write_battle_outcome(mmo_wbuf *w,
@@ -1531,7 +1598,7 @@ int mmo_game_read_shop_catalog(const u8 *body, size_t n,
 
 typedef struct {
     int  slot;
-    char text[MMO_DIALOG_STRVAR_CHARS + 1];
+    char text[MMO_TEXT_BYTES(MMO_DIALOG_STRVAR_CHARS)];
 } mmo_dialog_strvar;
 
 /*
@@ -1609,7 +1676,7 @@ typedef struct {
     s64 player;
     s32 unknown;
     u8  online;
-    char name[MMO_CHAR_NAME_MAX + 1];
+    char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
     u8  unk0;
     s32 last_seen;
     u8  kind;
@@ -1638,7 +1705,7 @@ void mmo_game_write_friend_name(mmo_wbuf *w, const char *name);
 #define MMO_GUILD_LOG_MAX         32
 
 typedef struct {
-    char name[MMO_CHAR_NAME_MAX + 1];
+    char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
     u8  unk0;
     s32 last_seen;
     u8  kind;
@@ -1656,21 +1723,21 @@ typedef struct {
 
 typedef struct {
     s64 guild_id;
-    char name[MMO_GUILD_NAME_MAX + 1];
-    char tag[MMO_GUILD_TAG_MAX + 1];
+    char name[MMO_TEXT_BYTES(MMO_GUILD_NAME_MAX)];
+    char tag[MMO_TEXT_BYTES(MMO_GUILD_TAG_MAX)];
     s32 founded_at;
-    char message[MMO_GUILD_MOTD_MAX + 1];
+    char message[MMO_TEXT_BYTES(MMO_GUILD_MOTD_MAX)];
     s32 unknown;
     s16 perm[MMO_GUILD_PERM_COUNT];
     s32 expiry;
     int rank_count;
-    char rank_label[MMO_GUILD_RANK_MAX][MMO_GUILD_RANK_LABEL_MAX + 1];
+    char rank_label[MMO_GUILD_RANK_MAX][MMO_TEXT_BYTES(MMO_GUILD_RANK_LABEL_MAX)];
 } mmo_guild_profile;
 
 typedef struct {
     u8  type;
-    char actor[MMO_CHAR_NAME_MAX + 1];
-    char target[MMO_CHAR_NAME_MAX + 1];
+    char actor[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
+    char target[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
     s32 timestamp;
 } mmo_guild_log_entry;
 
@@ -1710,11 +1777,11 @@ typedef struct {
     s64 recipient_id;
     s64 sender_id;
     u8  staff_kind;
-    char sender[MMO_CHAR_NAME_MAX + 1];
-    char recipient[MMO_CHAR_NAME_MAX + 1];
+    char sender[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
+    char recipient[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
     s32 sent_at;
-    char subject[MMO_MAIL_SUBJECT_MAX + 1];
-    char body[MMO_MAIL_BODY_MAX + 1];
+    char subject[MMO_TEXT_BYTES(MMO_MAIL_SUBJECT_MAX)];
+    char body[MMO_TEXT_BYTES(MMO_MAIL_BODY_MAX)];
     u8  unread;
     u8  has_attachments;
 } mmo_mail;
@@ -1740,7 +1807,7 @@ void mmo_game_write_mail_delete(mmo_wbuf *w, s64 mail_id, s16 page);
 
 typedef struct {
     s64 entity_id;
-    char name[MMO_CHAR_NAME_MAX + 1];
+    char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
     u8  unk0;
     s32 last_seen;
     u8  kind;
@@ -1784,7 +1851,7 @@ typedef struct {
 
 typedef struct {
     s64 entity_id;
-    char name[MMO_CHAR_NAME_MAX + 1];
+    char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
 } mmo_ui_name;
 
 typedef struct {
@@ -1809,7 +1876,7 @@ typedef struct {
 typedef struct {
     s8  row_type;
     s16 value[5];
-    char label[MMO_UI_LABEL_MAX + 1];
+    char label[MMO_TEXT_BYTES(MMO_UI_LABEL_MAX)];
     s16 extra;
 } mmo_ui_row;
 
@@ -1926,6 +1993,9 @@ void mmo_game_write_item_use(mmo_wbuf *w, u16 item_id, s64 target,
  * here (its party table holds 6, its PC table 660). */
 #define MMO_CONTAINER_PC    0
 #define MMO_CONTAINER_PARTY 1
+/* The day care, which is one of the seven containers the join block carries.
+ * Two slots, the same two the game's day care building has. */
+#define MMO_CONTAINER_DAYCARE 3
 
 /* Moves per record: four slots always go on the wire, empty ones included. */
 #define MMO_MON_MOVES 4
@@ -1963,8 +2033,8 @@ typedef struct {
     int slot;                    /* containerSlot */
     u16 dex_id;                  /* server National Dex (cross via the id map) */
     s32 seed;
-    char ot[MMO_MON_NAME];       /* original trainer */
-    char nickname[MMO_MON_NAME]; /* empty when the species name is shown */
+    char ot[MMO_TEXT_BYTES(MMO_MON_NAME)];       /* original trainer */
+    char nickname[MMO_TEXT_BYTES(MMO_MON_NAME)]; /* empty when the species name is shown */
     int level;
     int hp;                      /* current HP */
     s32 xp;
@@ -1980,6 +2050,7 @@ typedef struct {
     int nature;                  /* 0..24, derived from `seed` (not on the wire) */
     int ability_slot;            /* 0, 1, or MMO_ABILITY_SLOT_HIDDEN */
     int friendship;              /* 0..255; the summary shows it as a percentage */
+    int held_item;               /* server wire item id; 0 = carrying nothing */
     int form;                    /* alternate forme, 0 for the ordinary one */
     u16 rarity;                  /* shiny/hidden-ability/alpha/... bit set */
     s32 caught_at;               /* unix seconds */
@@ -1988,6 +2059,12 @@ typedef struct {
     int caught_region;
     int caught_bank;
     int caught_map;
+    /* The engine's own location label, where the record carries one instead of
+     * a place; 0 for a record that carries none. See MMO_MON_TLV_CAUGHT_LABEL. */
+    int caught_location_label;
+    /* The engine's own condition word, 0 for a healthy monster. See
+     * MMO_MON_TLV_STATUS. */
+    int status;
     int egg;
 } mmo_monster;
 
@@ -1997,6 +2074,13 @@ typedef struct {
 #define MMO_RARITY_ALPHA          0x0004
 #define MMO_RARITY_SECRET_SHINY   0x0008
 #define MMO_RARITY_FATEFUL        0x0010
+
+/* The personality that makes a record's shiny bit true against a given trainer. */
+u32 mmo_mon_shiny_personality(u32 base, u32 otid, int shiny, int nature);
+
+/* Whether that pair is shiny, by the rule the engine's own
+ * `Pokemon_IsPersonalityShiny` uses. */
+int mmo_mon_is_shiny(u32 otid, u32 personality);
 
 /*
  * A PokemonContainerPacket (0x13). `has_change` asks the client to replace the container
@@ -2032,7 +2116,7 @@ int mmo_game_read_monster(const u8 *body, size_t n, mmo_monster *out);
 typedef struct {
     int  flags;
     int  request_type;
-    char name[MMO_MON_NAME];
+    char name[MMO_TEXT_BYTES(MMO_MON_NAME)];
 } mmo_duel_invite;
 
 int mmo_game_read_duel_invite(const u8 *body, size_t n, mmo_duel_invite *out);
@@ -2050,17 +2134,19 @@ void mmo_game_write_duel_response(mmo_wbuf *w, int accepted, const char *text);
 int mmo_game_read_duel_outcome(const u8 *body, size_t n, int *out_packed);
 
 /*
- * LinkBattleOpen (s2c 0xC6): S32LE battle id, U8 net id, the opponent's name, then a
- * U8-counted list of monster records in the same shape a container carries. The party on the
- * wire is the *other* player's; each client already holds its own.
+ * LinkBattleOpen (s2c 0xC6): S32LE battle id, U8 net id, the opponent's name, U8 gender, a
+ * U8-counted list of monster records in the same shape a container carries, and last the
+ * opponent's cosmetic slots.
  */
 typedef struct {
     int  battle_id;
     int  net_id;
-    char peer_name[MMO_MON_NAME];
+    char peer_name[MMO_TEXT_BYTES(MMO_MON_NAME)];
     int  peer_gender; /* 0 male, 1 female: the sprite the other side is drawn as */
     int  total;   /* records on the wire */
     int  count;   /* records stored (<= cap) */
+    int  has_appearance;
+    mmo_skin_set appearance;  /* the opponent's, resolved to a body by the caller */
 } mmo_link_battle_open;
 
 int mmo_game_read_link_battle_open(const u8 *body, size_t n,
@@ -2114,7 +2200,7 @@ typedef struct {
     int  state;
     int  role;        /* 0 or 1: this side's net id at the table */
     int  peer_gender; /* 0 male, 1 female */
-    char peer[MMO_MON_NAME];
+    char peer[MMO_TEXT_BYTES(MMO_MON_NAME)];
 } mmo_trade_state;
 
 int mmo_game_read_trade_state(const u8 *body, size_t n, mmo_trade_state *out);
@@ -2312,6 +2398,30 @@ int mmo_game_read_gtl_log(const u8 *body, size_t n, mmo_gtl_log *out);
 #define MMO_UG_TALK_DATA    2 /* bidi: data[0] is a comm command id, rest its body */
 #define MMO_UG_TALK_RESULT  3 /* s2c: data[0] a TalkResult, data[1] a role */
 #define MMO_UG_TALK_END     4 /* bidi: the conversation is over */
+/* Fishing rides the same opcode: a rod cast is a field action the official client's wire
+ * never had, and this is the one bidirectional opcode we own with a kind byte
+ *. openmmo_fishing.c. */
+#define MMO_UG_TALK_FISH_CAST    5 /* c2s: data[0] is the rod, 1..3 */
+#define MMO_UG_TALK_FISH_HOOKED  6 /* c2s: the reel-in landed */
+#define MMO_UG_TALK_FISH_LOST    7 /* c2s: the fish got away */
+#define MMO_UG_TALK_FISH_VERDICT 8 /* s2c: data[0] is 1 for a bite, 0 for nothing */
+/* And the Apricorn trees: the pick is the server's record and grant, the
+ * lines are the client's (openmmo_apricorn.c). */
+#define MMO_UG_TALK_APRICORN_PICK    9  /* c2s: data[0] is the tree's index */
+#define MMO_UG_TALK_APRICORN_VERDICT 10 /* s2c: data[0] 0 no box, 1 nothing today, 2+kind picked */
+/* And what a field move meets on a ported map: the rubble of a smashed rock
+ * and the tree a Headbutt shakes are the server's two rolls, the smash, the
+ * shake and the lines the client's (openmmo_fieldmove.c). Neither names a
+ * tile: the rock or tree is the one the player faces. */
+#define MMO_UG_TALK_ROCK_SMASH         11 /* c2s: a rock in front was smashed */
+#define MMO_UG_TALK_ROCK_SMASH_VERDICT 12 /* s2c: data[0] 0 nothing, 1 a battle is coming, 2 an item (data[1..2] its id, LE) */
+#define MMO_UG_TALK_HEADBUTT           13 /* c2s: the tree in front was headbutted */
+#define MMO_UG_TALK_HEADBUTT_VERDICT   14 /* s2c: data[0] 0 nothing, 1 a battle is coming */
+/* A scripted wild fight the server dealt on a press (a static site) ended
+ * won, or with the Pokemon caught, on this client's engine, which is where
+ * a wild fight is fought; the server's own instance only ever hears RUN at
+ * the end of one. The server hides the site for this character on it. */
+#define MMO_UG_TALK_STATIC_WON         15 /* c2s: the static site's fight is won */
 
 /* MMO_UG_TALK_END's body, where it has one. */
 #define MMO_UG_END_DONE    0
@@ -2380,7 +2490,7 @@ typedef struct {
     s64 id;
     s8  kind;
     s8  type;
-    char name[MMO_TOURNEY_NAME_MAX + 1];
+    char name[MMO_TEXT_BYTES(MMO_TOURNEY_NAME_MAX)];
     s16 capacity;
     s16 format;                /* the client refuses a format its own tier disagrees with */
     s64 start_time;
@@ -2427,7 +2537,7 @@ typedef struct {
  * a marking byte, and one short per stat slot carrying a 10-bit value and a
  * 6-bit second field, with 1023 and 63 meaning absent. */
 typedef struct {
-    char name[MMO_CHAR_NAME_MAX + 1];
+    char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
     s8  u8_a;
     s32 s32_a;
     s8  u8_b;
@@ -2524,8 +2634,8 @@ void mmo_game_write_score_board_req(mmo_wbuf *w, s8 category);
  */
 typedef struct {
     s64 entity_id;
-    char name[MMO_GM_TEXT_MAX + 1];
-    char secondary[MMO_GM_TEXT_MAX + 1];
+    char name[MMO_TEXT_BYTES(MMO_GM_TEXT_MAX)];
+    char secondary[MMO_TEXT_BYTES(MMO_GM_TEXT_MAX)];
     s64 s64_a;
     s32 i32[MMO_GM_SESSION_S32];
     s16 i16[MMO_GM_SESSION_S16];
@@ -2541,8 +2651,8 @@ typedef struct {
 typedef struct {
     s64 entity_id;
     s32 value;
-    char name_a[MMO_GM_TEXT_MAX + 1];
-    char name_b[MMO_GM_TEXT_MAX + 1];
+    char name_a[MMO_TEXT_BYTES(MMO_GM_TEXT_MAX)];
+    char name_b[MMO_TEXT_BYTES(MMO_GM_TEXT_MAX)];
 } mmo_gm_character;
 
 typedef struct {
@@ -2551,15 +2661,15 @@ typedef struct {
     s8  rank;
     int has_account;
     s8  rank_extra[3];
-    char address[MMO_GM_TEXT_MAX + 1];
+    char address[MMO_TEXT_BYTES(MMO_GM_TEXT_MAX)];
     s64 playtime;
     s32 account_id;
-    char account_a[MMO_GM_TEXT_MAX + 1];
-    char account_b[MMO_GM_TEXT_MAX + 1];
-    char account_c[MMO_GM_TEXT_MAX + 1];
+    char account_a[MMO_TEXT_BYTES(MMO_GM_TEXT_MAX)];
+    char account_b[MMO_TEXT_BYTES(MMO_GM_TEXT_MAX)];
+    char account_c[MMO_TEXT_BYTES(MMO_GM_TEXT_MAX)];
     int has_detail;
     s32 detail_value;             /* read and dropped by the official client */
-    char detail_text[MMO_GM_TEXT_MAX + 1];
+    char detail_text[MMO_TEXT_BYTES(MMO_GM_TEXT_MAX)];
     int count;
     mmo_gm_character entry[MMO_GM_CHAR_MAX];
 } mmo_gm_lookup;
@@ -2579,9 +2689,9 @@ typedef struct {
 #define MMO_GM_PANEL_MENU       102
 
 typedef struct {
-    char label[MMO_GM_TEXT_MAX + 1];
+    char label[MMO_TEXT_BYTES(MMO_GM_TEXT_MAX)];
     int option_count;
-    char option[MMO_GM_PANEL_OPT_MAX][MMO_GM_TEXT_MAX + 1];
+    char option[MMO_GM_PANEL_OPT_MAX][MMO_TEXT_BYTES(MMO_GM_TEXT_MAX)];
     s8  option_kind[MMO_GM_PANEL_OPT_MAX];
 } mmo_gm_panel_row;
 
@@ -2595,9 +2705,9 @@ typedef struct {
     s8  variant;
     int known;
     s64 entity_id;
-    char text_a[MMO_GM_TEXT_MAX + 1];
-    char text_b[MMO_GM_TEXT_MAX + 1];
-    char text_c[MMO_GM_TEXT_MAX + 1];
+    char text_a[MMO_TEXT_BYTES(MMO_GM_TEXT_MAX)];
+    char text_b[MMO_TEXT_BYTES(MMO_GM_TEXT_MAX)];
+    char text_c[MMO_TEXT_BYTES(MMO_GM_TEXT_MAX)];
     s32 value;
     s8  s8_a;
     s16 s16_a;
@@ -2619,8 +2729,8 @@ typedef struct {
 
 typedef struct {
     s8  clear;
-    char label[MMO_GM_TEXT_MAX + 1];
-    char value[MMO_GM_TEXT_MAX + 1];
+    char label[MMO_TEXT_BYTES(MMO_GM_TEXT_MAX)];
+    char value[MMO_TEXT_BYTES(MMO_GM_TEXT_MAX)];
     s32 count;
 } mmo_gm_panel_entry;
 

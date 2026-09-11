@@ -67,7 +67,29 @@ NDK_BIN  ?= $(NDK)/toolchains/llvm/prebuilt/$(NDK_HOST)/bin
 # 26 is the highest of the three, so 26 it is, and it costs nothing a device
 # in this plan can feel.
 ANDROID_API ?= 26
+
+# WHICH ABI. armeabi-v7a is the device build and the default; x86 is the
+# same sources for the Android emulator, which is qemu with KVM on this host
+# and runs an x86 image at native speed. Every emulator configuration in
+# android/emu.sh, screen, density, cores, memory, driver, runs the x86
+# build, which is how the per-device defaults (android/src/mmo_device_rules.c)
+# are held to a table of devices that are not on this desk. One ABI per
+# invocation; each has its own build directory and its own FreeType
+# (android/freetype.sh), and the APK carries exactly one lib/<abi>.
+ANDROID_ABI ?= armeabi-v7a
+ifeq ($(ANDROID_ABI),armeabi-v7a)
 ANDROID_ARCH ?= armv7a-linux-androideabi
+ABI_NAME     := android-armeabi-v7a
+ABI_SUFFIX   :=
+ELF_MACHINE  := ARM
+else ifeq ($(ANDROID_ABI),x86)
+ANDROID_ARCH ?= i686-linux-android
+ABI_NAME     := android-x86
+ABI_SUFFIX   := -x86
+ELF_MACHINE  := Intel 80386
+else
+$(error ANDROID_ABI must be armeabi-v7a or x86, not '$(ANDROID_ABI)')
+endif
 
 CC := $(NDK_BIN)/$(ANDROID_ARCH)$(ANDROID_API)-clang
 AR := $(NDK_BIN)/llvm-ar
@@ -78,7 +100,7 @@ ifeq ($(shell command -v $(CC) 2>/dev/null),)
 $(error no $(CC); unpack the NDK under $(NDK), or set NDK to where it is)
 endif
 
-BUILD ?= $(NROOT)/build/android$(if $(filter 1,$(RELEASE)),-release)
+BUILD ?= $(NROOT)/build/android$(ABI_SUFFIX)$(if $(filter 1,$(RELEASE)),-release)
 
 # A .so, so TARGET is not an executable name and the link is -shared. The
 # archive keeps the base file's name and is what an app's own entry point
@@ -94,12 +116,24 @@ TARGET := $(BUILD)/libopenmmo.so
 # the host's file interface, it appears in no DS structure, and a 32-bit off_t
 # is a trap waiting on a filesystem with large inodes. bionic honours it from
 # API 24 and this build asks for 26.
+#
+# The same four on x86, where the first two are already the compiler's
+# defaults and cost nothing to state: the point of the list is that the
+# client and the engine agree on it, and abicheck reads both.
 ABI := -fno-short-enums -fsigned-char -fPIC -D_FILE_OFFSET_BITS=64
 
-# What this build calls itself, in every line `abicheck` prints.
-ABI_NAME := android-armeabi-v7a
+# SIXTEEN KILOBYTE PAGES, and this is a load-bearing flag rather than a
+# tidiness one. Android 15 runs on devices whose page size is 16 KB and not
+# the 4 KB every ARM Android had before it; a shared object whose LOAD
+# segments are aligned to 4 KB cannot be mapped on one at all, so the app
+# installs cleanly and then dies in the linker with nothing but the library's
+# name. NDK r27 does NOT do this by default, `llvm-readelf -l` on a library
+# built without the flag prints 0x1000, so it is asked for here and on the
+# fused link below, and `apk` refuses to package a library that came out any
+# other way. It costs padding in the file and nothing at run time.
+PAGEALIGN := -Wl,-z,max-page-size=16384,-z,common-page-size=16384
 
-LDFLAGS := $(ABI) -shared -Wl,-soname,libopenmmo.so
+LDFLAGS := $(ABI) $(PAGEALIGN) -shared -Wl,-soname,libopenmmo.so
 # bionic folds libm, libpthread and libdl into libc; -lm is accepted and empty.
 LDLIBS  := -lm -llog
 
@@ -112,7 +146,19 @@ SDL2_CONFIG := android-sdl2-config
 # the engine tree's to write, the way pc/Makefile.arm was, so `fused` here
 # fails at the missing makefile and `abicheck` says so out loud rather than
 # skipping.
+#
+# On x86 the engine's file is driven through android/engine-x86.mk, which
+# includes it and takes out the three ARM-only lines (the header there says
+# which); the engine checkout is not written.
+ifeq ($(ANDROID_ABI),x86)
+ENGINE_MAKEFILE = $(NROOT)/android/engine-x86.mk
+else
 ENGINE_MAKEFILE = $(ENGINE)/pc/Makefile.android
+endif
+
+# mbedTLS for the device (mmo/Makefile, MBEDTLS_*): the launcher's TLS, built
+# with the app's own ABI flags so its objects and tls.o agree on every struct.
+MBEDTLS_FLAGS := $(ABI) -O2 -std=gnu99 -w
 
 include $(NROOT)/Makefile
 
@@ -142,16 +188,19 @@ androidabi: $(TARGET)
 	@ec=0; \
 	 h="$$($(READELF) -h $(TARGET))"; \
 	 case "$$h" in *"ELF32"*) ;; *) echo "androidabi: NOT 32-bit"; ec=1;; esac; \
-	 case "$$h" in *"Machine:"*"ARM"*) ;; \
-	   *) echo "androidabi: not an ARM machine"; ec=1;; esac; \
+	 case "$$h" in *"Machine:"*"$(ELF_MACHINE)"*) ;; \
+	   *) echo "androidabi: not a $(ELF_MACHINE) machine"; ec=1;; esac; \
 	 case "$$h" in *"DYN ("*) ;; \
 	   *) echo "androidabi: not a shared object, an app cannot load it"; ec=1;; esac; \
-	 e=`$(READELF) -A $(TARGET) 2>/dev/null | \
-	    awk '/ABI_enum_size/ { f = 1 } f && /Description:/ { print $$2; exit }'`; \
-	 case "$$e" in Int32) ;; \
-	   *) echo "androidabi: enums are '$${e:-unstated}', not Int32, -fno-short-enums did not reach the link"; ec=1;; esac; \
-	 v=`$(READELF) -A $(TARGET) 2>/dev/null | \
-	    awk '/ABI_VFP_args/ { f = 1 } f && /Description:/ { print $$2; exit }'`; \
+	 v=; \
+	 if [ "$(ANDROID_ABI)" = armeabi-v7a ]; then \
+	   e=`$(READELF) -A $(TARGET) 2>/dev/null | \
+	      awk '/ABI_enum_size/ { f = 1 } f && /Description:/ { print $$2; exit }'`; \
+	   case "$$e" in Int32) ;; \
+	     *) echo "androidabi: enums are '$${e:-unstated}', not Int32, -fno-short-enums did not reach the link"; ec=1;; esac; \
+	   v=`$(READELF) -A $(TARGET) 2>/dev/null | \
+	      awk '/ABI_VFP_args/ { f = 1 } f && /Description:/ { print $$2; exit }'`; \
+	 fi; \
 	 if $(READELF) --dyn-syms $(TARGET) | grep -q ' JNI_OnLoad$$'; then \
 	   echo "androidabi: this object exports JNI_OnLoad, something Java-shaped got in"; ec=1; fi; \
 	 j=`find $(NROOT) \( -name build -o -name 'build-*' \) -prune -o \
@@ -160,8 +209,12 @@ androidabi: $(TARGET)
 	   echo "androidabi: the java in this tree is not the one doorbell:"; \
 	   printf '%s\n' "$$j" | sed 's/^/androidabi:      /'; ec=1; fi; \
 	 if [ $$ec -eq 0 ]; then \
-	   echo "androidabi: ok, ELF32 ARM shared object, 4-byte enums, one java file"; \
-	   echo "androidabi:      float ABI $${v:-base AAPCS (softfp)}, armeabi-v7a, not armhf"; \
+	   echo "androidabi: ok -- ELF32 $(ELF_MACHINE) shared object, 4-byte enums, one java file"; \
+	   if [ "$(ANDROID_ABI)" = armeabi-v7a ]; then \
+	     echo "androidabi:      float ABI $${v:-base AAPCS (softfp)}, armeabi-v7a, not armhf"; \
+	   else \
+	     echo "androidabi:      $(ANDROID_ABI): the ELF build's own layout, for the emulator"; \
+	   fi; \
 	 fi; \
 	 exit $$ec
 
@@ -184,7 +237,7 @@ bionic:
 	  > $(BUILD)/bionic_probe.c
 	@$(CC) $(filter-out -MMD -MP,$(CFLAGS)) -c \
 	   -o $(BUILD)/bionic_probe.o $(BUILD)/bionic_probe.c
-	@echo " BIONIC time_t 4, off_t 8, s64 4-aligned, enum 4, as the header says"
+	@echo "  BIONIC time_t 4, off_t 8, s64 4-aligned, enum 4, as the header says"
 
 # ============================================================== the app
 #
@@ -205,7 +258,9 @@ bionic:
 APPDIR   := $(NROOT)/android
 APPGLUE  := $(NDK)/sources/android/native_app_glue
 APPOBJ   := $(BUILD)/android
-APPOBJS  := $(APPOBJ)/mmo_android_main.o $(APPOBJ)/android_native_app_glue.o
+APPOBJS  := $(APPOBJ)/mmo_android_main.o $(APPOBJ)/android_native_app_glue.o \
+            $(APPOBJ)/mmo_device.o $(APPOBJ)/mmo_device_rules.o \
+            $(APPOBJ)/mmo_calibrate.o
 #
 # -MMD -MP, FOR THE REASON THE ELF MAKEFILE GIVES AND THIS FILE USED NOT TO.
 # Without them a header edit rebuilds only the .c files that changed, and the
@@ -235,50 +290,121 @@ APPCFLAGS := $(ABI) $(OPT) -std=gnu99 -Wall -MMD -MP -I$(APPGLUE) \
 #
 # FreeType is the one dependency the NDK does not ship: a static armeabi-v7a
 # build unpacked under a prefix, the same arrangement as the NDK itself.
-FT_ANDROID ?= $(HOME)/.local/opt/freetype-android
+FT_ANDROID ?= $(HOME)/.local/opt/freetype-android$(ABI_SUFFIX)
 
 VIEWOBJ  := $(APPOBJ)/viewer
 VIEWSRCS := viewer.c view_geom.c view_font.c view_input.c view_status.c \
             view_hud.c view_ui.c view_ui_draw.c view_ui_chat.c \
             view_ui_game.c view_ui_bar.c view_ui_wins.c view_ui_party.c \
-            view_ui_gtl.c view_ui_mail.c view_ui_theme.c
-VIEWOBJS := $(VIEWSRCS:%.c=$(VIEWOBJ)/%.o) $(APPOBJ)/sdlshim.o \
-            $(APPOBJ)/mmo_frontdoor.o $(APPOBJ)/mmo_update_notice.o
+            view_ui_gtl.c view_ui_mail.c view_ui_theme.c view_ui_skin.c
+# The window's own face, compiled in for the same reason it is on the desktop
+# (mmo/Makefile): the handheld has no folder a player would put one in, and an
+# app that has to be given a font is an app that comes up without one.
+NOTOTTF  := $(NROOT)/res/fonts/NotoSans-Medium.ttf
+NOTOSRC  := $(BUILD)/gen/view_font_noto.c
+VIEWOBJS := $(VIEWSRCS:%.c=$(VIEWOBJ)/%.o) $(VIEWOBJ)/view_font_noto.o \
+            $(APPOBJ)/sdlshim.o \
+            $(APPOBJ)/mmo_frontdoor.o $(APPOBJ)/mmo_frontdoor_launch.o \
+            $(APPOBJ)/mmo_update_notice.o
+# The endpoint pin is on the viewer's path since the bar started reading
+# DEV_FEATURES out of it (view_ui_game.h); this build's gen/ holds one pin
+# of each kind and nothing else, so the directory is safe to name here.
 VIEWCFLAGS := $(ABI) $(OPT) -std=gnu99 -Wall -MMD -MP \
               -I$(NROOT)/android/sdlshim -I$(NROOT)/include \
-              -I$(NROOT)/viewer -I$(FT_ANDROID)/include/freetype2
+              -I$(NROOT)/viewer -I$(FT_ANDROID)/include/freetype2 \
+              -I$(dir $(PIN))
 
 $(VIEWOBJ)/viewer.o: EXTRA_VIEWFLAGS := -Dmain=openmmo_viewer_main
 
-$(VIEWOBJ)/%.o: $(NROOT)/viewer/%.c
+$(VIEWOBJ)/%.o: $(NROOT)/viewer/%.c $(PIN) | ftcheck
 	@mkdir -p $(dir $@)
 	$(CC) $(VIEWCFLAGS) $(EXTRA_VIEWFLAGS) -c -o $@ $<
+
+# THE ONE DEPENDENCY WITH NO PACKAGE, AND IT IS PER-ABI. Without it the build
+# dies in the first viewer translation unit as `'ft2build.h' file not found`,
+# which names neither the library that is missing nor the ABI it is missing
+# for, and the x86 build added on a6c07445 met exactly that, on a machine
+# whose ~/.local/opt had held a FreeType since August: the armeabi-v7a one,
+# and only that one. Order-only, so it is asked before a viewer object is
+# compiled and never rebuilds one.
+.PHONY: ftcheck
+ftcheck:
+	@[ -f $(FT_ANDROID)/lib/libfreetype.a ] || { \
+	   echo "no FreeType for $(ANDROID_ABI) under $(FT_ANDROID)"; \
+	   echo "  build it: $(NROOT)/android/freetype.sh $(ANDROID_ABI)"; \
+	   exit 1; }
+
+$(NOTOSRC): $(NOTOTTF) $(NROOT)/tools/bin2c.py
+	@mkdir -p $(dir $@)
+	@python3 $(NROOT)/tools/bin2c.py $(NOTOTTF) $@ view_ui_noto
+
+$(VIEWOBJ)/view_font_noto.o: $(NOTOSRC)
+	@mkdir -p $(dir $@)
+	$(CC) $(VIEWCFLAGS) -c -o $@ $<
 
 $(APPOBJ)/sdlshim.o: $(NROOT)/android/sdlshim/sdlshim.c
 	@mkdir -p $(dir $@)
 	$(CC) $(VIEWCFLAGS) -c -o $@ $<
 
 # The front door speaks the viewer's language (SDL.h, the ui primitives),
-# so it compiles with the viewer's flags even though it lives with the app.
-$(APPOBJ)/mmo_frontdoor.o: $(NROOT)/android/src/mmo_frontdoor.c
+# so it compiles with the viewer's flags even though it lives with the app;
+# the launcher's headers are on its path for the plan library's names.
+$(APPOBJ)/mmo_frontdoor.o: $(NROOT)/android/src/mmo_frontdoor.c $(PIN)
 	@mkdir -p $(dir $@)
-	$(CC) $(VIEWCFLAGS) -c -o $@ $<
+	$(CC) $(VIEWCFLAGS) -I$(NROOT)/launcher -c -o $@ $<
+
+# The thin half that points the desktop plan library at the app's own
+# directory and turns its answers into the door's sentences.
+$(APPOBJ)/mmo_frontdoor_launch.o: $(NROOT)/android/src/mmo_frontdoor_launch.c \
+                                  $(PIN)
+	@mkdir -p $(dir $@)
+	$(CC) $(VIEWCFLAGS) -I$(NROOT)/launcher -c -o $@ $<
 
 # ------------------------------------------------- reading the channel
 #
-# FOUR FILES OF THE DESKTOP FRONT DOOR, FOR THE HALF OF IT THAT READS. The
-# app cannot update itself, the package installer owns the APK, so none
-# of the patcher comes over: what these four buy is one signed document
-# fetched and verified (mmo_update_latest_revision), which is how the front
-# door learns a newer build exists and offers its player the download.
-# The design notes, "the android channel", says why that is a check and not an
-# update. They are the app's flags, not the viewer's: no SDL, no freetype.
-FEEDSRCS := feed.c feed_verify.c fetch.c update.c
+# FIVE FILES OF THE DESKTOP FRONT DOOR, FOR THE HALF OF IT THAT FETCHES. The
+# app cannot rewrite itself, the package installer owns the APK, so the
+# file-by-file patcher never runs here: what these buy is the signed channel
+# read (mmo_update_latest_revision), which is how the front door learns a
+# newer build exists, and the one-file fetch (mmo_update_fetch_package) that
+# brings the new APK down proven against the signed hash for the installer
+# to put in place. The design notes, "the android channel", is the account. They
+# are the app's flags, not the viewer's: no SDL, no freetype.
+FEEDSRCS := feed.c feed_verify.c fetch.c update.c tls.c
 FEEDOBJS := $(FEEDSRCS:%.c=$(APPOBJ)/feed/%.o)
 
 $(APPOBJ)/feed/%.o: $(NROOT)/launcher/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(APPCFLAGS) -I$(NROOT)/launcher -c -o $@ $<
+	$(CC) $(APPCFLAGS) -I$(NROOT)/launcher $(MBEDTLS_CFLAGS) -I$(BUILD)/gen \
+	    -c -o $@ $<
+
+# tls.c compiles the roots in and reads the library's configuration.
+$(APPOBJ)/feed/tls.o: $(ROOTSGEN) $(MBEDTLS_CONF)
+
+# THREE MORE OF THE DESKTOP FRONT DOOR, FOR THE HALF THAT PLAYS. The plan
+# library names the offline save, writes a session down, adopts the image a
+# session leaves on its way out, offers that save back and puts an earlier
+# one back; the sound composer builds a soundtrack package out of the player's
+# own cartridges, and the follower one fills the Pokemon that walks behind them
+# out of the same cartridge. All three are plain C over files, so the device
+# links the desktop's own files rather than a copy that could drift
+# (mmo_frontdoor_launch.c is what points them at the app's directory). Their
+# tables live in src/, hence the second include.
+PLANSRCS := launch_plan.c nitrorom.c soundcompose.c followcompose.c \
+            speciescompose.c
+PLANOBJS := $(PLANSRCS:%.c=$(APPOBJ)/plan/%.o)
+
+$(APPOBJ)/plan/%.o: $(NROOT)/launcher/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(APPCFLAGS) -I$(NROOT)/launcher -I$(NROOT)/src \
+	    -I$(NROOT)/mods/openmmo/include -c -o $@ $<
+
+# The species fill composes a Gen 5 battle sprite, which is the plugin's own
+# arithmetic (blackcompose.h) rather than a second copy of it, but the object
+# is NOT built here: src/ is globbed into libopenmmo.a, which this app already
+# links, so compiling it again put every mmo_black_* symbol in twice and the
+# APK would not link. The desktop launcher names its sources one by one and
+# does have to add it (mmo/Makefile).
 
 # The notice speaks both languages, the viewer's primitives to draw the
 # panel, the launcher's headers to ask the question, so it takes the
@@ -288,8 +414,23 @@ $(APPOBJ)/feed/%.o: $(NROOT)/launcher/%.c
 # versionCode, because there is nothing on a device to read it back out of:
 # the desktop parses revision.txt beside the install and an app has no
 # install. Zero (a working tree with no git) asks nothing at all.
+#
+# THE REVISION IS A DEPENDENCY, NOT JUST A FLAG. -D on the compile line does
+# not make an object rebuild when its value changes, and the feed pin beside
+# it only rewrites itself when the URL or the key moves, so a commit in
+# between two builds left the notice compiled at the OLD count while the
+# manifest carried the new one (v1185 saying r1184, on the RG556, 09-07). A
+# release in that state is an app that reads its own channel as newer and
+# offers itself as an update on every start. The stamp below holds the
+# number and changes only when the number does.
+APK_REVSTAMP := $(BUILD)/gen/apk_revision.stamp
+$(APK_REVSTAMP): FORCE
+	@mkdir -p $(dir $@)
+	@printf '%s\n' '$(APK_REVISION)' > $@.new
+	@if cmp -s $@.new $@; then rm -f $@.new; else mv -f $@.new $@; fi
+
 $(APPOBJ)/mmo_update_notice.o: $(NROOT)/android/src/mmo_update_notice.c \
-                               $(FEEDPIN)
+                               $(FEEDPIN) $(APK_REVSTAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(VIEWCFLAGS) -I$(NROOT)/launcher -I$(dir $(FEEDPIN)) \
 	    -DOPENMMO_APK_REVISION=$(APK_REVISION) -c -o $@ $<
@@ -298,16 +439,22 @@ $(APPOBJ)/mmo_update_notice.o: $(NROOT)/android/src/mmo_update_notice.c \
 # names EXTRA_OBJS as '$(LIB) $(EXTRA_FUSED_OBJS)', and an archive resolves
 # nothing for an object listed after it. The feed objects sit with them for
 # the same reason, they need $(LIB)'s sockets and sha256.
-EXTRA_FUSED_OBJS := $(APPOBJS) $(VIEWOBJS) $(FEEDOBJS) $(LIB) \
+EXTRA_FUSED_OBJS := $(APPOBJS) $(VIEWOBJS) $(FEEDOBJS) $(MBEDTLS_LIB) \
+                    $(PLANOBJS) $(LIB) \
                     $(FT_ANDROID)/lib/libfreetype.a
 FUSED_NAME := libpokeplatinum.so
-FUSEDVARS += EXTRA_LDLIBS='-lEGL -lGLESv2 -laaudio'
+FUSEDVARS += EXTRA_LDLIBS='-lEGL -lGLESv2 -laaudio $(PAGEALIGN)'
 # THE ONLY SYMBOL THE PLATFORM LOOKS UP IN THIS LIBRARY. NativeActivity
 # dlsyms it and calls it; everything else in here talks to everything else
 # in here, inside one link, and must stay invisible, an exported name is a
 # name bionic itself might bind to, and the engine has thousands that
 # collide with a C library's (see the engine makefile's EXPORTS).
 FUSEDVARS += EXPORTS=ANativeActivity_onCreate
+# The x86 wrapper needs to know where the engine is; after the include,
+# because the base file assigns FUSEDVARS with = and would drop an earlier +=.
+ifeq ($(ANDROID_ABI),x86)
+FUSEDVARS += OPENMMO_ENGINE=$(ENGINE)
+endif
 
 $(APPOBJ)/%.o: $(APPDIR)/src/%.c
 	@mkdir -p $(dir $@)
@@ -317,15 +464,17 @@ $(APPOBJ)/android_native_app_glue.o: $(APPGLUE)/android_native_app_glue.c
 	@mkdir -p $(dir $@)
 	$(CC) $(APPCFLAGS) -Wno-deprecated-declarations -c -o $@ $<
 
-.PHONY: appobjs viewobjs feedobjs
+.PHONY: appobjs viewobjs feedobjs planobjs
 appobjs: $(APPOBJS)
 viewobjs: $(VIEWOBJS)
 feedobjs: $(FEEDOBJS)
+planobjs: $(PLANOBJS)
 
 # The .d files the flags above emit: one per object, listing every header it
 # read. Without this include they are written and never consulted, which is
 # the same as not having them.
-ANDROID_DEPS := $(APPOBJS:.o=.d) $(VIEWOBJS:.o=.d) $(FEEDOBJS:.o=.d)
+ANDROID_DEPS := $(APPOBJS:.o=.d) $(VIEWOBJS:.o=.d) $(FEEDOBJS:.o=.d) \
+                $(PLANOBJS:.o=.d)
 -include $(ANDROID_DEPS)
 
 # ------------------------------------------------------------ packaging
@@ -334,13 +483,33 @@ ANDROID_DEPS := $(APPOBJS:.o=.d) $(VIEWOBJS:.o=.d) $(FEEDOBJS:.o=.d)
 # privilege, the same arrangement as the NDK. No Gradle: there is no Java to
 # compile, so there is nothing for it to do that these three do not.
 SDK        ?= $(HOME)/.local/opt/android-sdk
-SDK_BT     ?= $(SDK)/build-tools/34.0.0
-SDK_JAR    ?= $(SDK)/platforms/android-34/android.jar
+SDK_BT     ?= $(SDK)/build-tools/35.0.0
+SDK_JAR    ?= $(SDK)/platforms/android-35/android.jar
 AAPT2      ?= $(SDK_BT)/aapt2
 ZIPALIGN   ?= $(SDK_BT)/zipalign
 APKSIGNER  ?= $(SDK_BT)/apksigner
 MIN_SDK    ?= 26
-TARGET_SDK ?= 28
+
+# TARGET_SDK IS WHY THE INSTALLER CALLED THIS APP UNSAFE, and it was 28 for
+# years on the theory that raising it was scoped storage's problem to solve
+# first. That reason is gone: the cartridge has come through the system
+# document picker since ddc6229e and no storage permission is asked for at
+# all, which IS the scoped-storage answer.
+#
+# What it cost meanwhile: Play Protect warns whenever an app targets more
+# than two API levels below the device's own, so 28 has been drawing "this
+# app was built for an older version of Android and doesn't have the latest
+# privacy protections" on everything since Android 12, and the wording is
+# read, correctly, as the system saying the app is not to be trusted.
+# Google Play has required 35 of every upload since 2026-08-31 besides.
+#
+# 35 AND NOT 36, deliberately. 36 clears the same warning and one more year
+# of it, but it also makes Android ignore an activity's screenOrientation on
+# any screen at least 600dp wide, and this app asks for landscape because
+# every layout in it is built for a wide surface. The RG556 is 429dp so it
+# would hold there today, but taking that risk buys a year that a later bump
+# buys just as well.
+TARGET_SDK ?= 35
 
 APK      := $(BUILD)/openmmo.apk
 APKSTAGE := $(BUILD)/apk
@@ -473,6 +642,12 @@ apk-live:
 # unstripped one is 48 MB of which 44 are debug info no phone can use and
 # every install has to carry; the armhf kit strips for the same reason.
 APKRES := $(shell find $(APPDIR)/res -type f 2>/dev/null)
+# THE DOOR'S ART, packed as assets. The front door reads bg.png and
+# wordmark.png from <external>/launcher first, which nobody has ever pushed
+# to a device, and then out of the package (mmo_frontdoor_assets); without
+# this the door drew a flat ground and the word OPENMMO where the desktop
+# launcher draws the painting and the wordmark.
+LAUNCHART := $(NROOT)/res/launcher/bg.png $(NROOT)/res/launcher/wordmark.png
 
 # ---------------------------------------------------------- the one class
 #
@@ -482,6 +657,8 @@ APKRES := $(shell find $(APPDIR)/res -type f 2>/dev/null)
 # and fed with MANAGE_EXTERNAL_STORAGE, the permission a store listing has to
 # apologise for. One small subclass hears the result and writes it to a file
 # the C side polls; the java/ directory holds it and may never hold more.
+# The package installer is the same shape (a session object, a verdict that
+# arrives as an Intent) and rings the same bell: installApk in that class.
 #
 # -parameters is LOAD-BEARING, not style: javac 21 without it emits the
 # anonymous Runnable with a nameless parameter entry and this d8 dies on it
@@ -498,7 +675,8 @@ $(BUILD)/classes.dex: $(JAVA_SRC)
 	   $(BUILD)/classes/org/openmmo/handheld/*.class
 	@echo "  DEX     $@"
 
-$(APK): $(APPOBJS) $(VIEWOBJS) $(FEEDOBJS) $(SIGN_DEP) $(APKRES) \
+$(APK): $(APPOBJS) $(VIEWOBJS) $(FEEDOBJS) $(MBEDTLS_LIB) $(PLANOBJS) \
+        $(SIGN_DEP) $(APKRES) $(LAUNCHART) \
         $(BUILD)/classes.dex FORCE
 	@$(MAKE) -s -f $(firstword $(MAKEFILE_LIST)) fused
 	@# A TRANSLATION UNIT THE COMPILER REFUSED IS NOT A WARNING HERE. The
@@ -517,8 +695,8 @@ $(APK): $(APPOBJS) $(VIEWOBJS) $(FEEDOBJS) $(SIGN_DEP) $(APKRES) \
 	@# divide-by-zero wrapper dropped by an EXTRA_OBJS override.
 	@$(MAKE) -s -f $(ENGINE_MAKEFILE) BUILD=$(FUSED) $(FUSEDVARS) nound
 	@rm -rf $(APKSTAGE)
-	@mkdir -p $(APKSTAGE)/lib/armeabi-v7a
-	@$(NDK_BIN)/llvm-strip -o $(APKSTAGE)/lib/armeabi-v7a/libpokeplatinum.so \
+	@mkdir -p $(APKSTAGE)/lib/$(ANDROID_ABI)
+	@$(NDK_BIN)/llvm-strip -o $(APKSTAGE)/lib/$(ANDROID_ABI)/libpokeplatinum.so \
 	    $(FUSED)/libpokeplatinum.so
 	@# THE RESOURCES, which this APK had none of until it had an icon. aapt2
 	@# is two passes by design: compile turns the res tree into its own
@@ -527,6 +705,8 @@ $(APK): $(APPOBJS) $(VIEWOBJS) $(FEEDOBJS) $(SIGN_DEP) $(APKRES) \
 	@# input only, and the error it gives for a raw png names the file and
 	@# not the reason.
 	@$(AAPT2) compile --dir $(APPDIR)/res -o $(BUILD)/res.zip
+	@rm -rf $(BUILD)/assets && mkdir -p $(BUILD)/assets/launcher
+	@cp $(LAUNCHART) $(BUILD)/assets/launcher/
 	@# THE VERSION A STORE ORDERS UPDATES BY. The manifest carries 1, and a
 	@# store will not take a second upload at the same versionCode, so a
 	@# hardcoded one means exactly one release, ever. The revision is the
@@ -537,14 +717,37 @@ $(APK): $(APPOBJS) $(VIEWOBJS) $(FEEDOBJS) $(SIGN_DEP) $(APKRES) \
 	@# ones.
 	@$(AAPT2) link -o $(APK).unaligned \
 	    --manifest $(APPDIR)/AndroidManifest.xml \
-	    -R $(BUILD)/res.zip --auto-add-overlay \
+	    -R $(BUILD)/res.zip --auto-add-overlay -A $(BUILD)/assets \
 	    -I $(SDK_JAR) \
 	    --version-code $(APK_VERSION_CODE) \
 	    --version-name $(APK_VERSION_NAME) --replace-version \
 	    --min-sdk-version $(MIN_SDK) --target-sdk-version $(TARGET_SDK)
-	@cd $(APKSTAGE) && zip -q -r $(APK).unaligned lib
+	@# THE LIBRARY GOES IN STORED, NOT DEFLATED, and that pairs with the
+	@# targetSdk above rather than being a size choice. From API 30
+	@# android:extractNativeLibs defaults to FALSE, so the platform stops
+	@# unpacking a copy into the app's directory and maps the library
+	@# straight out of the package, which it can only do if the entry is
+	@# uncompressed and starts on a page boundary. Left deflated, the bump
+	@# to 35 would install and then fail to load. `-0` stores it; the
+	@# classes.dex beside it is small and stays compressed.
+	@cd $(APKSTAGE) && zip -q -r -0 $(APK).unaligned lib
 	@cd $(BUILD) && zip -q -j $(APK).unaligned classes.dex
-	@$(ZIPALIGN) -f 4 $(APK).unaligned $(APK).aligned
+	@# -P 16 aligns the stored library on a 16 KB boundary, which is the
+	@# packaging half of PAGEALIGN's linking half. Both are needed and
+	@# neither is enough alone.
+	@$(ZIPALIGN) -f -P 16 4 $(APK).unaligned $(APK).aligned
+	@# AND BOTH HALVES ARE CHECKED, because each fails the same silent way:
+	@# an APK that installs and dies in the linker naming only the library.
+	@a=$$($(NDK_BIN)/llvm-readelf -lW \
+	        $(APKSTAGE)/lib/$(ANDROID_ABI)/libpokeplatinum.so \
+	      | awk '/LOAD/ { print $$NF }' | sort -u); \
+	 if [ "$$a" != "0x4000" ]; then \
+	   echo "apk: the library's LOAD segments are aligned $$a, not 0x4000."; \
+	   echo "apk: a 16 KB-page device (Android 15 and later) cannot map it."; \
+	   echo "apk: PAGEALIGN did not reach the fused link."; exit 1; fi
+	@$(ZIPALIGN) -c -P 16 4 $(APK).aligned >/dev/null || { \
+	   echo "apk: the library is not 16 KB-aligned inside the package."; \
+	   exit 1; }
 	@# NO --key-pass, and that is not an omission. apksigner's `file:` reader
 	@# takes ONE LINE PER PASSWORD from the same file in order, so handing it
 	@# the same one-line file twice makes the second read run off the end:

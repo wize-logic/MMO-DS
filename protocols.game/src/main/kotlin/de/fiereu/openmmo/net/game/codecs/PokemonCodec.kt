@@ -3,6 +3,8 @@ package de.fiereu.openmmo.net.game.codecs
 import de.fiereu.bytecodec.*
 import de.fiereu.openmmo.common.ContestConditions
 import de.fiereu.openmmo.common.ContestType
+import de.fiereu.openmmo.common.MAX_FRIENDSHIP
+import de.fiereu.openmmo.common.MON_STATUS_MASK
 import de.fiereu.openmmo.common.Pokemon
 import de.fiereu.openmmo.common.PokemonMove
 import de.fiereu.openmmo.common.enums.*
@@ -14,6 +16,26 @@ private const val TAIL_TAG_SUPER_CONTEST_RIBBONS = 1
 private const val TAIL_TAG_CAUGHT_WHERE = 2
 
 private const val CAUGHT_WHERE_BYTES = 6
+
+/** The item the monster is carrying, one little-endian 16-bit wire item id. */
+private const val TAIL_TAG_HELD_ITEM = 3
+
+private const val HELD_ITEM_BYTES = 2
+
+/**
+ * The engine's own location label for where the monster was caught, one little-endian 16-bit value.
+ */
+private const val TAIL_TAG_CAUGHT_LABEL = 4
+
+private const val CAUGHT_LABEL_BYTES = 2
+
+/**
+ * What the monster is suffering from, one little-endian 16-bit copy of the client engine's own
+ * condition word.
+ */
+private const val TAIL_TAG_STATUS = 5
+
+private const val STATUS_BYTES = 2
 
 /**
  * A monster with no ribbons and no recorded catch place writes no tail at all, so every record this
@@ -40,6 +62,31 @@ private fun encodeTail(p: Pokemon): ByteArray {
       out.add(((v shr 8) and 0xFF).toByte())
     }
   }
+  // Nothing held writes no entry, so a record for a monster carrying nothing is byte-for-byte
+  // what it was before this tag existed.
+  if (p.heldItemId != 0) {
+    out.add(TAIL_TAG_HELD_ITEM.toByte())
+    out.add(HELD_ITEM_BYTES.toByte())
+    out.add((p.heldItemId and 0xFF).toByte())
+    out.add(((p.heldItemId shr 8) and 0xFF).toByte())
+  }
+  // Label 0 is the one the game draws as the Mystery Zone, which is what a record with no entry
+  // already gets, so writing it would say nothing and cost two bytes on every monster.
+  if (p.caughtLocationLabel != 0) {
+    out.add(TAIL_TAG_CAUGHT_LABEL.toByte())
+    out.add(CAUGHT_LABEL_BYTES.toByte())
+    out.add((p.caughtLocationLabel and 0xFF).toByte())
+    out.add(((p.caughtLocationLabel shr 8) and 0xFF).toByte())
+  }
+  // A healthy monster writes no entry, so its record is byte-for-byte what it was before this tag
+  // existed, which is what nearly every record is.
+  val status = p.status and MON_STATUS_MASK
+  if (status != 0) {
+    out.add(TAIL_TAG_STATUS.toByte())
+    out.add(STATUS_BYTES.toByte())
+    out.add((status and 0xFF).toByte())
+    out.add(((status shr 8) and 0xFF).toByte())
+  }
   return out.toByteArray()
 }
 
@@ -65,6 +112,24 @@ private fun decodeSuperContestRibbons(tail: ByteArray): Long {
     bits = (bits shl 8) or (v[i].toLong() and 0xFF)
   }
   return bits
+}
+
+/** The wire item id the monster is carrying, or 0 where the record carries none. */
+private fun decodeHeldItem(tail: ByteArray): Int {
+  val v = tailEntry(tail, TAIL_TAG_HELD_ITEM, HELD_ITEM_BYTES) ?: return 0
+  return (v[0].toInt() and 0xFF) or ((v[1].toInt() and 0xFF) shl 8)
+}
+
+/** The location label the record carries, or 0 where it carries none. */
+private fun decodeCaughtLabel(tail: ByteArray): Int {
+  val v = tailEntry(tail, TAIL_TAG_CAUGHT_LABEL, CAUGHT_LABEL_BYTES) ?: return 0
+  return (v[0].toInt() and 0xFF) or ((v[1].toInt() and 0xFF) shl 8)
+}
+
+/** The engine condition word the record carries, or 0 for a healthy monster. */
+private fun decodeStatus(tail: ByteArray): Int {
+  val v = tailEntry(tail, TAIL_TAG_STATUS, STATUS_BYTES) ?: return 0
+  return ((v[0].toInt() and 0xFF) or ((v[1].toInt() and 0xFF) shl 8)) and MON_STATUS_MASK
 }
 
 /** region, bank, map, or three -1s where the record carries no place. */
@@ -132,9 +197,9 @@ object PokemonCodec : PacketCodec<Pokemon>() {
     // Two bits per move slot: the PP Ups applied to it. The client's max PP for a move is
     // base + floor(base * 0.2 * ups), so a monster with PP Ups shows short PP without this.
     field(U8) { 0 }
-    // Friendship. The client's summary draws it as a percentage of 255; not modelled here, so every
-    // monster goes out at the value the captures carry.
-    field(S16LE) { 50 }
+    // Friendship. The client's summary draws it as a percentage of 255, and the engine reads
+    // it for an evolution at 220 and for the power of Return and Frustration.
+    val friendship = field(S16LE) { it.friendship.toShort() }
     // Four slots always go on the wire, so a monster holding fewer writes empty ones. Only the
     // starter is padded when it is built; one caught from the wild keeps the one or two moves
     // it had, and indexing blind here threw mid-encode and shipped a malformed character list.
@@ -205,6 +270,10 @@ object PokemonCodec : PacketCodec<Pokemon>() {
         caughtRegionId = caughtRegionId,
         caughtBankId = caughtBankId,
         caughtMapId = caughtMapId,
+        caughtLocationLabel = decodeCaughtLabel(tail),
+        friendship = friendship.toInt().coerceIn(0, MAX_FRIENDSHIP),
+        heldItemId = decodeHeldItem(tail),
+        status = decodeStatus(tail),
     )
   }
 }

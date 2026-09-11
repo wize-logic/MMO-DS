@@ -2,6 +2,7 @@ package de.fiereu.openmmo.trainer
 
 import de.fiereu.openmmo.common.enums.Region
 import de.fiereu.openmmo.trainer.generated.GeneratedHoennTrainers
+import de.fiereu.openmmo.trainer.generated.GeneratedJohtoTrainers
 import de.fiereu.openmmo.trainer.generated.GeneratedKantoTrainers
 import de.fiereu.openmmo.trainer.generated.GeneratedSinnohTrainers
 import java.util.concurrent.ConcurrentHashMap
@@ -30,6 +31,13 @@ data class TrainerDef(
      * bitfield the script layer owns instead.
      */
     val defeatedFlag: String = "",
+    /**
+     * The story key of the badge beating this trainer earns, or "" for the many who hand out
+     * nothing: a gym leader's, read out of the gym script that says `GiveBadge` (HeartGold's
+     * leaders, whose fights this server plays), the Sinnoh leaders' badges come from the story
+     * scripts instead and leave this empty.
+     */
+    val badge: String = "",
 )
 
 private data class TrainerKey(val region: Region, val id: Int)
@@ -45,6 +53,7 @@ class TrainerRegistry @Inject constructor() {
 
   init {
     GeneratedHoennTrainers.loadInto(this)
+    GeneratedJohtoTrainers.loadInto(this)
     GeneratedKantoTrainers.loadInto(this)
     GeneratedSinnohTrainers.loadInto(this)
   }

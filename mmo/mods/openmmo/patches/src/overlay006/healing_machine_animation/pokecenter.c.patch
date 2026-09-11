@@ -1,0 +1,40 @@
+--- a/src/overlay006/healing_machine_animation/pokecenter.c
++++ b/src/overlay006/healing_machine_animation/pokecenter.c
+@@ -40,6 +40,18 @@
+ 
+ void FieldSystem_PlayHealingAnimation_Pokecenter(FieldSystem *fieldSystem, const u8 pokeballCount)
+ {
++    /* A room that came from the other cartridge plays that cartridge's own
++     * scene: its tray, its ball model, its offsets. This game's version
++     * would place its balls against a model they were never measured for
++     * (openmmo_healanim.c carries the derivation). */
++    {
++        extern int openmmo_hg_healanim(FieldSystem *fieldSystem, int count);
++
++        if (openmmo_hg_healanim(fieldSystem, pokeballCount)) {
++            return;
++        }
++    }
++
+     BOOL mapPropFound;
+     MapProp *healingMachine;
+     int mapMatrixIndex;
+@@ -89,11 +101,15 @@
+ 
+         MapPropOneShotAnimationManager_LoadPropAnimations(fieldSystem->mapPropAnimMan, fieldSystem->mapPropOneShotAnimMan, HEALING_MACHINE_ANIMATION_POKEBALL_TAG, pokecenter_healing_machine_mini_pokeball_nsbmd, NULL, pokeballModel, AreaDataManager_GetMapPropTexture(fieldSystem->areaDataManager), 1, 1, 0);
+ 
++        // A ported center's machine has no separate TV prop: the balls
++        // still fly, and the screen half of the show is skipped. The
++        // one-shot manager already answers a never-loaded tag as finished.
+         screenFound = FieldSystem_FindLoadedMapPropByModelID(fieldSystem, pokecenter_healing_machine_tv_nsbmd, &screenMapProp, NULL);
+-        GF_ASSERT(screenFound);
+-        screenRenderObj = MapProp_GetRenderObj(screenMapProp);
++        if (screenFound) {
++            screenRenderObj = MapProp_GetRenderObj(screenMapProp);
+ 
+-        MapPropOneShotAnimationManager_LoadPropAnimations(fieldSystem->mapPropAnimMan, fieldSystem->mapPropOneShotAnimMan, HEALING_MACHINE_ANIMATION_SCREEN_TAG, pokecenter_healing_machine_tv_nsbmd, screenRenderObj, screenModel, AreaDataManager_GetMapPropTexture(fieldSystem->areaDataManager), 1, 1, 0);
++            MapPropOneShotAnimationManager_LoadPropAnimations(fieldSystem->mapPropAnimMan, fieldSystem->mapPropOneShotAnimMan, HEALING_MACHINE_ANIMATION_SCREEN_TAG, pokecenter_healing_machine_tv_nsbmd, screenRenderObj, screenModel, AreaDataManager_GetMapPropTexture(fieldSystem->areaDataManager), 1, 1, 0);
++        }
+         (animation->state)++;
+         break;
+     }

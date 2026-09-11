@@ -1,0 +1,56 @@
+--- a/src/message.c
++++ b/src/message.c
+@@ -287,6 +287,17 @@
+ 
+ void MessageLoader_GetString(const MessageLoader *loader, u32 entryID, String *string)
+ {
++    /* openmmo: a fill appends the ported species names after the bank's two
++     * egg names, so on that bank the entry is not the species id. Every door to
++     * the bank comes through here, the summary's template, a new monster's
++     * default name, the box, the dex, so this is the one place to say so;
++     * on any other bank, or without a fill, the entry is the caller's. */
++    {
++        extern u32 openmmo_message_entry(u32 narcID, u32 bankID, u32 entryID);
++
++        entryID = openmmo_message_entry(loader->narcID, loader->bankID, entryID);
++    }
++
+     switch (loader->mode) {
+     case MSG_LOADER_PRELOAD_ENTIRE_BANK:
+         MessageBank_GetString(loader->bank, entryID, string);
+@@ -299,6 +310,17 @@
+ 
+ String *MessageLoader_GetNewString(const MessageLoader *loader, u32 entryID)
+ {
++    /* openmmo: a fill appends the ported species names after the bank's two
++     * egg names, so on that bank the entry is not the species id. Every door to
++     * the bank comes through here, the summary's template, a new monster's
++     * default name, the box, the dex, so this is the one place to say so;
++     * on any other bank, or without a fill, the entry is the caller's. */
++    {
++        extern u32 openmmo_message_entry(u32 narcID, u32 bankID, u32 entryID);
++
++        entryID = openmmo_message_entry(loader->narcID, loader->bankID, entryID);
++    }
++
+     switch (loader->mode) {
+     case MSG_LOADER_PRELOAD_ENTIRE_BANK:
+         return MessageBank_GetNewString(loader->bank, entryID, loader->heapID);
+@@ -323,6 +345,17 @@
+ 
+ void MessageLoader_Get(const MessageLoader *loader, u32 entryID, charcode_t *dst)
+ {
++    /* openmmo: a fill appends the ported species names after the bank's two
++     * egg names, so on that bank the entry is not the species id. Every door to
++     * the bank comes through here, the summary's template, a new monster's
++     * default name, the box, the dex, so this is the one place to say so;
++     * on any other bank, or without a fill, the entry is the caller's. */
++    {
++        extern u32 openmmo_message_entry(u32 narcID, u32 bankID, u32 entryID);
++
++        entryID = openmmo_message_entry(loader->narcID, loader->bankID, entryID);
++    }
++
+     switch (loader->mode) {
+     case MSG_LOADER_PRELOAD_ENTIRE_BANK:
+         MessageBank_Get(loader->bank, entryID, dst);

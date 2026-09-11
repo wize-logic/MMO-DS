@@ -1,8 +1,8 @@
 package de.fiereu.openmmo.common.enums
 
 /**
- * The abilities of the generation this server hosts, in the game's own order: an ability's ordinal
- * here is its id there.
+ * The abilities the species table names, in the game's own order: an ability's ordinal here is its
+ * id there.
  */
 enum class Ability {
   NONE,
@@ -129,4 +129,45 @@ enum class Ability {
   MULTITYPE,
   FLOWER_GIFT,
   BAD_DREAMS,
+  PICKPOCKET,
+  SHEER_FORCE,
+  CONTRARY,
+  UNNERVE,
+  DEFIANT,
+  DEFEATIST,
+  CURSED_BODY,
+  HEALER,
+  FRIEND_GUARD,
+  WEAK_ARMOR,
+  HEAVY_METAL,
+  LIGHT_METAL,
+  MULTISCALE,
+  TOXIC_BOOST,
+  FLARE_BOOST,
+  HARVEST,
+  TELEPATHY,
+  MOODY,
+  OVERCOAT,
+  POISON_TOUCH,
+  REGENERATOR,
+  BIG_PECKS,
+  SAND_RUSH,
+  WONDER_SKIN,
+  ANALYTIC,
+  ILLUSION,
+  IMPOSTER,
+  INFILTRATOR,
+  MUMMY,
+  MOXIE,
+  JUSTIFIED,
+  RATTLED,
+  MAGIC_BOUNCE,
+  SAP_SIPPER,
+  PRANKSTER,
+  SAND_FORCE,
+  IRON_BARBS,
+  ZEN_MODE,
+  VICTORY_STAR,
+  TURBOBLAZE,
+  TERAVOLT,
 }

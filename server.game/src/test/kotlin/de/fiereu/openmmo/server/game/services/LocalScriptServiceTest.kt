@@ -2,8 +2,11 @@ package de.fiereu.openmmo.server.game.services
 
 import de.fiereu.network.PacketEvent
 import de.fiereu.openmmo.common.ContestConditions
+import de.fiereu.openmmo.common.Pokemon
+import de.fiereu.openmmo.common.PokemonMove
 import de.fiereu.openmmo.common.enums.CharacterGender
 import de.fiereu.openmmo.common.enums.Direction
+import de.fiereu.openmmo.common.enums.EVs
 import de.fiereu.openmmo.common.enums.IVs
 import de.fiereu.openmmo.common.enums.PokemonContainer
 import de.fiereu.openmmo.common.enums.PokemonNature
@@ -28,25 +31,37 @@ import de.fiereu.openmmo.net.game.packets.ScriptGrantPacket
 import de.fiereu.openmmo.net.game.packets.ScriptStatePacket
 import de.fiereu.openmmo.net.game.packets.ScriptVarEntry
 import de.fiereu.openmmo.net.game.packets.ScriptWarpArrivedPacket
+import de.fiereu.openmmo.pokemon.EvolutionRegistry
 import de.fiereu.openmmo.pokemon.LearnsetRegistry
+import de.fiereu.openmmo.pokemon.MoveSourceRegistry
 import de.fiereu.openmmo.pokemon.SpeciesRegistry
+import de.fiereu.openmmo.server.game.battle.BattleRegistry
 import de.fiereu.openmmo.server.game.battle.BattleRng
 import de.fiereu.openmmo.server.game.battle.ExpCurves
 import de.fiereu.openmmo.server.game.battle.StatCalculator
 import de.fiereu.openmmo.server.game.battle.WildMonFactory
+import de.fiereu.openmmo.server.game.offline.verify.ReplayVerdict
+import de.fiereu.openmmo.server.game.script.Badge
 import de.fiereu.openmmo.server.game.session.CLIENT_RUNS_SCRIPTS
 import de.fiereu.openmmo.server.game.session.SessionRegistry
 import de.fiereu.openmmo.server.game.storage.CharacterStore
 import de.fiereu.openmmo.server.game.storage.EntityIdService
+import de.fiereu.openmmo.server.game.storage.ImportRecord
+import de.fiereu.openmmo.server.game.storage.ImportRepository
+import de.fiereu.openmmo.server.game.storage.InMemoryImportRepository
 import de.fiereu.openmmo.server.game.storage.InMemorySaveBlockRepository
 import de.fiereu.openmmo.server.game.testsupport.FakeCharacterRepository
 import de.fiereu.openmmo.server.game.testsupport.FakeSession
+import de.fiereu.openmmo.server.game.testsupport.fieldMoveService
+import de.fiereu.openmmo.server.game.testsupport.staticEncounterService
 import de.fiereu.openmmo.server.game.testsupport.testGameConfig
 import de.fiereu.openmmo.server.game.world.WarpNeighbours
 import de.fiereu.openmmo.server.game.world.interest.InterestManager
 import de.fiereu.openmmo.server.game.world.interest.PassThroughInterestPolicy
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import java.time.LocalDateTime
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 
@@ -64,6 +79,7 @@ class LocalScriptServiceTest :
           levelsGained: Int = 30,
           contestPointsGained: Int = 1_000,
           ribbonsWon: Int = 4,
+          friendshipGained: Int = 500,
       ) =
           GrantBudget(
               GrantBudget.Limits(
@@ -73,22 +89,72 @@ class LocalScriptServiceTest :
                   levelsGained = levelsGained,
                   contestPointsGained = contestPointsGained,
                   ribbonsWon = ribbonsWon,
+                  friendshipGained = friendshipGained,
               ),
           ) {
             0L
           }
 
+      // Heatran, which is a static site in this game, and a Bidoof, which is every route.
+      val HEATRAN = 485
+      val BIDOOF = 399
+
+      /** A capture report of one species, as the client's engine sends one. */
+      fun grantOf(dexId: Int) =
+          ScriptGrantPacket(
+              dexId = dexId,
+              level = 50,
+              hp = -1,
+              container = 1,
+              slot = -1,
+              seed = 0,
+              ivBits = 0,
+              isShiny = false,
+              nickname = "",
+          )
+
+      /** An import standing on a character: the shape, not the contents, is what is read. */
+      fun importRow(characterId: Long) =
+          ImportRecord(
+              id = 1,
+              characterId = characterId,
+              importedAt = LocalDateTime.of(2026, 9, 6, 12, 0),
+              playTimeSeconds = 3600,
+              saveSha256 = "a".repeat(64),
+              clientRevision = 7,
+              trainerId = 42,
+              partyCount = 1,
+              boxCount = 0,
+              speciesCount = 1,
+              levelTotal = 50,
+              levelMax = 50,
+              moneyBefore = 0,
+              moneyAfter = 0,
+              badgesBefore = 0,
+              badgesAfter = 8,
+              verdicts = emptyList(),
+              snapshotVersion = 1,
+          )
+
       fun service(
           store: CharacterStore,
           maps: MapManager,
           budget: GrantBudget = budget(),
+          battles: BattleRegistry = BattleRegistry(),
+          // The two the capture path asks about provenance: which static site's fight this catch
+          // belongs to, and whether the character is standing on an import nobody has replayed.
+          statics: StaticEncounterService? = null,
+          imports: ImportRepository = InMemoryImportRepository(),
       ) =
           LocalScriptService(
               StoryService(store),
               store,
               maps,
               PresenceService(
-                  InterestManager(), PassThroughInterestPolicy(), MapLoadService(maps), store),
+                  InterestManager(),
+                  PassThroughInterestPolicy(),
+                  MapLoadService(maps, SpeciesRegistry()),
+                  store),
               StoryPlayerService(
                   store,
                   WildMonFactory(
@@ -98,9 +164,11 @@ class LocalScriptServiceTest :
                   ItemRegistry(),
               ),
               LearnsetRegistry(),
+              MoveSourceRegistry(),
               UndergroundTalkService(SessionRegistry()),
               ItemRegistry(),
               SpeciesRegistry(),
+              EvolutionRegistry(),
               budget,
               MoveRegistry(),
               ReportedIndividual(testGameConfig()),
@@ -108,6 +176,10 @@ class LocalScriptServiceTest :
               ViolationLog(),
               WarpNeighbours(maps),
               InMemorySaveBlockRepository(),
+              fieldMoveService(store, maps),
+              battles,
+              statics ?: staticEncounterService(store, maps),
+              imports,
           )
 
       test("a reported flag and var are stored, and seat back as the same ids") {
@@ -134,6 +206,44 @@ class LocalScriptServiceTest :
           stored.storyVars["sinnoh/vm/var/16400"] shouldBe 7
 
           val seat = StoryClientState.scriptState(3, stored.storyFlags, stored.storyVars)
+          seat.flags shouldBe listOf(ScriptFlagEntry(2408, true))
+          seat.vars shouldBe listOf(ScriptVarEntry(16400, 7))
+        }
+      }
+
+      /**
+       * The seat sends these rows under the character's own region, so the report has to write them
+       * under the same one. A session carries a region of its own that is only filled in when a map
+       * address is seated, and until then it reads as Hoenn.
+       */
+      test("a report is keyed to the character's region, not the session's") {
+        runTest {
+          val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+          val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+          val session =
+              FakeSession(characterId = id, regionId = 1, bankId = 51, mapId = 3).also {
+                it.attributes[CLIENT_RUNS_SCRIPTS] = true
+              }
+
+          service(store, MapManager())
+              .onScriptState(
+                  PacketEvent(
+                      ScriptStatePacket(
+                          flags = listOf(ScriptFlagEntry(2408, true)),
+                          vars = listOf(ScriptVarEntry(16400, 7)),
+                      ),
+                      session,
+                  ))
+
+          val stored = store.getCharacter(id)!!
+          ("sinnoh/vm/flag/2408" in stored.storyFlags) shouldBe true
+          stored.storyVars["sinnoh/vm/var/16400"] shouldBe 7
+          stored.storyFlags.none { it.startsWith("hoenn/") } shouldBe true
+          stored.storyVars.keys.none { it.startsWith("hoenn/") } shouldBe true
+
+          val seat =
+              StoryClientState.scriptState(
+                  stored.info.positionRegionId, stored.storyFlags, stored.storyVars)
           seat.flags shouldBe listOf(ScriptFlagEntry(2408, true))
           seat.vars shouldBe listOf(ScriptVarEntry(16400, 7))
         }
@@ -461,9 +571,368 @@ class LocalScriptServiceTest :
         }
 
         /**
+         * The engine runs the game's own evolution screen, so a monster that evolves has already
+         * changed species on the client by the time the report arrives.
+         */
+        test("a battle outcome carries the species the engine evolved the monster into") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            val svc = service(store, MapManager())
+            val factory =
+                WildMonFactory(
+                    SpeciesRegistry(), MoveRegistry(), LearnsetRegistry(), EntityIdService())
+            // Charmander, one level short of the sixteen it becomes a Charmeleon at.
+            val seated = store.addPokemon(id, factory.create(4, 15, BattleRng(seed = 1))!!)!!
+
+            fun report(level: Int, species: Int) =
+                svc.onBattleOutcome(
+                    PacketEvent(
+                        BattleOutcomePacket(
+                            listOf(
+                                BattleOutcomeMon(
+                                    seated.id,
+                                    level,
+                                    seated.xp,
+                                    hp = 1,
+                                    moves = List(4) { BattleOutcomeMove(0, 0) },
+                                    species = species))),
+                        session,
+                    ))
+
+            // A species the level does not reach yet: refused, and the record stands.
+            report(level = 15, species = 5)
+            store.getCharacter(id)!!.pokemon.single().dexId shouldBe 4
+
+            // The evolution the fight really produced.
+            report(level = 16, species = 5)
+            store.getCharacter(id)!!.pokemon.single().dexId shouldBe 5
+
+            // A species a Charmeleon does not become at all.
+            report(level = 16, species = 149)
+            store.getCharacter(id)!!.pokemon.single().dexId shouldBe 5
+
+            // A report making no claim leaves the evolved species alone.
+            report(level = 16, species = 0)
+            store.getCharacter(id)!!.pokemon.single().dexId shouldBe 5
+          }
+        }
+
+        test("a battle outcome carries the friendship the engine walked into it") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            val svc = service(store, MapManager())
+            val factory =
+                WildMonFactory(
+                    SpeciesRegistry(), MoveRegistry(), LearnsetRegistry(), EntityIdService())
+            // A Golbat, which becomes a Crobat on friendship and on nothing else.
+            val seated = store.addPokemon(id, factory.create(42, 30, BattleRng(seed = 1))!!)!!
+            // A fresh monster starts at its own species' base, not at a flat number.
+            seated.friendship shouldBe 70
+
+            fun report(friendship: Int, species: Int = 0) =
+                svc.onBattleOutcome(
+                    PacketEvent(
+                        BattleOutcomePacket(
+                            listOf(
+                                BattleOutcomeMon(
+                                    seated.id,
+                                    level = 30,
+                                    xp = seated.xp,
+                                    hp = 1,
+                                    moves = List(4) { BattleOutcomeMove(0, 0) },
+                                    species = species,
+                                    friendship = friendship))),
+                        session,
+                    ))
+
+            // One short of the threshold: the friendship is kept and the evolution is not.
+            report(friendship = 219, species = 169)
+            store.getCharacter(id)!!.pokemon.single().friendship shouldBe 219
+            store.getCharacter(id)!!.pokemon.single().dexId shouldBe 42
+
+            report(friendship = 220, species = 169)
+            store.getCharacter(id)!!.pokemon.single().friendship shouldBe 220
+            store.getCharacter(id)!!.pokemon.single().dexId shouldBe 169
+
+            // Fainting takes it back down, which the record follows.
+            report(friendship = 200)
+            store.getCharacter(id)!!.pokemon.single().friendship shouldBe 200
+
+            // A client making no claim leaves it where it is.
+            report(friendship = -1)
+            store.getCharacter(id)!!.pokemon.single().friendship shouldBe 200
+          }
+        }
+
+        /**
+         * The engine hatches an egg itself, end to end: an egg's remaining cycles ride the record's
+         * friendship byte, exactly where the game's own `Egg_CreateEgg` keeps them, the field's
+         * step chain spends one every 255 steps, and the game's hatch scene clears the bit.
+         */
+        test("a battle outcome hatches an egg and cannot turn a monster back into one") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            val svc = service(store, MapManager())
+            val factory =
+                WildMonFactory(
+                    SpeciesRegistry(), MoveRegistry(), LearnsetRegistry(), EntityIdService())
+            // An Eevee egg with its last cycle spent, which is what the client seats and walks.
+            val egg =
+                store.addPokemon(
+                    id,
+                    factory
+                        .create(133, 1, BattleRng(seed = 1))!!
+                        .copy(isEgg = true, friendship = 0))!!
+            egg.isEgg shouldBe true
+
+            fun report(isEgg: Boolean, friendship: Int) =
+                svc.onBattleOutcome(
+                    PacketEvent(
+                        BattleOutcomePacket(
+                            listOf(
+                                BattleOutcomeMon(
+                                    egg.id,
+                                    level = 1,
+                                    xp = egg.xp,
+                                    hp = 1,
+                                    moves = List(4) { BattleOutcomeMove(0, 0) },
+                                    friendship = friendship,
+                                    isEgg = isEgg))),
+                        session,
+                    ))
+
+            // Still counting down: the bit stands and the cycles left stand with it.
+            report(isEgg = true, friendship = 0)
+            store.getCharacter(id)!!.pokemon.single().isEgg shouldBe true
+
+            // The hatch the engine ran. It leaves a hatched monster liking its trainer at 120.
+            report(isEgg = false, friendship = 120)
+            store.getCharacter(id)!!.pokemon.single().isEgg shouldBe false
+            store.getCharacter(id)!!.pokemon.single().friendship shouldBe 120
+
+            // And nothing puts it back. An egg is the one shape whose level, moves and catch place
+            // a client could otherwise reset by hand.
+            report(isEgg = true, friendship = 120)
+            store.getCharacter(id)!!.pokemon.single().isEgg shouldBe false
+          }
+        }
+
+        test("a battle outcome carries the item the party menu gave the monster") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            val svc = service(store, MapManager())
+            val factory =
+                WildMonFactory(
+                    SpeciesRegistry(), MoveRegistry(), LearnsetRegistry(), EntityIdService())
+            val catalogue = ItemRegistry()
+            val razorClaw = catalogue.idOf(Items.RAZOR_CLAW)
+            val leftovers = catalogue.idOf(Items.LEFTOVERS)
+            // A Sneasel, which becomes a Weavile on a Razor Claw and on nothing else.
+            val seated = store.addPokemon(id, factory.create(215, 30, BattleRng(seed = 1))!!)!!
+            seated.heldItemId shouldBe 0
+
+            fun report(heldItemId: Int, species: Int = 0) =
+                svc.onBattleOutcome(
+                    PacketEvent(
+                        BattleOutcomePacket(
+                            listOf(
+                                BattleOutcomeMon(
+                                    seated.id,
+                                    level = 30,
+                                    xp = seated.xp,
+                                    hp = 1,
+                                    moves = List(4) { BattleOutcomeMove(0, 0) },
+                                    species = species,
+                                    heldItemId = heldItemId))),
+                        session,
+                    ))
+
+            // A give. The bag half of it is a BagDelta of its own and nothing here moves the bag.
+            report(heldItemId = razorClaw)
+            store.getCharacter(id)!!.pokemon.single().heldItemId shouldBe razorClaw
+
+            // The evolution the item is the whole trigger for. The report carries no item, because
+            // the game clears a held item as it evolves on one. The check reads the stored one.
+            report(heldItemId = 0, species = 461)
+            store.getCharacter(id)!!.pokemon.single().dexId shouldBe 461
+            store.getCharacter(id)!!.pokemon.single().heldItemId shouldBe 0
+
+            // A client making no claim leaves it where it is; a take says 0 and is taken.
+            report(heldItemId = leftovers)
+            report(heldItemId = -1)
+            store.getCharacter(id)!!.pokemon.single().heldItemId shouldBe leftovers
+            report(heldItemId = 0)
+            store.getCharacter(id)!!.pokemon.single().heldItemId shouldBe 0
+          }
+        }
+
+        test("an Everstone on the record refuses the evolution the report claims") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            val svc = service(store, MapManager())
+            val factory =
+                WildMonFactory(
+                    SpeciesRegistry(), MoveRegistry(), LearnsetRegistry(), EntityIdService())
+            val everstone = ItemRegistry().idOf(Items.EVERSTONE)
+            val seated = store.addPokemon(id, factory.create(4, 15, BattleRng(seed = 1))!!)!!
+
+            fun report(heldItemId: Int, species: Int = 0) =
+                svc.onBattleOutcome(
+                    PacketEvent(
+                        BattleOutcomePacket(
+                            listOf(
+                                BattleOutcomeMon(
+                                    seated.id,
+                                    level = 16,
+                                    xp = seated.xp,
+                                    hp = 1,
+                                    moves = List(4) { BattleOutcomeMove(0, 0) },
+                                    species = species,
+                                    heldItemId = heldItemId))),
+                        session,
+                    ))
+
+            report(heldItemId = everstone)
+            store.getCharacter(id)!!.pokemon.single().heldItemId shouldBe everstone
+            // The engine would not have run the screen at all, so the claim is a client's.
+            report(heldItemId = everstone, species = 5)
+            store.getCharacter(id)!!.pokemon.single().dexId shouldBe 4
+            // Taken off, the same level-up stands.
+            report(heldItemId = 0)
+            report(heldItemId = 0, species = 5)
+            store.getCharacter(id)!!.pokemon.single().dexId shouldBe 5
+          }
+        }
+
+        test("a key item is not something a monster can be reported holding") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            val svc = service(store, MapManager())
+            val factory =
+                WildMonFactory(
+                    SpeciesRegistry(), MoveRegistry(), LearnsetRegistry(), EntityIdService())
+            val seated = store.addPokemon(id, factory.create(215, 30, BattleRng(seed = 1))!!)!!
+
+            fun report(heldItemId: Int) =
+                svc.onBattleOutcome(
+                    PacketEvent(
+                        BattleOutcomePacket(
+                            listOf(
+                                BattleOutcomeMon(
+                                    seated.id,
+                                    level = 30,
+                                    xp = seated.xp,
+                                    hp = 1,
+                                    moves = List(4) { BattleOutcomeMove(0, 0) },
+                                    heldItemId = heldItemId))),
+                        session,
+                    ))
+
+            // The game's own give flow never offers one, so a report of one is a client sending
+            // numbers rather than recording a scene.
+            report(KEY_ITEM_IDS.first)
+            store.getCharacter(id)!!.pokemon.single().heldItemId shouldBe 0
+            // An id no registry knows is the same thing said differently.
+            report(60_000)
+            store.getCharacter(id)!!.pokemon.single().heldItemId shouldBe 0
+          }
+        }
+
+        test("friendship stops being taken once the allowance for the window is gone") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            val svc = service(store, MapManager(), budget = budget(friendshipGained = 100))
+            val factory =
+                WildMonFactory(
+                    SpeciesRegistry(), MoveRegistry(), LearnsetRegistry(), EntityIdService())
+            val seated = store.addPokemon(id, factory.create(42, 30, BattleRng(seed = 1))!!)!!
+
+            fun report(friendship: Int) =
+                svc.onBattleOutcome(
+                    PacketEvent(
+                        BattleOutcomePacket(
+                            listOf(
+                                BattleOutcomeMon(
+                                    seated.id,
+                                    level = 30,
+                                    xp = seated.xp,
+                                    hp = 1,
+                                    moves = List(4) { BattleOutcomeMove(0, 0) },
+                                    friendship = friendship))),
+                        session,
+                    ))
+
+            // Eighty of the hundred, taken.
+            report(friendship = 150)
+            store.getCharacter(id)!!.pokemon.single().friendship shouldBe 150
+            // The jump to the evolution threshold is seventy more, past what is left.
+            report(friendship = 220)
+            store.getCharacter(id)!!.pokemon.single().friendship shouldBe 150
+          }
+        }
+
+        /**
+         * The species is settled against the level the record is going to hold, not the one the
+         * report claims. A window that has run out of levels keeps the monster where it was, and an
+         * evolution taken at the claimed level would have left a Charmeleon standing at 15.
+         */
+        test("a level the window refuses does not carry an evolution with it") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            val svc = service(store, MapManager(), budget(levelsGained = 0))
+            val factory =
+                WildMonFactory(
+                    SpeciesRegistry(), MoveRegistry(), LearnsetRegistry(), EntityIdService())
+            val seated = store.addPokemon(id, factory.create(4, 15, BattleRng(seed = 1))!!)!!
+
+            svc.onBattleOutcome(
+                PacketEvent(
+                    BattleOutcomePacket(
+                        listOf(
+                            BattleOutcomeMon(
+                                seated.id,
+                                level = 16,
+                                xp = seated.xp,
+                                hp = 1,
+                                moves = List(4) { BattleOutcomeMove(0, 0) },
+                                species = 5))),
+                    session,
+                ))
+
+            val after = store.getCharacter(id)!!.pokemon.single()
+            after.level shouldBe 15
+            after.dexId shouldBe 4
+          }
+        }
+
+        /**
          * Level and experience are the same fact told twice, and only the level was bounded. A row
-         * could stand still and put two billion behind it, which the next server-run battle reads
-         * back out as level 100.
+         * could stand still at the level it started on and put two billion experience behind it,
+         * which the next server-run battle reads back out as level 100.
          */
         test("experience past what the reported level can hold is cut down to it") {
           runTest {
@@ -497,7 +966,10 @@ class LocalScriptServiceTest :
           }
         }
 
-        /** Ten levels a report was the whole bound, and reports were free. */
+        /**
+         * Ten levels a report was the whole bound, and reports were free, so a party reached level
+         * 100 in about as long as it takes to send sixty packets.
+         */
         test("levels stop being taken once the allowance for the window is gone") {
           runTest {
             val store =
@@ -534,7 +1006,10 @@ class LocalScriptServiceTest :
           }
         }
 
-        /** These are what a link contest scores on, so an untrue one beats another player. */
+        /**
+         * These are what a link Super Contest scores on, so unlike the rest of this file an untrue
+         * one is a player beating somebody else rather than beating the game.
+         */
         test("one report raises a contest condition by a Poffin, not to the ceiling") {
           runTest {
             val store =
@@ -566,20 +1041,25 @@ class LocalScriptServiceTest :
             val after = store.getCharacter(id)!!.pokemon.single()
             after.conditions shouldBe ContestConditions(60, 60, 60, 60, 60)
             after.sheen shouldBe 60
-            // Every bit set is twenty contests won at once, and the bits that name no contest are
-            // dropped before they are counted.
+            // Every bit set is twenty contests won at once, which is not a contest that happened.
+            // The forty-four bits that name no contest are dropped before they are counted.
             after.superContestRibbons shouldBe 0L
           }
         }
 
-        /** The reporter caps itself and carries the rest to its next report. */
+        /**
+         * The reporter caps itself at 192 flags and 64 vars and carries the rest to its next
+         * report, so a wider one did not come from it. The codec would take about 21,000, each a
+         * write to this character's story rows.
+         */
         test("a report wider than a client sends is refused whole") {
           runTest {
             val store =
                 CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
             val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
             val session = playing(store, id)
-            // A new character starts with the flags its region's new game sets.
+            // A new character starts with the flags its region's new game sets, so what this
+            // asserts is that the report added none of its own.
             val before = store.getCharacter(id)!!.storyFlags.toSet()
 
             service(store, MapManager())
@@ -627,6 +1107,83 @@ class LocalScriptServiceTest :
           }
         }
 
+        /* The last road imported progress had into the market. */
+        test("a static site taken on an unverified import is marked") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            val statics = staticEncounterService(store, MapManager())
+            val imports = InMemoryImportRepository()
+            imports.record(importRow(id), ByteArray(0))
+            statics.claims[id] = StaticEncounterService.Claim(HEATRAN)
+            val svc = service(store, MapManager(), statics = statics, imports = imports)
+
+            svc.onScriptGrant(PacketEvent(grantOf(HEATRAN), session))
+
+            store.getCharacter(id)!!.pokemon.single().offlineOrigin shouldBe true
+          }
+        }
+
+        test("the same catch on a character that imported nothing is not marked") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            val statics = staticEncounterService(store, MapManager())
+            statics.claims[id] = StaticEncounterService.Claim(HEATRAN)
+            val svc = service(store, MapManager(), statics = statics)
+
+            svc.onScriptGrant(PacketEvent(grantOf(HEATRAN), session))
+
+            store.getCharacter(id)!!.pokemon.single().offlineOrigin shouldBe false
+          }
+        }
+
+        test("an ordinary catch on an unverified import is not marked, and spends no claim") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            val statics = staticEncounterService(store, MapManager())
+            val imports = InMemoryImportRepository()
+            imports.record(importRow(id), ByteArray(0))
+            statics.claims[id] = StaticEncounterService.Claim(HEATRAN)
+            val svc = service(store, MapManager(), statics = statics, imports = imports)
+
+            // A Bidoof caught on the way to the site. The claim is the legendary's and stays put.
+            svc.onScriptGrant(PacketEvent(grantOf(BIDOOF), session))
+
+            store.getCharacter(id)!!.pokemon.single().offlineOrigin shouldBe false
+            statics.claims[id].shouldNotBeNull()
+          }
+        }
+
+        test("a verified import leaves the site's catch alone") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            val statics = staticEncounterService(store, MapManager())
+            val imports = InMemoryImportRepository()
+            val row = importRow(id)
+            imports.record(row, ByteArray(0))
+            // The play behind the import was replayed here and agreed with: there is nothing left
+            // to hold against what its badges opened.
+            imports.markReplay(row.id, ReplayVerdict.VERIFIED.name, null)
+            statics.claims[id] = StaticEncounterService.Claim(HEATRAN)
+            val svc = service(store, MapManager(), statics = statics, imports = imports)
+
+            svc.onScriptGrant(PacketEvent(grantOf(HEATRAN), session))
+
+            store.getCharacter(id)!!.pokemon.single().offlineOrigin shouldBe false
+          }
+        }
+
         test("a monster stops being granted once the allowance is gone") {
           runTest {
             val store =
@@ -658,9 +1215,8 @@ class LocalScriptServiceTest :
         }
 
         /**
-         * A capture is a monster the engine already rolled. Rolling a second one over it changed
-         * the nature the player saw the ball land on, its IVs, and, once in several thousand, the
-         * fact that it was shiny at all.
+         * A capture is one monster however many times it is reported, and it is the server that
+         * says which one.
          */
         test("a reported capture is the server's monster, and stable across a retry") {
           runTest {
@@ -703,7 +1259,8 @@ class LocalScriptServiceTest :
             granted.iVs.compress() shouldBe rolled.ivBits
             granted.isShiny shouldBe rolled.isShiny
             (granted.iVs.compress() == ivs.compress()) shouldBe false
-            // The nature is read out of the seed, masked the way the record masks it.
+            // The nature is read out of the seed, which is why the seed had to stop being a claim.
+            // Masked the way the record masks it: the seed is unsigned on the wire.
             granted.nature shouldBe
                 PokemonNature.entries[
                         ((rolled.seed.toLong() and 0xFFFFFFFFL) % PokemonNature.entries.size)
@@ -799,6 +1356,69 @@ class LocalScriptServiceTest :
           }
         }
 
+        /**
+         * A release is the third gesture that takes a monster out of a container, and the two
+         * places it may not land are the two a box move and a shelf listing are already refused
+         * from: a battle writes its own copy of the party back when it ends, and a settlement at a
+         * trade table is two writes with a window between them.
+         */
+        test("a release while the character is at a trade table is refused") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            val svc = service(store, MapManager())
+            val factory =
+                WildMonFactory(
+                    SpeciesRegistry(), MoveRegistry(), LearnsetRegistry(), EntityIdService())
+            store.addPokemon(id, factory.create(387, 20, BattleRng(seed = 1))!!)
+            val boxed =
+                store.addPokemon(
+                    id,
+                    factory
+                        .create(396, 5, BattleRng(seed = 2))!!
+                        .copy(container = PokemonContainer.PC))!!
+            session.state().atTradeTable = true
+
+            session.sent.clear()
+            svc.onPokemonRelease(PacketEvent(PokemonReleasePacket(boxed.id), session))
+
+            store.getCharacter(id)!!.pcStorage.map { it.id } shouldBe listOf(boxed.id)
+            session.sent.filterIsInstance<PokemonContainerPacket>().map { it.container } shouldBe
+                listOf(PokemonContainer.PARTY, PokemonContainer.PC)
+          }
+        }
+
+        test("a release while the character is in a battle is refused") {
+          runTest {
+            val store =
+                CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+            val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+            val session = playing(store, id)
+            val battles = BattleRegistry()
+            val svc = service(store, MapManager(), battles = battles)
+            val factory =
+                WildMonFactory(
+                    SpeciesRegistry(), MoveRegistry(), LearnsetRegistry(), EntityIdService())
+            store.addPokemon(id, factory.create(387, 20, BattleRng(seed = 1))!!)
+            val boxed =
+                store.addPokemon(
+                    id,
+                    factory
+                        .create(396, 5, BattleRng(seed = 2))!!
+                        .copy(container = PokemonContainer.PC))!!
+            battles.create(id, session, emptyList(), emptyList(), BattleRng(seed = 3))
+
+            session.sent.clear()
+            svc.onPokemonRelease(PacketEvent(PokemonReleasePacket(boxed.id), session))
+
+            store.getCharacter(id)!!.pcStorage.map { it.id } shouldBe listOf(boxed.id)
+            session.sent.filterIsInstance<PokemonContainerPacket>().map { it.container } shouldBe
+                listOf(PokemonContainer.PARTY, PokemonContainer.PC)
+          }
+        }
+
         test("a release from the party leaves the remaining slots contiguous") {
           runTest {
             val store =
@@ -849,4 +1469,95 @@ class LocalScriptServiceTest :
           after.positionY shouldBe before.positionY
         }
       }
+
+      /**
+       * Fly crosses the region in one step with no warp tile behind it, so it arrives looking
+       * exactly like the teleport the reachability check exists to refuse.
+       */
+      test("a Fly landing is taken for the badge, the move and a town already visited") {
+        runTest {
+          val maps = MapManager()
+          val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+          val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+          // Standing in Jubilife City (header 3), whose header allows Fly.
+          store.updatePosition(id, 180, 777, 0, 3)
+          val session =
+              FakeSession(characterId = id, regionId = 3, bankId = 0, mapId = 3).also {
+                it.attributes[CLIENT_RUNS_SCRIPTS] = true
+              }
+          val svc = service(store, maps)
+          // Twinleaf Town's fly tile: spawn row 1, header 411 (bank 1 map 155) at (116, 886).
+          val landing = ScriptWarpArrivedPacket(411, 116, 886, Direction.DOWN.ordinal)
+
+          // Nothing in place: this is the teleport the audit refuses.
+          svc.onScriptWarpArrived(PacketEvent(landing, session))
+          store.getCharacter(id)!!.info.positionMapId shouldBe 3.toByte()
+
+          store.addPokemon(id, flier(id))
+          store.setStoryFlag(id, Badge.COBBLE.keyIn("sinnoh"))
+          // Still refused: the player has never stood in Twinleaf, so the town map would not have
+          // offered it. The id is FLAG_FIRST_ARRIVAL_TWINLEAF_TOWN.
+          svc.onScriptWarpArrived(PacketEvent(landing, session))
+          store.getCharacter(id)!!.info.positionMapId shouldBe 3.toByte()
+
+          store.setStoryFlag(id, "sinnoh/vm/flag/2480")
+          svc.onScriptWarpArrived(PacketEvent(landing, session))
+          val after = store.getCharacter(id)!!.info
+          after.positionBankId shouldBe 1.toByte()
+          after.positionMapId shouldBe 155.toByte()
+          after.positionX shouldBe 116.toShort()
+          after.positionY shouldBe 886.toShort()
+        }
+      }
+
+      test("a Fly out of a cave is refused, because the cartridge would not have offered one") {
+        runTest {
+          val maps = MapManager()
+          val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+          val id = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH).info.id
+          // Oreburgh Gate 1F, header 258, whose header says Fly does not work here.
+          checkNotNull(maps.getMap(3, 1, 2)).flyAllowed shouldBe false
+          store.updatePosition(id, 10, 10, 1, 2)
+          store.addPokemon(id, flier(id))
+          store.setStoryFlag(id, Badge.COBBLE.keyIn("sinnoh"))
+          store.setStoryFlag(id, "sinnoh/vm/flag/2480")
+          val session =
+              FakeSession(characterId = id, regionId = 3, bankId = 1, mapId = 2).also {
+                it.attributes[CLIENT_RUNS_SCRIPTS] = true
+              }
+
+          service(store, maps)
+              .onScriptWarpArrived(
+                  PacketEvent(
+                      ScriptWarpArrivedPacket(411, 116, 886, Direction.DOWN.ordinal), session))
+
+          store.getCharacter(id)!!.info.positionMapId shouldBe 2.toByte()
+        }
+      }
     })
+
+/** A party member that knows Fly, which is one of the four things a Fly landing is checked on. */
+private fun flier(ownerId: Long): Pokemon =
+    Pokemon(
+        id = EntityIdService().newMonsterId(),
+        ownerId = ownerId,
+        container = PokemonContainer.PARTY,
+        containerSlot = 0,
+        dexId = 398,
+        seed = 0,
+        ot = "Lucas",
+        nickname = "",
+        level = 30,
+        hp = 60,
+        xp = 0,
+        eVs = EVs(),
+        iVs = IVs(),
+        moves = listOf(PokemonMove(19, 15)),
+        isShiny = false,
+        hasHiddenAbility = false,
+        isAlpha = false,
+        isSecret = false,
+        isFatefulEncounter = false,
+        isRaidEncounter = false,
+        caughtAt = LocalDateTime.now(),
+    )

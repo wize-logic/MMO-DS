@@ -1,0 +1,38 @@
+--- a/src/battle_anim/battle_anim_system.c
++++ b/src/battle_anim/battle_anim_system.c
+@@ -51,6 +51,17 @@
+ #include "vram_transfer.h"
+ #include "pc_sprite_mirror.h"
+ 
++/* openmmo: the frame a mon sprite is drawn through follows the battle's page
++ * layout (mods/openmmo/src/openmmo_spriteframe.c): the cartridge's 80x80, or
++ * 128x88 for the two sprites of a single battle. Set here, in the translation
++ * unit, because a patched header is only seen by the units that open it first. */
++#undef MON_SPRITE_FRAME_WIDTH
++#undef MON_SPRITE_FRAME_HEIGHT
++int openmmo_mon_frame_w(void);
++int openmmo_mon_frame_h(void);
++#define MON_SPRITE_FRAME_WIDTH  (openmmo_mon_frame_w())
++#define MON_SPRITE_FRAME_HEIGHT (openmmo_mon_frame_h())
++
+ /* pc port: which battler sprite each script copy mirrors, and the character
+  * VRAM it was loaded to, so the mirror can let go of it when the copy goes. */
+ static PokemonSprite *sCopyMirrorSource[BATTLE_ANIM_SCRIPT_MAX_POKEMON_SPRITES];
+@@ -494,8 +505,15 @@
+         }
+     }
+ 
+-    if (moveID == MOVE_NONE || moveID > NUM_VALID_MOVES) {
+-        moveID = MOVE_POUND;
++    /* openmmo: the last move with a script is 467 on the cartridge and 559 once
++     * a fill has put the borrowed ones in (mods/openmmo/src/openmmo_moves.c);
++     * the engine's own clamp to Pound stays for everything past that. */
++    {
++        extern int openmmo_move_max(void);
++
++        if (moveID == MOVE_NONE || moveID > openmmo_move_max()) {
++            moveID = MOVE_POUND;
++        }
+     }
+ 
+     system->moveArcID = battlerContext->moveArcID;

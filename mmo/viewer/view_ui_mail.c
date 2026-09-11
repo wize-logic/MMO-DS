@@ -142,10 +142,29 @@ static void mail_ask(struct view_hud *hud, int tab, int page)
                             ((uint32_t)(page & 0xFF) << 16)));
 }
 
-static void mail_verb(struct view_hud *hud, unsigned verb, int row)
+/* A verb naming one letter. The id is what the guest acts on, since the page
+ * it would resolve a row index against can be replaced between the publish
+ * this window drew from and the command arriving. The row rides along
+ * only so the guest's log line says which line was clicked. */
+static void mail_verb(struct view_hud *hud, unsigned verb, int row,
+                      uint32_t id_lo, uint32_t id_hi)
 {
-    view_hud_push(hud, OPENMMO_HUD_CMD_MAIL,
-                  (int32_t)(verb | ((uint32_t)(row & 0xFF) << 8)));
+    view_hud_push_id(hud, OPENMMO_HUD_CMD_MAIL,
+                     (int32_t)(verb | ((uint32_t)(row & 0xFF) << 8)),
+                     id_lo, id_hi);
+}
+
+/* Which listed row the open letter is, for the guest's log line; 0xFF when
+ * the page moved on under the reader. */
+static int open_row(const struct openmmo_hud_mail *ms)
+{
+    int i;
+
+    for (i = 0; i < (int)ms->row_n && i < OPENMMO_HUD_MAIL_ROWS; i++)
+        if (ms->row[i].id_lo == ms->open_id_lo &&
+            ms->row[i].id_hi == ms->open_id_hi)
+            return i;
+    return 0xFF;
 }
 
 static void mail_send(struct view_hud *hud)
@@ -898,22 +917,16 @@ int view_ui_mail_event(const SDL_Event *ev,
             return 1;
         }
         if (view_ui_hit(&M.r_paper, x, y)) {
-            /* The engine's own stationery, on the row this letter came from. */
-            for (i = 0; i < (int)ms->row_n; i++)
-                if (ms->row[i].id_lo == ms->open_id_lo &&
-                    ms->row[i].id_hi == ms->open_id_hi) {
-                    mail_verb(hud, OPENMMO_HUD_MAIL_PAPER, i);
-                    break;
-                }
+            /* The engine's own stationery, on the letter that is open,
+             * which the listed page need not still be showing: the reader
+             * survives a page turn behind it. */
+            mail_verb(hud, OPENMMO_HUD_MAIL_PAPER, open_row(ms),
+                      ms->open_id_lo, ms->open_id_hi);
             return 1;
         }
         if (view_ui_hit(&M.r_letter_del, x, y)) {
-            for (i = 0; i < (int)ms->row_n; i++)
-                if (ms->row[i].id_lo == ms->open_id_lo &&
-                    ms->row[i].id_hi == ms->open_id_hi) {
-                    mail_verb(hud, OPENMMO_HUD_MAIL_DELETE, i);
-                    break;
-                }
+            mail_verb(hud, OPENMMO_HUD_MAIL_DELETE, open_row(ms),
+                      ms->open_id_lo, ms->open_id_hi);
             M.reading = 0;
             return 1;
         }
@@ -922,7 +935,8 @@ int view_ui_mail_event(const SDL_Event *ev,
 
     for (i = 0; i < M.row_n; i++) {
         if (view_ui_hit(&M.r_del[i], x, y)) {
-            mail_verb(hud, OPENMMO_HUD_MAIL_DELETE, i);
+            mail_verb(hud, OPENMMO_HUD_MAIL_DELETE, i, ms->row[i].id_lo,
+                      ms->row[i].id_hi);
             return 1;
         }
         if (view_ui_hit(&M.r_row[i], x, y)) {
@@ -930,7 +944,8 @@ int view_ui_mail_event(const SDL_Event *ev,
             M.want_hi = ms->row[i].id_hi;
             M.reading = 2;
             M.letter_scroll = 0;
-            mail_verb(hud, OPENMMO_HUD_MAIL_READ, i);
+            mail_verb(hud, OPENMMO_HUD_MAIL_READ, i, ms->row[i].id_lo,
+                      ms->row[i].id_hi);
             return 1;
         }
     }

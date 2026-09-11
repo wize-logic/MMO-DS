@@ -1,0 +1,78 @@
+--- a/src/overlay005/land_data.c
++++ b/src/overlay005/land_data.c
+@@ -671,9 +671,23 @@
+     // Here, we check for movements from the tracked target and start lazy loading maps if necessary.
+     if (landDataMan->inDistortionWorld == FALSE && trackedTarget->tracking == TRUE) {
+         if (trackedTarget->moving) {
+-            GF_ASSERT(*trackedTarget->lowerMovementCoord <= *trackedTarget->higherMovementCoord);
+-
+-            if (*trackedTarget->higherMovementCoord - *trackedTarget->lowerMovementCoord >= MAP_OBJECT_TILE_SIZE) {
++            // A server correction can teleport the target against the step it
++            // was mid-way through, and this ordered pair turns upside down.
++            // That is an arrival, not a walk: take the new place as the
++            // baseline and wait for the next real step, instead of wedging
++            // the streamer on an assert that would fire every frame from
++            // here on.
++            if (*trackedTarget->lowerMovementCoord > *trackedTarget->higherMovementCoord) {
++                trackedTarget->prevPosition = *trackedTarget->position;
++                // The live position can already be gliding into a new step
++                // when the correction is noticed; the move-start below asserts
++                // half-tile alignment of its baseline, so keep it on the grid.
++                trackedTarget->prevPosition.x &= ~((MAP_OBJECT_TILE_SIZE / 2) - 1);
++                trackedTarget->prevPosition.z &= ~((MAP_OBJECT_TILE_SIZE / 2) - 1);
++                trackedTarget->moving = FALSE;
++                trackedTarget->higherMovementCoord = NULL;
++                trackedTarget->lowerMovementCoord = NULL;
++            } else if (*trackedTarget->higherMovementCoord - *trackedTarget->lowerMovementCoord >= MAP_OBJECT_TILE_SIZE) {
+                 // The tracked target has finished moving a tile.
+                 int trackedTargetTileX, trackedTargetTileZ;
+ 
+@@ -696,7 +710,9 @@
+             }
+         } else {
+             if (trackedTarget->prevPosition.x != trackedTarget->position->x && trackedTarget->prevPosition.z != trackedTarget->position->z) {
+-                GF_ASSERT(FALSE);
++                // Both axes changed at once, which no walk does: the target
++                // was teleported. Take where it stands as the new baseline.
++                trackedTarget->prevPosition = *trackedTarget->position;
+             } else if (trackedTarget->prevPosition.x != trackedTarget->position->x || trackedTarget->prevPosition.z != trackedTarget->position->z) {
+                 // The tracked target has started moving: check in which direction it is moving,
+                 // and start lazy loading the next maps in that direction if necessary.
+@@ -2295,9 +2311,23 @@
+ 
+     if (landDataMan->inDistortionWorld == FALSE && trackedTarget->tracking == TRUE) {
+         if (trackedTarget->moving) {
+-            GF_ASSERT(*trackedTarget->lowerMovementCoord <= *trackedTarget->higherMovementCoord);
+-
+-            if (*trackedTarget->higherMovementCoord - *trackedTarget->lowerMovementCoord >= MAP_OBJECT_TILE_SIZE) {
++            // A server correction can teleport the target against the step it
++            // was mid-way through, and this ordered pair turns upside down.
++            // That is an arrival, not a walk: take the new place as the
++            // baseline and wait for the next real step, instead of wedging
++            // the streamer on an assert that would fire every frame from
++            // here on.
++            if (*trackedTarget->lowerMovementCoord > *trackedTarget->higherMovementCoord) {
++                trackedTarget->prevPosition = *trackedTarget->position;
++                // The live position can already be gliding into a new step
++                // when the correction is noticed; the move-start below asserts
++                // half-tile alignment of its baseline, so keep it on the grid.
++                trackedTarget->prevPosition.x &= ~((MAP_OBJECT_TILE_SIZE / 2) - 1);
++                trackedTarget->prevPosition.z &= ~((MAP_OBJECT_TILE_SIZE / 2) - 1);
++                trackedTarget->moving = FALSE;
++                trackedTarget->higherMovementCoord = NULL;
++                trackedTarget->lowerMovementCoord = NULL;
++            } else if (*trackedTarget->higherMovementCoord - *trackedTarget->lowerMovementCoord >= MAP_OBJECT_TILE_SIZE) {
+                 int trackedTargetTileX, trackedTargetTileZ;
+ 
+                 LandData_ObjectPosToTilePos(trackedTarget->position->x, trackedTarget->position->z, &trackedTargetTileX, &trackedTargetTileZ);
+@@ -2319,7 +2349,9 @@
+             }
+         } else {
+             if (trackedTarget->prevPosition.x != trackedTarget->position->x && trackedTarget->prevPosition.z != trackedTarget->position->z) {
+-                GF_ASSERT(FALSE);
++                // Both axes changed at once, which no walk does: the target
++                // was teleported. Take where it stands as the new baseline.
++                trackedTarget->prevPosition = *trackedTarget->position;
+             } else if (trackedTarget->prevPosition.x != trackedTarget->position->x || trackedTarget->prevPosition.z != trackedTarget->position->z) {
+                 trackedTarget->moving = TRUE;
+ 

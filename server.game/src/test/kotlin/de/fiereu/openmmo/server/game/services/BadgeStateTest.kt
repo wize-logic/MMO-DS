@@ -20,8 +20,12 @@ class BadgeStateTest :
       test("a badge's story key is its own decomp name, namespaced by region") {
         Badge.COAL.keyIn("sinnoh") shouldBe "sinnoh/BADGE_ID_COAL"
         Badge.BEACON.keyIn("sinnoh") shouldBe "sinnoh/BADGE_ID_BEACON"
-        // The ordinal is the decomp's BADGE_ID_* value, which is what the wire carries.
-        Badge.entries.map { Badge.wireId(it).toInt() } shouldBe (0..7).toList()
+        // The ordinal is the wire id: Sinnoh's eight are the decomp's BADGE_ID_* values, and
+        // Johto's and Kanto's follow in HeartGold's own order, each region keyed by its home.
+        Badge.entries.map { Badge.wireId(it).toInt() } shouldBe (0..23).toList()
+        Badge.entries.take(8).all { it.home == "sinnoh" } shouldBe true
+        Badge.ZEPHYR.key shouldBe "johto/BADGE_ID_ZEPHYR"
+        Badge.BOULDER.key shouldBe "kanto/BADGE_ID_BOULDER"
       }
 
       test("the badges a character has earned reach the client in its player state") {
@@ -30,7 +34,7 @@ class BadgeStateTest :
           val character = store.createCharacter(1, "Lucas", CharacterGender.MALE, Region.SINNOH)
           val charId = character.info.id
           val session = FakeSession(characterId = charId, regionId = 3, bankId = 1, mapId = 159)
-          val world = WorldStateService()
+          val world = WorldStateService(WorldClock())
 
           world.send(session, checkNotNull(store.getCharacter(charId)))
           session.sent.filterIsInstance<LocalPlayerStatePacket>().single().badges shouldBe

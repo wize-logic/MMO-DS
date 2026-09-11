@@ -201,7 +201,9 @@ void openmmo_view_fill_split(int win_w, int win_h, int sec,
     if (sec > OPENMMO_VIEW_SEC_MAX) sec = OPENMMO_VIEW_SEC_MAX;
     fill_split_rest(win_w, win_h, &rest);
     want_w = rest.w * 8 / 5;
-    if (want_w > win_w) want_w = win_w;
+    /* Never past half the window, at the top of the ramp as well as at rest. */
+    if (want_w > win_w * 46 / 100) want_w = win_w * 46 / 100;
+    if (want_w < rest.w) want_w = rest.w;
     t = sec - OPENMMO_VIEW_SEC_MIN;
     den = OPENMMO_VIEW_SEC_MAX - OPENMMO_VIEW_SEC_MIN;
     panel->h = win_h;

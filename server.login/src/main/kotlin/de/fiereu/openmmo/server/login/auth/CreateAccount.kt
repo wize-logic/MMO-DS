@@ -13,7 +13,8 @@ object CreateAccount {
     data class Rejected(val reason: String) : Outcome()
   }
 
-  fun validate(username: String, password: String): String? {
+  /** Why this is not a name any account here has, or null when it could be one. */
+  fun validateUsername(username: String): String? {
     val name = username.trim()
     if (name.isEmpty()) return "username must not be blank"
     if (name.length > USERNAME_MAX) {
@@ -21,6 +22,13 @@ object CreateAccount {
     }
     if (name.any { it.isISOControl() || it.isWhitespace() }) {
       return "username cannot contain spaces or control characters"
+    }
+    return null
+  }
+
+  fun validate(username: String, password: String): String? {
+    validateUsername(username)?.let {
+      return it
     }
     if (password.isBlank()) return "password must not be blank"
     return null

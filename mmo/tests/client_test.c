@@ -20,14 +20,21 @@ static int failures;
         }                                                                       \
     } while (0)
 
-/* Captured live from the login server; signature verifies under the pinned root
- * (see session_test.c). Body only, the frame prefix is added by the test. */
+/*
+ * The point captured live from the login server, with a signature minted by openssl over what
+ * a ServerHello signature covers, the point, the checksum size and the client's hello
+ * timestamp, under the key the client pins.
+ */
 static const char *SERVER_HELLO_BODY =
     "014100040c38ac53e0f2f0a801f2303e40975ea1dc2a86527fd4e3593fc80d999"
     "e22e5a60557ae5afedb1d820fef8d2e06ec6db3dd1050b7a77057dee7b9829dd4"
-    "fe85f746003044022024a95e17ec8692f0b36c5dbbdc2d595abd39b86bf109828"
-    "56e2388366c344e0a02201d7f80f9511b057c37ca0ef3442993ccdd3e188115ea"
-    "39afd20286082b19c8c010";
+    "fe85f747003045022100d84392457183782c259463a1ed49ef3c6a1ac30adbe89"
+    "21f6067b63305d5c2a902205ec135670fd02bb9ddb7f3bf0d55e44643abae18d5"
+    "d6f02d3eeb80105589e76910";
+
+/* The hello timestamp that vector was signed for. A client that says anything
+ * else refuses it, which is the whole point of the timestamp being in there. */
+#define HELLO_TS ((s64)1700000000000LL)
 
 static size_t unhex(const char *hex, u8 *out, size_t cap)
 {
@@ -60,6 +67,9 @@ static int attach_pair(openmmo_client *c, int *peer)
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0)
         return -1;
     openmmo_config cfg = login_cfg();
+    /* Before the attach: the handshake begins there, and the ServerHello below
+     * was signed for one hello timestamp. */
+    openmmo_client_pin_hello_time(c, HELLO_TS);
     if (openmmo_client_attach_fd(c, sv[1], &cfg) != 0) {
         close(sv[0]);
         close(sv[1]);
@@ -245,6 +255,75 @@ static void test_self_tile_unknown_before_join(void)
     openmmo_client_free(c);
 }
 
+/*
+ * A client whose link breaks is restarted, not replaced: the same object goes back into
+ * openmmo_client_start, because the modules attached to it hold its pointer.
+ */
+static void test_restart_hangs_up_the_old_socket(void)
+{
+    printf("a restart hangs up the session it replaces:\n");
+    openmmo_client *c = openmmo_client_new();
+    int peer;
+    if (!c || attach_pair(c, &peer) != 0) { CHECK(0, "socketpair"); return; }
+    pump_n(c, 2); /* flush ClientHello */
+
+    /* End the session with the peer still up, the way a refusal does. */
+    u8 body[256];
+    size_t blen = unhex(SERVER_HELLO_BODY, body, sizeof body);
+    body[blen - 20] ^= 0xff; /* flip a byte inside the DER signature */
+    mmo_wbuf frame;
+    mmo_wbuf_init(&frame);
+    mmo_frame_put(&frame, body, blen);
+    if (write(peer, frame.data, frame.len) != (ssize_t)frame.len) { CHECK(0, "write hello"); }
+    mmo_wbuf_free(&frame);
+    pump_n(c, 3);
+    char msg[128] = {0};
+    CHECK(saw_failed(c, msg, sizeof msg) && openmmo_client_status(c) == OPENMMO_FAILED,
+          "the session ended with the peer still connected");
+
+    /* Drain what the client already sent, so a later read of nothing is the
+     * hang-up rather than a buffer that had not been emptied. */
+    u8 drain[1024];
+    while (read_peer(peer, drain, sizeof drain) > 0)
+        ;
+
+    openmmo_config cfg = login_cfg();
+    (void)openmmo_client_start(c, &cfg);
+    CHECK(recv(peer, drain, sizeof drain, MSG_DONTWAIT) == 0,
+          "the restart closed the old socket: the peer reads EOF");
+
+    close(peer);
+    openmmo_client_free(c);
+}
+
+/*
+ * What a redialling caller reads to tell a server that is down, worth another attempt,
+ * from one that is up and has said no. The positive path needs the server's key (the
+ * LoginResponse is encrypted), so it belongs to the live oracle on 2106; the negative one is
+ * what decides whether a broken link is retried at all, and it is checkable here.
+ */
+static void test_no_login_refusal_until_the_server_sends_one(void)
+{
+    printf("no login refusal until one arrives:\n");
+    openmmo_client *c = openmmo_client_new();
+    int peer;
+    if (!c) { CHECK(0, "alloc"); return; }
+    CHECK(openmmo_client_login_refusal(c) == -1,
+          "a client that has not signed in has not been refused");
+    CHECK(openmmo_client_login_refusal(NULL) == -1,
+          "no client at all is answered rather than dereferenced");
+
+    if (attach_pair(c, &peer) != 0) { CHECK(0, "socketpair"); openmmo_client_free(c); return; }
+    pump_n(c, 2);
+    close(peer); /* the link dies before any LoginResponse */
+    pump_n(c, 5);
+    char msg[128] = {0};
+    CHECK(saw_failed(c, msg, sizeof msg) && openmmo_client_login_refusal(c) == -1,
+          "a dropped link fails without looking like a refusal");
+
+    openmmo_client_free(c);
+}
+
 int client_tests_run(void)
 {
     failures = 0;
@@ -253,5 +332,7 @@ int client_tests_run(void)
     test_drop_not_hang();
     test_valid_hello_advances_to_auth();
     test_self_tile_unknown_before_join();
+    test_restart_hangs_up_the_old_socket();
+    test_no_login_refusal_until_the_server_sends_one();
     return failures;
 }

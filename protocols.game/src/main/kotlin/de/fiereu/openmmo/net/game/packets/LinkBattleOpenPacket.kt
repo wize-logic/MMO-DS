@@ -7,7 +7,9 @@ import de.fiereu.bytecodec.U8
 import de.fiereu.bytecodec.Utf16LeNullTerminated
 import de.fiereu.bytecodec.listPrefixed
 import de.fiereu.openmmo.common.Pokemon
+import de.fiereu.openmmo.net.game.codecs.DefaultSkinSetCodec
 import de.fiereu.openmmo.net.game.codecs.PokemonCodec
+import de.fiereu.openmmo.net.game.codecs.SkinSet
 
 /** Seat a native Platinum link battle between two players. */
 data class LinkBattleOpenPacket(
@@ -20,6 +22,8 @@ data class LinkBattleOpenPacket(
      */
     val peerGender: Int,
     val party: List<Pokemon>,
+    /** The other player's cosmetic slots, the same set [LoadEntityPacket] carries. */
+    val peerSkin: SkinSet = SkinSet(),
 )
 
 object LinkBattleOpenPacketCodec : PacketCodec<LinkBattleOpenPacket>() {
@@ -29,6 +33,7 @@ object LinkBattleOpenPacketCodec : PacketCodec<LinkBattleOpenPacket>() {
     val peerName = field(Utf16LeNullTerminated) { it.peerName }
     val peerGender = field(U8) { it.peerGender }
     val party = field(PokemonCodec.listPrefixed(U8), LinkBattleOpenPacket::party)
-    return LinkBattleOpenPacket(battleId, netId, peerName, peerGender, party)
+    val peerSkin = field(DefaultSkinSetCodec, LinkBattleOpenPacket::peerSkin)
+    return LinkBattleOpenPacket(battleId, netId, peerName, peerGender, party, peerSkin)
   }
 }

@@ -27,19 +27,19 @@ object Pages {
       <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <title>${escape(title)} &middot; OpenMMO DS</title>
+      <title>${escape(title)} &middot; MMO-DS</title>
       <meta name="robots" content="noindex, follow">
       <meta name="theme-color" content="#73ace2">
-      <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-      <link rel="stylesheet" href="/style.css?v=2">
+      <link rel="icon" href="/favicon.svg?v=3" type="image/svg+xml">
+      <link rel="stylesheet" href="/style.css?v=9">
       </head>
       <body>
+      <div class="sky" aria-hidden="true"><div></div><div></div><div></div></div>
       <header class="bar">
-        <a class="brand" href="/"><span class="mark"></span>OpenMMO DS</a>
+        <a class="brand" href="/"><span class="mark"></span>MMO-DS</a>
         <nav>
           <a href="/">Home</a>
-          <a href="https://github.com/wize-logic/OpenMMO-DS">Download</a>
-          <a class="only-wide" href="https://github.com/openmmo-org/OpenMMO">Source</a>
+          <a href="/download.html">Download</a>
           <a class="cta" href="/register.html">Play now</a>
         </nav>
       </header>
@@ -48,8 +48,8 @@ object Pages {
       </main>
       <footer class="foot">
         <div class="footer-legal">
-          OpenMMO DS is a fan project in development, built on OpenMMO.<br>
-          Not affiliated with PokeMMO, Nintendo, or The Pok&eacute;mon Company. No ROMs or copyrighted
+          MMO-DS is a free fan project in development.<br>
+          Not affiliated with Nintendo or The Pok&eacute;mon Company. No ROMs or copyrighted
           assets are distributed.<br>
           All logos, trademarks, and trade names used herein are the property of their respective
           owners.
@@ -68,7 +68,7 @@ object Pages {
             <h1>You're in, ${escape(username)}.</h1>
             <p>That name is yours. Get the client and sign in.</p>
             <p class="muted">Capitals don't matter when you sign in.</p>
-            <p><a class="button" href="https://github.com/wize-logic/OpenMMO-DS">Get the client &rarr;</a></p>
+            <p><a class="button" href="/download.html">Get the client &rarr;</a></p>
           </div>
           """
               .trimIndent())

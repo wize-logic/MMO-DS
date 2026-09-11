@@ -11,7 +11,8 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 
 private const val LAST_GBA_MOVE = 354 // Psycho Boost
-private const val LAST_MOVE = 467 // Shadow Force
+private const val LAST_DS_MOVE = 467 // Shadow Force, and the last one the client can draw
+private const val LAST_MOVE = 559 // Fusion Bolt
 
 class MoveRegistryTest :
     FunSpec({
@@ -60,9 +61,29 @@ class MoveRegistryTest :
       // way. A generator that turned it into 0% would silently make Aerial Ace whiff.
       test("writes a move that cannot miss as accuracy 0") { moves.get(332)?.accuracy shouldBe 0 }
 
-      test("still agrees with the GBA range on where it ends") {
+      // The three generations end where each of them ends, which is the check that the Gen 5
+      // block was appended rather than laid over the table it joined.
+      test("ends where each generation it was assembled from ends") {
         moves.get(LAST_GBA_MOVE)?.name shouldBe "Psycho Boost"
-        moves.get(LAST_MOVE)?.name shouldBe "Shadow Force"
+        moves.get(LAST_DS_MOVE)?.name shouldBe "Shadow Force"
+        moves.get(LAST_MOVE)?.name shouldBe "Fusion Bolt"
         moves.get(LAST_MOVE + 1).shouldBeNull()
+      }
+
+      // The block Black added, which no decompilation this repo reads has a row for. Hone Claws is
+      // the first of them and V-create is the strongest, so between them they catch a Gen 5 table
+      // that was read at the wrong offset or joined at the wrong id.
+      test("carries the moves that came out of a Black cartridge") {
+        val honeClaws = moves.get(468)
+
+        honeClaws.shouldNotBeNull()
+        honeClaws.name shouldBe "Hone Claws"
+        honeClaws.type shouldBe PokemonType.DARK
+        honeClaws.pp shouldBe 15
+        honeClaws.target shouldBe MoveTarget.USER
+        honeClaws.hasFlag(MoveFlag.SNATCH_AFFECTED) shouldBe true
+
+        moves.get(557)?.power shouldBe 180 // V-create
+        moves.get(469)?.priority shouldBe 3 // Wide Guard
       }
     })

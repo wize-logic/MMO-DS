@@ -1,0 +1,17 @@
+--- a/src/enc_effects.c
++++ b/src/enc_effects.c
+@@ -204,7 +204,13 @@
+ 
+ u32 EncEffects_BGM(const FieldBattleDTO *dto)
+ {
+-    return EncEffects_BGMForPair(EncEffects_GetEffectPair(dto), dto);
++    // A battle on a ported map opens with the source region's own theme; the
++    // package carries the table and the engine's pick stands wherever that
++    // table is silent (mods/openmmo/src/openmmo_battlebgm.c).
++    // The enemy's class rides along, for a class the package appended whose
++    // fight has a theme of its own (a gym leader's, the Rockets').
++    extern unsigned int openmmo_battle_bgm_override(int mapHeaderID, unsigned int battleType, unsigned int engineBGM, int trainerClass);
++    return openmmo_battle_bgm_override(dto->mapHeaderID, dto->battleType, EncEffects_BGMForPair(EncEffects_GetEffectPair(dto), dto), dto->trainer[1].header.trainerType);
+ }
+ 
+ static u32 EncEffects_TrainerClassEffect(u32 trainerClass)

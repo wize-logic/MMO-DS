@@ -97,7 +97,10 @@ class InMemoryUserStoreTest :
 private fun sha1HexOf(input: String): String =
     java.security.MessageDigest.getInstance("SHA-1").digest(input.toByteArray()).toHex()
 
-/** What stops somebody working through a password list. It runs before the password is checked. */
+/**
+ * What stops somebody working through a password list. It runs before the password is checked, so
+ * an attempt nobody is allowed to make buys none of the hashing either.
+ */
 class LoginAttemptLimiterTest :
     FunSpec({
       var now = 0L
@@ -123,7 +126,10 @@ class LoginAttemptLimiterTest :
         limiter.allow("ash", "10.0.0.1") shouldBe false
       }
 
-      /** Why the account counter is paired with an address: alone it would be a lockout lever. */
+      /**
+       * The reason the account counter is paired with an address rather than standing alone: on its
+       * own it would let anybody lock any player out by failing a few logins on their behalf.
+       */
       test("one address guessing an account does not lock its owner out") {
         now = 0
         val limiter = limiter()

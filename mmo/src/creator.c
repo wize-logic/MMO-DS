@@ -51,43 +51,45 @@ static int offered_region_index_of(int id)
     return 0;
 }
 
-static int offered_appear_count(void)
+/* The look step lists the rows of the gender already chosen: three boys or
+ * three girls, one a game. The other gender's rows exist and are not on the
+ * list, because the gender is the wire's field and a look has to agree with
+ * it, the card, the battle back and the fallback body all read gender. */
+static int appear_listed(const mmo_appearance *a, int gender)
+{
+    return a != NULL && a->offered && a->gender == (gender & 1);
+}
+
+static int offered_appear_count(const mmo_creator *c)
 {
     int n = 0, i, total = mmo_appearance_count();
 
-    for (i = 0; i < total; i++) {
-        const mmo_appearance *a = mmo_appearance_at(i);
-
-        if (a && a->offered)
+    for (i = 0; i < total; i++)
+        if (appear_listed(mmo_appearance_at(i), c->gender))
             n++;
-    }
     return n;
 }
 
-static int offered_appear_at(int want)
+static int offered_appear_at(const mmo_creator *c, int want)
 {
     int seen = 0, i, total = mmo_appearance_count();
 
     for (i = 0; i < total; i++) {
-        const mmo_appearance *a = mmo_appearance_at(i);
-
-        if (!a || !a->offered)
+        if (!appear_listed(mmo_appearance_at(i), c->gender))
             continue;
         if (seen == want)
             return i;
         seen++;
     }
-    return 0;
+    return -1;
 }
 
-static int offered_appear_index_of(int catalog)
+static int offered_appear_index_of(const mmo_creator *c, int catalog)
 {
     int seen = 0, i, total = mmo_appearance_count();
 
     for (i = 0; i < total; i++) {
-        const mmo_appearance *a = mmo_appearance_at(i);
-
-        if (!a || !a->offered)
+        if (!appear_listed(mmo_appearance_at(i), c->gender))
             continue;
         if (i == catalog)
             return seen;
@@ -96,6 +98,7 @@ static int offered_appear_index_of(int catalog)
     return 0;
 }
 
+/* The gender's own Platinum trainer: the row a fresh creator starts on. */
 static int gender_trainer_index(int gender)
 {
     int gfx = mmo_appearance_gender_gfx(gender);
@@ -110,17 +113,19 @@ static int gender_trainer_index(int gender)
     return 0;
 }
 
-static int is_other_trainer(int catalog, int gender)
+/* A look of the other gender cannot stay picked across a gender change. */
+static int is_other_gender(int catalog, int gender)
 {
     const mmo_appearance *a = mmo_appearance_at(catalog);
-    int other = mmo_appearance_gender_gfx(gender ^ 1);
 
-    return a != NULL && a->gfx == other;
+    return a != NULL && a->gender != (gender & 1);
 }
 
 static int select_rows(const mmo_creator *c)
 {
-    return c->list.held + 1;
+    /* A fixed list has no NEW CHARACTER row to reserve the slot past the end
+     * for, so the rows are the characters. */
+    return c->list.held + (c->fixed ? 0 : 1);
 }
 
 static int step_rows(const mmo_creator *c)
@@ -135,7 +140,7 @@ static int step_rows(const mmo_creator *c)
     case MMO_CREATOR_REGION:
         return offered_region_count();
     case MMO_CREATOR_APPEAR:
-        return offered_appear_count();
+        return offered_appear_count(c);
     default:
         return 0;
     }
@@ -176,6 +181,27 @@ void mmo_creator_reset(mmo_creator *c)
     c->region = mmo_region_default();
     c->appear = gender_trainer_index(0);
     c->submitted = 0;
+}
+
+void mmo_creator_fix_list(mmo_creator *c, int on)
+{
+    if (c)
+        c->fixed = on ? 1 : 0;
+}
+
+void mmo_creator_direct_new(mmo_creator *c, int on)
+{
+    if (c)
+        c->direct_new = on ? 1 : 0;
+}
+
+int mmo_creator_wants_new(const mmo_creator *c)
+{
+    /* Still on the list is the whole point: a direct new game never walks the
+     * name, gender, region and body steps, so the step not having moved is
+     * what says the press was taken. */
+    return c != NULL && c->direct_new && c->creating
+           && c->step == MMO_CREATOR_SELECT;
 }
 
 void mmo_creator_set_list(mmo_creator *c, const mmo_character_list *list)
@@ -245,7 +271,7 @@ void mmo_creator_move(mmo_creator *c, mmo_creator_dir dir)
             || dir == MMO_CREATOR_UP || dir == MMO_CREATOR_DOWN)
             c->cursor ^= 1;
         c->gender = c->cursor & 1;
-        if (is_other_trainer(c->appear, c->gender))
+        if (is_other_gender(c->appear, c->gender))
             c->appear = gender_trainer_index(c->gender);
         return;
     }
@@ -265,6 +291,18 @@ int mmo_creator_confirm(mmo_creator *c)
 
     switch (c->step) {
     case MMO_CREATOR_SELECT:
+        if (c->fixed) {
+            /*
+             * Nothing on the menu the other branch opens exists here: PLAY is the only verb,
+             * and the row is the pick.
+             */
+            if (c->refused[0] || c->cursor >= c->list.held)
+                return 0;
+            c->pick = c->cursor;
+            c->acting = -1;
+            c->creating = 0;
+            return 1;
+        }
         c->refused[0] = '\0';
         if (c->cursor < c->list.held) {
             /* Not the pick itself: a character is also the one thing on this
@@ -278,6 +316,12 @@ int mmo_creator_confirm(mmo_creator *c)
         c->pick = -1;
         c->acting = -1;
         c->creating = 1;
+        if (c->direct_new) {
+            /* The caller makes this one. Nothing below is asked, and the step
+             * stays where it is so the screen does not flicker through a
+             * creator nobody is going to finish. */
+            return 1;
+        }
         c->name[0] = '\0';
         c->gender = 0;
         c->region = mmo_region_default();
@@ -317,7 +361,7 @@ int mmo_creator_confirm(mmo_creator *c)
 
     case MMO_CREATOR_GENDER:
         c->gender = c->cursor & 1;
-        if (is_other_trainer(c->appear, c->gender))
+        if (is_other_gender(c->appear, c->gender))
             c->appear = gender_trainer_index(c->gender);
         set_step(c, MMO_CREATOR_REGION, offered_region_index_of(c->region));
         return 1;
@@ -327,11 +371,13 @@ int mmo_creator_confirm(mmo_creator *c)
         if (!r || !r->selectable)
             return 0;
         c->region = r->id;
-        set_step(c, MMO_CREATOR_APPEAR, offered_appear_index_of(c->appear));
+        set_step(c, MMO_CREATOR_APPEAR, offered_appear_index_of(c, c->appear));
         return 1;
 
     case MMO_CREATOR_APPEAR:
-        c->appear = offered_appear_at(c->cursor);
+        if (offered_appear_at(c, c->cursor) < 0)
+            return 0;
+        c->appear = offered_appear_at(c, c->cursor);
         c->submitted = 1;
         return 1;
 
@@ -370,16 +416,20 @@ int mmo_creator_back(mmo_creator *c)
     }
 }
 
-int mmo_creator_set_name(mmo_creator *c, const char *latin1)
+int mmo_creator_set_name(mmo_creator *c, const char *name)
 {
     size_t n;
 
-    if (!c || !latin1 || c->step != MMO_CREATOR_NAME)
+    if (!c || !name || c->step != MMO_CREATOR_NAME)
         return 0;
-    n = strlen(latin1);
-    if (n == 0 || n > MMO_CHAR_NAME_MAX)
+    n = strlen(name);
+    if (n == 0 || mmo_utf16_units(name) > MMO_CHAR_NAME_MAX)
         return 0;
-    memcpy(c->name, latin1, n);
+    /* Three bytes a unit bounds the cap above, so this cannot fire; refusing
+     * beats trusting the arithmetic with a fixed buffer behind it. */
+    if (n >= sizeof c->name)
+        return 0;
+    memcpy(c->name, name, n);
     c->name[n] = '\0';
     set_step(c, MMO_CREATOR_GENDER, c->gender & 1);
     return 1;
@@ -405,6 +455,7 @@ void mmo_creator_refuse(mmo_creator *c, const char *why)
         n = sizeof c->refused - 1;
     memcpy(c->refused, why, n);
     c->refused[n] = '\0';
+    c->pick = -1;
     /* The reason is read on the list the refusal put the player back on, and
      * not on the name step: the lobby hands that step straight to the engine's
      * naming screen, which has nowhere to print a sentence of ours. The cursor
@@ -495,6 +546,10 @@ const char *mmo_creator_hint(const mmo_creator *c)
     case MMO_CREATOR_SELECT:
         if (c->refused[0])
             return c->refused;
+        if (c->fixed)
+            return "A TO CHOOSE";
+        if (c->direct_new)
+            return c->list.held ? "A TO CHOOSE   NEW GAME TO START ONE" : "A  NEW GAME";
         return c->list.held ? "A TO CHOOSE   NEW CHARACTER TO CREATE" : "A  NEW CHARACTER";
     case MMO_CREATOR_ACTION:
         return "A TO CHOOSE   B GOES BACK";
@@ -536,17 +591,6 @@ int mmo_creator_visible_count(const mmo_creator *c)
     return left;
 }
 
-static void pretty_name(const char *in, char *out, size_t cap)
-{
-    size_t i;
-
-    if (cap == 0)
-        return;
-    for (i = 0; in[i] != '\0' && i + 1 < cap; i++)
-        out[i] = (in[i] == '_') ? ' ' : in[i];
-    out[i] = '\0';
-}
-
 int mmo_creator_row_count(const mmo_creator *c)
 {
     if (!c || c->step == MMO_CREATOR_NAME || c->step == MMO_CREATOR_WAIT
@@ -560,7 +604,6 @@ int mmo_creator_row_at(const mmo_creator *c, int idx, mmo_creator_row *out)
     const mmo_region *r;
     const mmo_appearance *a;
     const mmo_character *ch;
-    char look[24];
 
     if (!c || !out || idx < 0 || idx >= mmo_creator_row_count(c))
         return 0;
@@ -576,7 +619,11 @@ int mmo_creator_row_at(const mmo_creator *c, int idx, mmo_creator_row *out)
                      ch->gender == 1 ? "F" : (ch->gender == 0 ? "M" : "?"),
                      mmo_region_name(ch->region));
         } else {
-            snprintf(out->text, sizeof out->text, "NEW CHARACTER");
+            /* NEW GAME, not NEW CHARACTER, where the caller starts one: offline
+             * that row is the cartridge's own opening and the player knows it
+             * by the cartridge's own name for it. */
+            snprintf(out->text, sizeof out->text, "%s",
+                     c->direct_new ? "NEW GAME" : "NEW CHARACTER");
         }
         return 1;
 
@@ -614,16 +661,25 @@ int mmo_creator_row_at(const mmo_creator *c, int idx, mmo_creator_row *out)
         return 1;
 
     case MMO_CREATOR_APPEAR:
-        a = mmo_appearance_at(offered_appear_at(idx));
+        a = mmo_appearance_at(offered_appear_at(c, idx));
         if (!a)
             return 0;
-        pretty_name(a->name, look, sizeof look);
-        snprintf(out->text, sizeof out->text, "%s", look);
+        snprintf(out->text, sizeof out->text, "%s", a->label);
         return 1;
 
     default:
         return 0;
     }
+}
+
+int mmo_creator_appear_gfx_at(const mmo_creator *c, int idx)
+{
+    const mmo_appearance *a;
+
+    if (!c || c->step != MMO_CREATOR_APPEAR)
+        return -1;
+    a = mmo_appearance_at(offered_appear_at(c, idx));
+    return a != NULL ? a->gfx : -1;
 }
 
 int mmo_creator_get_row(const mmo_creator *c, int vis, mmo_creator_row *out)

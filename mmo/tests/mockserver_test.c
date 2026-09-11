@@ -39,7 +39,8 @@ static void test_signature_oracle(void)
 
     mmo_wbuf hello;
     mmo_wbuf_init(&hello);
-    mmo_mock_server_hello(&m, &hello);
+    CHECK(mmo_mock_server_hello(&m, &hello, MMO_MOCK_HELLO_TS) == 0,
+          "the mock has a signature for this profile and timestamp");
 
     const u8 *body;
     size_t n;
@@ -49,14 +50,39 @@ static void test_signature_oracle(void)
     mmo_rbuf_init(&r, body, n);
     mmo_server_hello sh;
     CHECK(mmo_hs_read_server_hello(&r, &sh) == 0, "ServerHello parses");
-    CHECK(mmo_p256_ecdsa_verify(mmo_mock_root_pub, sh.ephemeral_pub,
-                                MMO_P256_POINT, sh.signature, sh.siglen) == 1,
+    u8 signed_bytes[MMO_HS_SIGNED];
+    mmo_hs_signed_bytes(sh.ephemeral_pub, sh.checksum_size, MMO_MOCK_HELLO_TS,
+                        signed_bytes);
+    CHECK(mmo_p256_ecdsa_verify(mmo_mock_root_pub, signed_bytes, sizeof signed_bytes,
+                                sh.signature, sh.siglen) == 1,
           "signature verifies under mmo_mock_root_pub");
-    CHECK(mmo_p256_ecdsa_verify(mmo_root_pubkey, sh.ephemeral_pub,
-                                MMO_P256_POINT, sh.signature, sh.siglen) == 0,
+    CHECK(mmo_p256_ecdsa_verify(mmo_root_pubkey, signed_bytes, sizeof signed_bytes,
+                                sh.signature, sh.siglen) == 0,
           "the same signature does NOT verify under the real pinned root");
 
     mmo_wbuf_free(&hello);
+}
+
+/* The mock cannot sign, so it can only answer the (profile, timestamp) pairs its
+ * fixture was minted for. Anything else has to say so rather than hand out a
+ * ServerHello signed for some other session. */
+static void test_hello_needs_a_minted_fixture(void)
+{
+    printf("the mock refuses to answer what it was never signed for:\n");
+    mmo_mock_server m;
+    mmo_wbuf w;
+
+    mmo_mock_server_init(&m, 16);
+    mmo_wbuf_init(&w);
+    CHECK(mmo_mock_server_hello(&m, &w, MMO_MOCK_HELLO_TS + 1) == -1 && w.len == 0,
+          "another hello timestamp is refused, nothing written");
+    mmo_wbuf_free(&w);
+
+    mmo_mock_server_init(&m, 7);
+    mmo_wbuf_init(&w);
+    CHECK(mmo_mock_server_hello(&m, &w, MMO_MOCK_HELLO_TS) == -1 && w.len == 0,
+          "a profile the fixture has no signature for is refused");
+    mmo_wbuf_free(&w);
 }
 
 /* The ServerHello is constant for a given profile, a frozen byte string, the
@@ -70,8 +96,8 @@ static void test_hello_is_frozen(void)
     mmo_wbuf wa, wb;
     mmo_wbuf_init(&wa);
     mmo_wbuf_init(&wb);
-    mmo_mock_server_hello(&a, &wa);
-    mmo_mock_server_hello(&b, &wb);
+    mmo_mock_server_hello(&a, &wa, MMO_MOCK_HELLO_TS);
+    mmo_mock_server_hello(&b, &wb, MMO_MOCK_HELLO_TS);
     CHECK(wa.len == wb.len && memcmp(wa.data, wb.data, wa.len) == 0,
           "two mocks emit the identical ServerHello");
     mmo_wbuf_free(&wa);
@@ -96,13 +122,14 @@ static void test_full_handshake_and_app_roundtrip(void)
     mmo_session c;
     mmo_wbuf hello;
     mmo_wbuf_init(&hello);
-    CHECK(mmo_session_start(&c, &hello) == 0, "client sent ClientHello");
+    CHECK(mmo_session_start_at(&c, &hello, MMO_MOCK_HELLO_TS) == 0,
+          "client sent ClientHello");
     c.root_pub = mmo_mock_root_pub; /* set AFTER start, which memsets it to NULL */
 
     /* Mock: hand out ServerHello; client verifies it and returns ClientReady. */
     mmo_wbuf shello;
     mmo_wbuf_init(&shello);
-    mmo_mock_server_hello(&m, &shello);
+    mmo_mock_server_hello(&m, &shello, MMO_MOCK_HELLO_TS);
     const u8 *sh_body;
     size_t sh_n;
     one_frame(&shello, &sh_body, &sh_n);
@@ -164,7 +191,7 @@ static void test_default_root_rejects_mock(void)
     mmo_mock_server_init(&m, 16);
     mmo_wbuf shello;
     mmo_wbuf_init(&shello);
-    mmo_mock_server_hello(&m, &shello);
+    mmo_mock_server_hello(&m, &shello, MMO_MOCK_HELLO_TS);
     const u8 *sh_body;
     size_t sh_n;
     one_frame(&shello, &sh_body, &sh_n);
@@ -172,7 +199,7 @@ static void test_default_root_rejects_mock(void)
     mmo_session c;
     mmo_wbuf hello;
     mmo_wbuf_init(&hello);
-    mmo_session_start(&c, &hello);
+    mmo_session_start_at(&c, &hello, MMO_MOCK_HELLO_TS);
     /* root_pub left NULL: the pinned production key governs. */
     mmo_wbuf ready;
     mmo_wbuf_init(&ready);
@@ -189,6 +216,7 @@ int mockserver_tests_run(void)
 {
     failures = 0;
     test_signature_oracle();
+    test_hello_needs_a_minted_fixture();
     test_hello_is_frozen();
     test_full_handshake_and_app_roundtrip();
     test_default_root_rejects_mock();

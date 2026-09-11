@@ -23,7 +23,7 @@ import kotlinx.coroutines.test.runTest
 class GuildStoreTest :
     FunSpec({
       test("creating a guild registers the leader as a member and binds the lookup") {
-        val store = GuildStore()
+        val store = GuildStore(InMemoryGuildRepository())
         store.getGuildForChar(100L) shouldBe null
 
         val guild = store.createGuild("Knights", "KNT", leaderId = 100L, leaderName = "Leader")
@@ -35,7 +35,7 @@ class GuildStoreTest :
       }
 
       test("invited members append to the roster") {
-        val store = GuildStore()
+        val store = GuildStore(InMemoryGuildRepository())
         val guild = store.createGuild("Knights", "KNT", leaderId = 100L, leaderName = "Leader")
         store.addMember(guild, GuildMember(200L, "Grunt", GuildRank.GRUNT, leader = false))
         guild.members.map { it.name } shouldBe listOf("Leader", "Grunt")
@@ -43,7 +43,7 @@ class GuildStoreTest :
       }
 
       test("rank assign updates a member and kick removes them") {
-        val store = GuildStore()
+        val store = GuildStore(InMemoryGuildRepository())
         val guild = store.createGuild("Knights", "KNT", leaderId = 100L, leaderName = "Leader")
         store.addMember(guild, GuildMember(200L, "Recruit", GuildRank.GRUNT, leader = false))
 
@@ -55,7 +55,7 @@ class GuildStoreTest :
       }
 
       test("transferring leadership promotes the target and demotes the old Boss to Executive") {
-        val store = GuildStore()
+        val store = GuildStore(InMemoryGuildRepository())
         val guild = store.createGuild("Knights", "KNT", leaderId = 100L, leaderName = "Leader")
         store.addMember(guild, GuildMember(200L, "Heir", GuildRank.OFFICER, leader = false))
 
@@ -68,9 +68,12 @@ class GuildStoreTest :
         byId.getValue(100L).leader shouldBe false
       }
 
-      /** A kick used to clear the membership lookup for whatever id it was handed. */
+      /**
+       * A kick used to clear the membership lookup for whatever id it was handed, whether or not
+       * that character was in this guild.
+       */
       test("a kick aimed outside the guild leaves the other guild alone") {
-        val store = GuildStore()
+        val store = GuildStore(InMemoryGuildRepository())
         val mine = store.createGuild("Knights", "KNT", leaderId = 100L, leaderName = "Leader")
         val theirs = store.createGuild("Rockets", "RKT", leaderId = 200L, leaderName = "Boss")
 
@@ -80,9 +83,12 @@ class GuildStoreTest :
         theirs.members.map { it.id } shouldBe listOf(200L)
       }
 
-      /** The old loop demoted the Boss whether or not it found a successor. */
+      /**
+       * The old loop demoted whoever held the guild whether or not it found a successor, so naming
+       * anyone who was not a member left the guild with no Boss and no way to appoint one.
+       */
       test("handing the guild to somebody who is not in it changes nothing") {
-        val store = GuildStore()
+        val store = GuildStore(InMemoryGuildRepository())
         val guild = store.createGuild("Knights", "KNT", leaderId = 100L, leaderName = "Leader")
 
         store.transferLeadership(guild, 999L)
@@ -95,7 +101,7 @@ class GuildStoreTest :
       }
 
       test("leave unbinds the leaver and disband removes the guild") {
-        val store = GuildStore()
+        val store = GuildStore(InMemoryGuildRepository())
         store.createGuild("Knights", "KNT", leaderId = 100L, leaderName = "Leader")
         store.leaveGuild(100L)
         store.getGuildForChar(100L) shouldBe null
@@ -105,14 +111,11 @@ class GuildStoreTest :
         store.getGuildForChar(100L) shouldBe null
       }
 
-      /**
-       * What a member is allowed to do, which nothing asked before. Every verb read which guild the
-       * sender was in and then acted on whatever id the packet named.
-       */
+      /** What a member is allowed to do, which nothing asked before. */
       context("what a rank may do") {
         /** A guild with its leader and one Grunt, both online, and the service in front of it. */
         class Fixture(scope: CoroutineScope) {
-          val guilds = GuildStore()
+          val guilds = GuildStore(InMemoryGuildRepository())
           val characters = CharacterStore(FakeCharacterRepository(), EntityIdService(), scope)
           val sessions = SessionRegistry()
           val service = GuildService(guilds, characters, sessions)

@@ -11,6 +11,18 @@
 
 #include "../../../include/client.h"
 
+/* How many of the twenty-five apps this save has. */
+static int registered_apps(Poketch *poketch)
+{
+    int id, n = 0;
+
+    for (id = 0; id < POKETCH_APPID_MAX; id++) {
+        if (Poketch_IsAppRegistered(poketch, (enum PoketchAppID)id))
+            n++;
+    }
+    return n;
+}
+
 /* Whether the server's seat says this character has been handed the Poketch.
  * Read off the seat rather than off VarsFlags: the seat lands in the join
  * burst but is written into the block on the first frame that has a field,
@@ -43,7 +55,8 @@ void openmmo_poketch_seat(SaveData *save, const openmmo_script_state *st)
     }
 
     Poketch_Enable(poketch);
-    printf("openmmo: poketch seated on, vanilla apps\n");
+    printf("openmmo: poketch seated on, %d app(s) registered\n",
+           registered_apps(poketch));
 }
 
 void openmmo_poketch_report(FieldSystem *fs)
@@ -59,8 +72,9 @@ void openmmo_poketch_report(FieldSystem *fs)
 
     poketch = SaveData_GetPoketch(fs->saveData);
     sys = FieldSystem_GetPoketchSystem();
-    printf("openmmo: poketch %s, system %s\n",
+    printf("openmmo: poketch %s, system %s, %d app(s)\n",
            (poketch != NULL && Poketch_IsEnabled(poketch)) ? "on" : "off",
-           sys != NULL ? "live" : "unavailable");
+           sys != NULL ? "live" : "unavailable",
+           poketch != NULL ? registered_apps(poketch) : 0);
     reported = 1;
 }

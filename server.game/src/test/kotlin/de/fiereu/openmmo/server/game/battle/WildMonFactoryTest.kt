@@ -51,9 +51,12 @@ class WildMonFactoryTest :
         mon.xp shouldBe ExpCurves.totalXpFor(SpeciesRegistry().get(19)!!.growthRate, 7)
       }
 
+      // 495 used to be one of these. Black's 156 species reached the table on 2026-08-30, so the
+      // first id past the end is Genesect's plus one, and a Gen 5 species now rolls like any other.
       test("an unknown species returns null") {
         factory.create(9999, 5, BattleRng(seed = 1)).shouldBeNull()
-        factory.create(495, 5, BattleRng(seed = 1)).shouldBeNull()
+        factory.create(650, 5, BattleRng(seed = 1)).shouldBeNull()
+        factory.create(495, 5, BattleRng(seed = 1)).shouldNotBeNull()
       }
 
       test("the wild id carries the monster tag") {

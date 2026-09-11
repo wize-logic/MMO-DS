@@ -200,6 +200,59 @@ static void test_chains_to_what_it_displaced(const char *dir)
           "and the report was written before it");
 }
 
+/*
+ * A division by zero is not a crash on this hardware: the DS has no divide instruction, so the
+ * cartridge's runtime answers it, and in the fused game the engine's SIGFPE handler repairs
+ * the fault and lets the frame carry on.
+ */
+static void test_leaves_a_taken_sigfpe_alone(const char *dir)
+{
+    pid_t kid;
+    int status = 0;
+
+    remove_matching(dir, "crash-");
+    fflush(stdout);
+    kid = fork();
+    if (kid == 0) {
+        struct sigaction sa;
+
+        memset(&sa, 0, sizeof sa);
+        sa.sa_sigaction = pretend_engine;
+        sa.sa_flags = SA_SIGINFO;
+        sigaction(SIGFPE, &sa, NULL);
+        mmo_plat_crash_install("fpe");
+        raise(SIGFPE);
+        _exit(0);
+    }
+    CHECK(kid > 0 && waitpid(kid, &status, 0) == kid &&
+          WIFEXITED(status) && WEXITSTATUS(status) == 42,
+          "a SIGFPE handler that was already there keeps the signal");
+    CHECK(count_matching(dir, "crash-fpe-") == 0,
+          "and no report is written about a fault it was going to repair");
+}
+
+/* The other half: with nobody holding it, a SIGFPE is a real one and gets the
+ * same report and the same death as any other fault. */
+static void test_takes_an_untaken_sigfpe(const char *dir)
+{
+    pid_t kid;
+    int status = 0;
+
+    remove_matching(dir, "crash-");
+    fflush(stdout);
+    kid = fork();
+    if (kid == 0) {
+        mmo_plat_crash_install("fpe");
+        raise(SIGFPE);
+        _exit(0);
+    }
+    CHECK(kid > 0 && waitpid(kid, &status, 0) == kid &&
+          WIFSIGNALED(status) && WTERMSIG(status) == SIGFPE,
+          "a SIGFPE nobody else wanted still kills the process");
+    CHECK(count_matching(dir, "crash-fpe-") == 1,
+          "and still leaves a report behind");
+}
+
 int logdir_tests_run(void)
 {
     char dir[1024];
@@ -218,6 +271,8 @@ int logdir_tests_run(void)
     test_stamp();
     test_crash_leaves_a_report(dir);
     test_chains_to_what_it_displaced(dir);
+    test_leaves_a_taken_sigfpe_alone(dir);
+    test_takes_an_untaken_sigfpe(dir);
 
     remove_matching(dir, "crash-");
     remove_matching(dir, ".writable");

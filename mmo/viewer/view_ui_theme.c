@@ -250,6 +250,49 @@ int view_ui_theme_cells(int id, const struct openmmo_rect *dst, int text_px,
     return n;
 }
 
+/*
+ * The same grid read the other way: where each cell sits on the sheet, and how big the surface
+ * is at 1:1.
+ */
+int view_ui_theme_source(int id, struct view_ui_th_pair out[VIEW_UI_TH_CELLS],
+                         int *w, int *h)
+{
+    const struct th_def *d;
+    int r, c, n = 0, x, y = 0, tw = 0, th = 0;
+
+    if (id < 0 || id >= VIEW_UI_TH_N || out == NULL)
+        return 0;
+    d = &defs[id];
+    for (c = 0; c < d->ncols; c++)
+        tw += d->cw[c];
+    for (r = 0; r < d->nrows; r++)
+        th += d->rh[r];
+    for (r = 0; r < d->nrows; r++) {
+        x = 0;
+        for (c = 0; c < d->ncols; c++) {
+            struct view_ui_th_pair *p = &out[n];
+            int cw = d->cw[c];
+
+            if (id == VIEW_UI_TH_FRAME && r == 3 && c == 1)
+                cw = 3;
+            p->src.x = d->sx[r][c];
+            p->src.y = d->sy[r][c];
+            p->src.w = cw;
+            p->src.h = d->rh[r];
+            p->dst.x = x;
+            p->dst.y = y;
+            p->dst.w = cw;
+            p->dst.h = d->rh[r];
+            x += d->cw[c];
+            n++;
+        }
+        y += d->rh[r];
+    }
+    if (w != NULL) *w = tw;
+    if (h != NULL) *h = th;
+    return n;
+}
+
 /* ------------------------------------------------------------------ */
 /* PNG                                                                 */
 /* ------------------------------------------------------------------ */
@@ -280,6 +323,11 @@ unsigned char *view_ui_png(const unsigned char *buf, size_t len,
     size_t at, idat_len = 0, idat_cap = 0, raw_len, got;
     uint32_t iw = 0, ih = 0;
     int bpp = 0, y;
+    /* A palette image's table, expanded on the way out: the launcher's
+     * wallpaper is one (825 KB against 2 MB as truecolour), and the Android
+     * door reads it through here rather than through raylib. */
+    unsigned char pal[256][4];
+    int npal = 0, paletted = 0;
 
     if (buf == NULL || len < 8 + 25 || memcmp(buf, sig, 8) != 0)
         return NULL;
@@ -295,13 +343,34 @@ unsigned char *view_ui_png(const unsigned char *buf, size_t len,
                 goto fail;
             iw = be32(data);
             ih = be32(data + 4);
-            /* 8-bit truecolour, no palette, no interlace: what every sheet
-             * the default theme ships is. Anything else is refused, not
-             * half-read. */
+            /* 8-bit truecolour or 8-bit palette, no interlace: what every
+             * sheet the default theme ships is, plus the wallpaper. Anything
+             * else is refused, not half-read. */
             if (iw < 1 || ih < 1 || iw > 8192 || ih > 8192 || data[8] != 8 ||
-                (data[9] != 2 && data[9] != 6) || data[12] != 0)
+                (data[9] != 2 && data[9] != 6 && data[9] != 3) ||
+                data[12] != 0)
                 goto fail;
-            bpp = data[9] == 6 ? 4 : 3;
+            paletted = data[9] == 3;
+            bpp = data[9] == 6 ? 4 : data[9] == 2 ? 3 : 1;
+        } else if (memcmp(type, "PLTE", 4) == 0) {
+            int i;
+
+            if (clen % 3 != 0 || clen > 256 * 3)
+                goto fail;
+            npal = (int)(clen / 3);
+            for (i = 0; i < npal; i++) {
+                pal[i][0] = data[i * 3];
+                pal[i][1] = data[i * 3 + 1];
+                pal[i][2] = data[i * 3 + 2];
+                pal[i][3] = 255;
+            }
+        } else if (memcmp(type, "tRNS", 4) == 0 && paletted) {
+            int i;
+
+            if ((int)clen > npal)
+                goto fail;
+            for (i = 0; i < (int)clen; i++)
+                pal[i][3] = data[i];
         } else if (memcmp(type, "IDAT", 4) == 0) {
             if (idat_len + clen > idat_cap) {
                 unsigned char *grow;
@@ -319,7 +388,7 @@ unsigned char *view_ui_png(const unsigned char *buf, size_t len,
         }
         at += 12 + clen;
     }
-    if (bpp == 0 || idat_len == 0)
+    if (bpp == 0 || idat_len == 0 || (paletted && npal == 0))
         goto fail;
 
     raw_len = (size_t)ih * ((size_t)iw * (size_t)bpp + 1);
@@ -359,6 +428,12 @@ unsigned char *view_ui_png(const unsigned char *buf, size_t len,
         for (i = 0; i < (int)iw; i++) {
             unsigned char *o = px + ((size_t)y * iw + i) * 4;
 
+            if (paletted) {
+                if (cur[i] >= npal)
+                    goto fail;
+                memcpy(o, pal[cur[i]], 4);
+                continue;
+            }
             o[0] = cur[i * bpp];
             o[1] = cur[i * bpp + 1];
             o[2] = cur[i * bpp + 2];
@@ -437,11 +512,15 @@ int view_ui_theme_read(struct view_ui_theme *t, const char *dir)
 
         snprintf(path, sizeof path, "%s/%s", dir, sheets[i].file);
         buf = slurp(path, &len);
+        /* Nothing at that PATH is not a fault any more, and it is not worth a line. */
+        if (buf == NULL && i == 0)
+            return 0;
         px = buf != NULL ? view_ui_png(buf, len, &w, &h) : NULL;
         free(buf);
         if (px == NULL || w < sheets[i].min_w || h < sheets[i].min_h) {
             fprintf(stderr,
-                    "openmmo-view: theme: %s %s; drawing without art\n", path,
+                    "openmmo-view: theme: %s %s; drawing the window's own art\n",
+                    path,
                     px == NULL ? "missing or not an 8-bit PNG"
                                : "is not the layout the table was measured on");
             free(px);

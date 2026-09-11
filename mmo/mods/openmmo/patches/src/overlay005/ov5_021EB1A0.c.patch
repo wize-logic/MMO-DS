@@ -1,0 +1,38 @@
+--- a/src/overlay005/ov5_021EB1A0.c
++++ b/src/overlay005/ov5_021EB1A0.c
+@@ -249,7 +249,12 @@
+     v0 = MapObject_GetFacingDir(mapObj);
+     v1 = sub_02062A14(mapObj);
+ 
+-    GF_ASSERT(v1 < (0x8 + 1));
++    // A ported billboard has the nine generic anim groups and nothing
++    // else, so a special the script asked for (a bow, a give) stands
++    // still instead of indexing off the table.
++    if (v1 >= (0x8 + 1)) {
++        v1 = 0;
++    }
+     Unk_ov5_021FF3D4[v1](mapObj, v3, v2, v0);
+ 
+     v2->unk_02 = v0;
+@@ -789,7 +794,9 @@
+     v0 = MapObject_GetFacingDir(mapObj);
+     v1 = sub_02062A14(mapObj);
+ 
+-    GF_ASSERT(v1 < ((0x8 + 1) + 1));
++    if (v1 >= ((0x8 + 1) + 1)) {
++        v1 = 0;
++    }
+     Unk_ov5_021FF3F8[v1](mapObj, v3, v2, v0);
+ 
+     v2->unk_00 = v0;
+@@ -1045,7 +1052,9 @@
+     v0 = MapObject_GetFacingDir(mapObj);
+     v1 = sub_02062A14(mapObj);
+ 
+-    GF_ASSERT(v1 < (((0x8 + 1) + 1) + 1));
++    if (v1 >= (((0x8 + 1) + 1) + 1)) {
++        v1 = 0;
++    }
+ 
+     if ((v2->unk_02 == 0x0) && (v1 != v2->unk_02) && (v2->unk_03_0 == 0)) {
+         v2->unk_00 = -1;

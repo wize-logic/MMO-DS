@@ -298,7 +298,8 @@ static void gtl_ask(struct view_hud *hud, int tab)
 
 /* Push a money verb whose wide arguments ride cmd_gtl. */
 static void gtl_verb(struct view_hud *hud, unsigned verb, int row,
-                     int32_t price, int32_t qty)
+                     int32_t price, int32_t qty, uint32_t id_lo,
+                     uint32_t id_hi)
 {
     if (hud != NULL && hud->page != NULL) {
         struct openmmo_hud_gtl_ask a;
@@ -308,8 +309,22 @@ static void gtl_verb(struct view_hud *hud, unsigned verb, int row,
         a.qty = qty;
         memcpy((void *)&hud->page->cmd_gtl, &a, sizeof a);
     }
-    view_hud_push(hud, OPENMMO_HUD_CMD_GTL,
-                  (int32_t)(verb | ((uint32_t)(row & 0xFF) << 8)));
+    view_hud_push_id(hud, OPENMMO_HUD_CMD_GTL,
+                     (int32_t)(verb | ((uint32_t)(row & 0xFF) << 8)),
+                     id_lo, id_hi);
+}
+
+/* The listing on a drawn row, or zero when the page no longer has that row. */
+static void gtl_row_id(const struct openmmo_hud_gtl *gs, int row, uint32_t *lo,
+                       uint32_t *hi)
+{
+    *lo = 0;
+    *hi = 0;
+    if (gs != NULL && row >= 0 && row < (int)gs->row_n &&
+        row < (int)OPENMMO_HUD_GTL_ROWS) {
+        *lo = gs->row[row].id_lo;
+        *hi = gs->row[row].id_hi;
+    }
 }
 
 void view_ui_gtl_open(struct view_hud *hud)
@@ -1261,33 +1276,42 @@ static void dlg_accept(struct view_hud *hud)
 {
     const struct openmmo_hud_gtl *gs = &hud->snap.gtl;
     long qty = field_num(GF_DLG_QTY);
+    uint32_t id_lo, id_hi;
 
+    /* The dialog has been up while the player typed a quantity, which is
+     * long enough for a fresh page to land behind it, so the listing it
+     * names is the one the row held when it opened. */
+    gtl_row_id(gs, G.dlg_row, &id_lo, &id_hi);
     if (qty < 1)
         qty = 1;
     switch (G.dlg) {
     case GDLG_BUY_MON:
-        gtl_verb(hud, OPENMMO_HUD_GTL_BUY, G.dlg_row, -1, 1);
+        gtl_verb(hud, OPENMMO_HUD_GTL_BUY, G.dlg_row, -1, 1, id_lo, id_hi);
         break;
     case GDLG_BUY_ITEM:
         if (G.dlg_row < (int)gs->row_n &&
             qty > (long)gs->row[G.dlg_row].quantity)
             qty = (long)gs->row[G.dlg_row].quantity;
-        gtl_verb(hud, OPENMMO_HUD_GTL_BUY, G.dlg_row, -1, (int32_t)qty);
+        gtl_verb(hud, OPENMMO_HUD_GTL_BUY, G.dlg_row, -1, (int32_t)qty,
+                 id_lo, id_hi);
         break;
     case GDLG_BUY_MARKET:
+        /* The quote strip names an item, not a listing: the server picks the
+         * cheapest asks itself. */
         if (G.dlg_row < (int)gs->quote_n)
             gtl_verb(hud, OPENMMO_HUD_GTL_MARKET, G.dlg_row,
                      (int32_t)(qty * (long)gs->quote[G.dlg_row].price),
-                     (int32_t)qty);
+                     (int32_t)qty, gs->quote[G.dlg_row].item, 0);
         break;
     case GDLG_CANCEL:
-        gtl_verb(hud, OPENMMO_HUD_GTL_BACK, G.dlg_row, -1, 1);
+        gtl_verb(hud, OPENMMO_HUD_GTL_BACK, G.dlg_row, -1, 1, id_lo, id_hi);
         break;
     case GDLG_REPRICE: {
         long p = field_num(GF_DLG_PRICE);
 
         if (p >= 1)
-            gtl_verb(hud, OPENMMO_HUD_GTL_REPRICE, G.dlg_row, (int32_t)p, 1);
+            gtl_verb(hud, OPENMMO_HUD_GTL_REPRICE, G.dlg_row, (int32_t)p, 1,
+                     id_lo, id_hi);
         break;
     }
     case GDLG_SELL: {
@@ -1298,10 +1322,10 @@ static void dlg_accept(struct view_hud *hud)
             break;
         if (G.create_bag >= 0)
             gtl_verb(hud, OPENMMO_HUD_GTL_SELL_ITEM, G.create_bag,
-                     (int32_t)price, (int32_t)(n < 1 ? 1 : n));
+                     (int32_t)price, (int32_t)(n < 1 ? 1 : n), 0, 0);
         else if (G.create_slot >= 0)
             gtl_verb(hud, OPENMMO_HUD_GTL_SELL, G.create_slot,
-                     (int32_t)price, 1);
+                     (int32_t)price, 1, 0, 0);
         G.create_bag = -1;
         G.create_slot = -1;
         G.field[GF_CREATE_PRICE][0] = '\0';
@@ -1469,7 +1493,8 @@ int view_ui_gtl_event(const SDL_Event *ev,
                 gtl_ask(hud, G.tab);
                 break;
             case GTOOL_CLAIM_ALL:
-                gtl_verb(hud, OPENMMO_HUD_GTL_CLAIM, 255, -1, 1);
+                /* The whole page, whichever listings it now holds. */
+                gtl_verb(hud, OPENMMO_HUD_GTL_CLAIM, 255, -1, 1, 0, 0);
                 break;
             default:
                 break;
@@ -1587,7 +1612,10 @@ int view_ui_gtl_event(const SDL_Event *ev,
             return 1;
         }
         if (G.r_claim[i].w > 0 && view_ui_hit(&G.r_claim[i], x, y)) {
-            gtl_verb(hud, OPENMMO_HUD_GTL_CLAIM, i, -1, 1);
+            uint32_t lo, hi;
+
+            gtl_row_id(gs, i, &lo, &hi);
+            gtl_verb(hud, OPENMMO_HUD_GTL_CLAIM, i, -1, 1, lo, hi);
             return 1;
         }
         if (G.r_price[i].w > 0 && view_ui_hit(&G.r_price[i], x, y) &&

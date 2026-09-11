@@ -6,7 +6,7 @@ object RenderUtil {
     val party = t.party.joinToString(", ", "listOf(", ")") { mon(it) }
     return "reg.register(Region.${region.uppercase()}, TrainerDef(${t.id}, \"${escape(t.name)}\", " +
         "${t.trainerClass}, ${t.doubleBattle}, ${t.prizeRate}, $party, " +
-        "\"${escape(t.defeatedFlag)}\"))"
+        "\"${escape(t.defeatedFlag)}\", \"${escape(t.badge)}\"))"
   }
 
   private fun mon(m: ParsedTrainerMon): String {

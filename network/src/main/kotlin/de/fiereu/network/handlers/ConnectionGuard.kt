@@ -13,16 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 private val log = KotlinLogging.logger {}
 
-/**
- * What a peer may hold open, and for how long before it says who it is.
- *
- * Accepting a connection costs a handshake keypair and a socket, and nothing bounded either the
- * number of those or their lifetime: the only timeout in the pipeline is on writes, so a peer could
- * open sockets and never speak. Three bounds, all about the connection rather than what it says: a
- * total, a per address count, and a deadline for reaching [SessionPhase.ESTABLISHED].
- *
- * Sharable because one instance counts for the whole server.
- */
+/** What a peer may hold open, and for how long before it has said who it is. */
 @ChannelHandler.Sharable
 class ConnectionGuard(
     private val maxTotal: Int,
@@ -49,7 +40,8 @@ class ConnectionGuard(
       ctx.close()
       return
     }
-    // Never cancelled: the check is cheap and a channel that closed on its own is already gone.
+    // Armed on the way in and never cancelled, because the check it runs is cheap and a channel
+    // that closed on its own is already gone by the time it fires.
     ctx.channel()
         .eventLoop()
         .schedule(
@@ -72,7 +64,8 @@ class ConnectionGuard(
   override fun channelInactive(ctx: ChannelHandlerContext) {
     total.decrementAndGet()
     val address = addressOf(ctx)
-    // Removed rather than left at zero, so the table follows the peers.
+    // Removed rather than left at zero, so the table follows the peers instead of growing with
+    // every address that has ever connected.
     perAddress.computeIfPresent(address) { _, count ->
       if (count.decrementAndGet() <= 0) null else count
     }

@@ -1,0 +1,31 @@
+--- a/src/scrcmd_daycare.c
++++ b/src/scrcmd_daycare.c
+@@ -79,6 +79,15 @@
+     party = SaveData_GetParty(fieldSystem->saveData);
+     *destVar = Daycare_MoveToPartyFromDaycareSlot(party, *template, daycare, daycareSlot);
+ 
++    /* openmmo: who is boarding is the server's, and this is a boarder coming
++     * home. Ask for the pass that reports it now rather than waiting for the
++     * next screen to close, the counter is the one place a monster changes
++     * container without a menu behind it. mods/openmmo/src/openmmo_pc.c. */
++    {
++        extern void openmmo_pc_request_reconcile(void);
++        openmmo_pc_request_reconcile();
++    }
++
+     return FALSE;
+ }
+ 
+@@ -140,6 +149,12 @@
+ 
+     Daycare_MoveToEmptySlotFromParty(party, partySlot, daycare, saveData);
+ 
++    /* openmmo: and this is one being handed over. Same reason. */
++    {
++        extern void openmmo_pc_request_reconcile(void);
++        openmmo_pc_request_reconcile();
++    }
++
+     return FALSE;
+ }
+ 

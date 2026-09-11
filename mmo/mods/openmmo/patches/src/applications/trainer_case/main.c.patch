@@ -1,0 +1,127 @@
+--- a/src/applications/trainer_case/main.c	2026-09-07 21:06:19.679907833 -0400
++++ b2/src/applications/trainer_case/main.c	2026-09-07 21:06:19.701507832 -0400
+@@ -212,7 +212,14 @@
+     GXS_SetVisiblePlane(0);
+ 
+     SetAutorepeat(4, 8);
+-    Heap_Create(HEAP_ID_APPLICATION, HEAP_ID_TRAINER_CASE, HEAP_SIZE_TRAINER_CASE);
++    /* HeartGold's page and its badges are a third again of this heap (the
++     * badges' tiles alone are 96K); a ported region's card takes more
++     * (mods/openmmo/src/openmmo_card.c). */
++    {
++        extern int openmmo_card_page_ready(void);
++
++        Heap_Create(HEAP_ID_APPLICATION, HEAP_ID_TRAINER_CASE, openmmo_card_page_ready() ? HEAP_SIZE_TRAINER_CASE + 0x20000 : HEAP_SIZE_TRAINER_CASE);
++    }
+ 
+     NARC *narc = NARC_ctor(NARC_INDEX_GRAPHIC__TRAINER_CASE, HEAP_ID_TRAINER_CASE);
+     TrainerCaseApp *trainerCaseApp = ApplicationManager_NewData(appMan, sizeof(TrainerCaseApp), HEAP_ID_TRAINER_CASE);
+@@ -264,7 +271,13 @@
+     }
+ 
+     trainerCaseApp->viewingBack = FALSE;
+-    trainerCaseApp->badgeCaseOpenState = BADGE_CASE_CLOSED;
++    /* HeartGold's page has no lid: a ported region's card opens on it
++     * (mods/openmmo/src/openmmo_card.c). */
++    {
++        extern int openmmo_card_page_ready(void);
++
++        trainerCaseApp->badgeCaseOpenState = openmmo_card_page_ready() ? BADGE_CASE_OPEN : BADGE_CASE_CLOSED;
++    }
+     trainerCaseApp->touchedRectangleIndex = TOUCHSCREEN_INPUT_NONE;
+     trainerCaseApp->badgeCaseButtonPushed = FALSE;
+     trainerCaseApp->badgeCaseButtonState = BUTTON_STATE_DEFAULT;
+@@ -692,7 +705,20 @@
+ 
+     TrainerCase_LoadCasePalette(trainerCaseApp->trainerCase->gameVersion, narc);
+ 
++    /* A body the card has no face of, drawn from its trainer class's own
++     * front into the same box the sixteen stand in
++     * (mods/openmmo/src/openmmo_card.c). It is asked only where the card was
++     * going to draw the player, and it answers NULL for the player itself, so
++     * both of the branches below keep every case they had. */
+     if (trainerCaseApp->trainerCase->trainerAppearance == (u8)TRAINER_APPEARANCE_DEFAULT) {
++        extern void *openmmo_card_portrait(NNSG2dCharacterData **out);
++
++        trainerCaseApp->trainerSprite = openmmo_card_portrait(&trainerCaseApp->trainerCharacterData);
++    }
++
++    if (trainerCaseApp->trainerSprite != NULL) {
++        trainerCaseApp->trainerScreenDataNSCRBuffer = Graphics_GetScrnDataFromOpenNARC(narc, trainer_appearance_NSCR, FALSE, &trainerCaseApp->trainerScreenData, HEAP_ID_TRAINER_CASE);
++    } else if (trainerCaseApp->trainerCase->trainerAppearance == (u8)TRAINER_APPEARANCE_DEFAULT) {
+         s32 trainerSpriteNarcIndex, trainerScreenDataNarcIndex, trainerPaletteNarcIndex;
+ 
+         switch (trainerCaseApp->trainerCase->gameVersion) {
+@@ -744,11 +770,28 @@
+     Graphics_LoadTilesToBgLayerFromOpenNARC(narc, case_top_screen_tiles_NCGR, trainerCaseApp->bgConfig, BG_LAYER_SUB_1, 0, 0, FALSE, HEAP_ID_TRAINER_CASE);
+     Graphics_LoadTilemapToBgLayerFromOpenNARC(narc, case_top_screen_NSCR, trainerCaseApp->bgConfig, BG_LAYER_SUB_1, 0, 0, FALSE, HEAP_ID_TRAINER_CASE);
+ 
+-    Graphics_LoadTilesToBgLayerFromOpenNARC(narc, badge_case_tiles_NCGR, trainerCaseApp->bgConfig, BG_LAYER_MAIN_2, 0, 0, FALSE, HEAP_ID_TRAINER_CASE);
+-    Graphics_LoadTilemapToBgLayerFromOpenNARC(narc, badge_case_NSCR, trainerCaseApp->bgConfig, BG_LAYER_MAIN_2, 0, 0, FALSE, HEAP_ID_TRAINER_CASE);
++    /* A ported region's card shows HeartGold's LEAGUE BADGES page on the
++     * case's own bottom layer, the members its package appended
++     * (mods/openmmo/src/openmmo_card.c), and no lid above it: the page's
++     * thousand tiles run through the lid's character area, so the lid's
++     * layer is put out rather than loaded. */
++    {
++        extern int openmmo_card_page_ready(void);
++        extern int openmmo_card_member(const char *key);
++
++        if (openmmo_card_page_ready()) {
++            Graphics_LoadTilesToBgLayerFromOpenNARC(narc, openmmo_card_member("page_tiles"), trainerCaseApp->bgConfig, BG_LAYER_MAIN_2, 0, 0, FALSE, HEAP_ID_TRAINER_CASE);
++            Graphics_LoadTilemapToBgLayerFromOpenNARC(narc, openmmo_card_member("page_screen"), trainerCaseApp->bgConfig, BG_LAYER_MAIN_2, 0, 0, FALSE, HEAP_ID_TRAINER_CASE);
++            Graphics_LoadPaletteFromOpenNARC(narc, openmmo_card_member("page_palette"), PAL_LOAD_MAIN_BG, 0, PALETTE_SIZE_EXT_BYTES, HEAP_ID_TRAINER_CASE);
++            Bg_ToggleLayer(BG_LAYER_MAIN_3, FALSE);
++        } else {
++            Graphics_LoadTilesToBgLayerFromOpenNARC(narc, badge_case_tiles_NCGR, trainerCaseApp->bgConfig, BG_LAYER_MAIN_2, 0, 0, FALSE, HEAP_ID_TRAINER_CASE);
++            Graphics_LoadTilemapToBgLayerFromOpenNARC(narc, badge_case_NSCR, trainerCaseApp->bgConfig, BG_LAYER_MAIN_2, 0, 0, FALSE, HEAP_ID_TRAINER_CASE);
+ 
+-    Graphics_LoadTilesToBgLayerFromOpenNARC(narc, badge_case_lid_tiles_NCGR, trainerCaseApp->bgConfig, BG_LAYER_MAIN_3, 0, 0, FALSE, HEAP_ID_TRAINER_CASE);
+-    Graphics_LoadTilemapToBgLayerFromOpenNARC(narc, badge_case_lid_NSCR, trainerCaseApp->bgConfig, BG_LAYER_MAIN_3, 0, 0, FALSE, HEAP_ID_TRAINER_CASE);
++            Graphics_LoadTilesToBgLayerFromOpenNARC(narc, badge_case_lid_tiles_NCGR, trainerCaseApp->bgConfig, BG_LAYER_MAIN_3, 0, 0, FALSE, HEAP_ID_TRAINER_CASE);
++            Graphics_LoadTilemapToBgLayerFromOpenNARC(narc, badge_case_lid_NSCR, trainerCaseApp->bgConfig, BG_LAYER_MAIN_3, 0, 0, FALSE, HEAP_ID_TRAINER_CASE);
++        }
++    }
+ 
+     TrainerCase_ConvertSignature1BppTo8Bpp(trainerCaseApp->trainerCase->signature, trainerCaseApp->signature);
+ }
+@@ -920,6 +963,23 @@
+     return FALSE;
+ }
+ 
++/* HeartGold's page takes no touch here: no case button to push, no badge
++ * to rub (mods/openmmo/src/openmmo_card.c). */
++static const TouchScreenRect sTouchRectangles_Page[] = {
++    { TOUCHSCREEN_TABLE_TERMINATOR, 0, 0, 0 }
++};
++
++static const TouchScreenRect *TrainerCase_TouchRectangles(const TrainerCaseApp *trainerCaseApp)
++{
++    extern int openmmo_card_page_ready(void);
++
++    if (openmmo_card_page_ready()) {
++        return sTouchRectangles_Page;
++    }
++
++    return sTouchRectangleSets[trainerCaseApp->trainerCase->badgesInteractable].touchRectangles[trainerCaseApp->badgeCaseOpenState];
++}
++
+ static int TrainerCase_GetPlayerInput(TrainerCaseApp *trainerCaseApp)
+ {
+     BOOL touchScreenInput = FALSE;
+@@ -931,13 +991,13 @@
+         trainerCaseApp->polishingEnabled = TRUE;
+     }
+ 
+-    trainerCaseApp->touchedRectangleIndex = TrainerCase_CheckBadgeOrButtonTouched(trainerCaseApp->bgConfig, sTouchRectangleSets[trainerCaseApp->trainerCase->badgesInteractable].touchRectangles[trainerCaseApp->badgeCaseOpenState]);
++    trainerCaseApp->touchedRectangleIndex = TrainerCase_CheckBadgeOrButtonTouched(trainerCaseApp->bgConfig, TrainerCase_TouchRectangles(trainerCaseApp));
+ 
+     if (trainerCaseApp->touchedRectangleIndex != TOUCHSCREEN_INPUT_NONE) {
+         touchScreenInput = TRUE;
+         input = INPUT_TOUCH_SCREEN_TAP;
+     } else if (gSystem.touchHeld) {
+-        trainerCaseApp->touchedRectangleIndex = TrainerCase_CheckBadgeOrButtonHeld(trainerCaseApp->bgConfig, sTouchRectangleSets[trainerCaseApp->trainerCase->badgesInteractable].touchRectangles[trainerCaseApp->badgeCaseOpenState]);
++        trainerCaseApp->touchedRectangleIndex = TrainerCase_CheckBadgeOrButtonHeld(trainerCaseApp->bgConfig, TrainerCase_TouchRectangles(trainerCaseApp));
+ 
+         if (trainerCaseApp->polishingEnabled) {
+             touchScreenInput = TRUE;

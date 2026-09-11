@@ -68,7 +68,7 @@
 "area: launcher":
   - changed-files:
       - any-glob-to-any-file:
-          - launcher/**
+          - mmo/launcher/**
           - keys/**
 
 "area: build":

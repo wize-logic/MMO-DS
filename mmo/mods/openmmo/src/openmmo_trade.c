@@ -12,13 +12,19 @@
 #include "field_transition.h"
 #include "heap.h"
 #include "sound.h"
+#include "sound_playback.h"
 #include "savedata/save_table.h"
 #include "save_player.h"
 #include "trainer_info.h"
 
 #include "../../../include/charcode.h"
+#include "../../../include/endpoint.h"
 #include "../../../include/client.h"
 #include "../../../include/game.h"
+
+/* HEAP_ID_COMMUNICATION, shared with the link contest,
+ * which wants the same heap for the same dispatcher. */
+extern int openmmo_comm_heap_take(u32 size);
 
 extern int openmmo_hud_windowed(void);
 extern FieldSystem *pc_lab_field_system(void);
@@ -113,7 +119,7 @@ void openmmo_trade_attach(openmmo_client *c)
  * player is always asked on the box. */
 void openmmo_trade_offer(const char *name)
 {
-    const char *aa = getenv("OPENMMO_TRADE_ACCEPT");
+    const char *aa = openmmo_dev_env("OPENMMO_TRADE_ACCEPT");
 
     snprintf(s_offer_from, sizeof s_offer_from, "%s", name != NULL ? name : "");
     if (aa != NULL && aa[0] != '\0' && aa[0] != '0') {
@@ -370,8 +376,7 @@ static void pipe_open(void)
     static int s_comm_heap;
 
     if (!s_comm_heap) {
-        Heap_CreateAtEnd(HEAP_ID_APPLICATION, HEAP_ID_COMMUNICATION, 0x7080);
-        s_comm_heap = 1;
+        s_comm_heap = openmmo_comm_heap_take(0x7080);
     }
 
     s_net_id = tr->role ? 1 : 0;

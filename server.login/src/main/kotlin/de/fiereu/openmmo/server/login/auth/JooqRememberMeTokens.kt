@@ -50,14 +50,4 @@ constructor(
       withContext(dispatcher) {
         dsl.deleteFrom(REMEMBER_ME_TOKENS).where(REMEMBER_ME_TOKENS.USER_ID.eq(userId)).execute()
       }
-
-  /**
-   * Clears out what has run out of time. Nothing depends on it; it keeps the table from growing.
-   */
-  suspend fun purgeExpired(): Int =
-      withContext(dispatcher) {
-        dsl.deleteFrom(REMEMBER_ME_TOKENS)
-            .where(REMEMBER_ME_TOKENS.EXPIRES_AT.le(LocalDateTime.now()))
-            .execute()
-      }
 }

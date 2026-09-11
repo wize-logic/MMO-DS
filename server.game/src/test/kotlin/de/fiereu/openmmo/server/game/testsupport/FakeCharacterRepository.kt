@@ -38,6 +38,14 @@ class FakeCharacterRepository : CharacterRepository {
     saved[current.info.id] = current
   }
 
+  override suspend fun seedsHeldElsewhere(seeds: Set<Int>, exceptOwner: Long): Set<Int> =
+      saved.values
+          .filter { it.info.id != exceptOwner }
+          .flatMap { it.pokemon + it.pcStorage + it.daycare }
+          .map { it.seed }
+          .filter { it in seeds }
+          .toSet()
+
   override suspend fun deleteById(userId: Int, id: Long): Boolean {
     val stored = saved[id] ?: return false
     if (stored.info.userId != userId) return false

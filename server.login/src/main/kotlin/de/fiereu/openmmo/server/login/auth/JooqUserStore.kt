@@ -28,9 +28,9 @@ constructor(
         if (user == null || !PasswordHash.verify(user.passwordHash, password)) {
           UserService.AuthResult(LoginState.INVALID_PASSWORD)
         } else {
-          // The row is out of date, in shape or in cost, and somebody just proved they own it, so
-          // this is the moment to write it again. The startup sweep gets the unsalted ones nobody
-          // logs into; a merely cheap one is not urgent enough to rehash a whole table for.
+          // The row is out of date, either in shape or in cost, and somebody just proved they own
+          // it, so this is the moment to write it again. The startup sweep gets the unsalted ones
+          // nobody logs into; a merely cheap one is not urgent enough to rehash a whole table for.
           if (PasswordHash.needsRehash(user.passwordHash)) {
             dsl.update(USERS)
                 .set(USERS.PASSWORD_HASH, PasswordHash.hash(password))
@@ -38,15 +38,11 @@ constructor(
                 .execute()
             log.info { "Rewrote the stored credential for user ${user.id}" }
           }
-          UserService.AuthResult(LoginState.AUTHED, user.id, user.tokenEpoch ?: 0)
+          UserService.AuthResult(LoginState.AUTHED, user.id)
         }
       }
 
-  /**
-   * Rewrite every credential still stored the old way, and answer how many there were. A row nobody
-   * signs into is the one a dump is read from, so leaving them until their owner turns up would
-   * leave most of the table as it was.
-   */
+  /** Rewrite every credential still stored the old way, and answer how many there were. */
   suspend fun upgradeLegacyHashes(): Int =
       withContext(dispatcher) {
         val rows = dsl.select(USERS.ID, USERS.PASSWORD_HASH).from(USERS).fetch()
@@ -69,7 +65,7 @@ constructor(
   override suspend fun findForToken(userId: Int): UserService.TokenUser? =
       withContext(dispatcher) {
         dsl.selectFrom(USERS).where(USERS.ID.eq(userId)).fetchOne()?.let {
-          UserService.TokenUser(it.id!!, it.username, it.displayName, it.tokenEpoch ?: 0)
+          UserService.TokenUser(it.id!!, it.username, it.displayName)
         }
       }
 
@@ -98,13 +94,7 @@ constructor(
         id
       }
 
-  /**
-   * Gives the developer role to the account that is the only one on the server.
-   *
-   * The condition is "no other row exists" rather than "the table was empty a moment ago". Two
-   * accounts created at once then leave neither of them a developer, which one command puts right,
-   * where two of them would be a thing nobody was told about.
-   */
+  /** Gives the developer role to the account that is the only one on the server. */
   private fun grantFirstAccountRoles(id: Int) {
     val granted =
         dsl.update(USERS)

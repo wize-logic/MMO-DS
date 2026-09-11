@@ -3,7 +3,10 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [ "master" ]
+    # The development branch as well as master: everything lands on
+    # native-client first, so a gate that ran on master alone ran too late to
+    # stop anything.
+    branches: [ "master", "native-client" ]
 
 permissions:
   contents: write

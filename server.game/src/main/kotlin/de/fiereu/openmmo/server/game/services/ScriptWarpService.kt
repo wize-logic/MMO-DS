@@ -9,6 +9,7 @@ import de.fiereu.openmmo.net.game.packets.MapTransitionPacket
 import de.fiereu.openmmo.net.game.packets.RenderScreenPacket
 import de.fiereu.openmmo.server.game.session.PENDING_MAP_LOAD
 import de.fiereu.openmmo.server.game.session.PlayerState
+import de.fiereu.openmmo.server.game.session.setMapAddress
 import de.fiereu.openmmo.server.game.storage.CharacterStore
 import io.github.oshai.kotlinlogging.KotlinLogging
 import javax.inject.Inject
@@ -62,9 +63,8 @@ constructor(
     state.justWarped = true
     // Leave now, so the old map's observers do not keep a ghost for the whole transition.
     presenceService.leave(session)
-    state.regionId = destination.regionId.toInt()
-    state.bankId = destination.bankId.toInt()
-    state.mapId = destination.mapId.toInt()
+    state.setMapAddress(
+        destination.regionId.toInt(), destination.bankId.toInt(), destination.mapId.toInt())
     state.x = destination.x
     state.y = destination.y
     state.elevation = map.tileAt(destination.x.toInt(), destination.y.toInt())?.elevation ?: 0

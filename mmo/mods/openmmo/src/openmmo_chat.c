@@ -25,8 +25,8 @@ extern BOOL Font_HasManager(enum Font font);
  * text printer's choice, not a constant. openmmo_font.c holds the reason
  * this has to be set before reading one from outside a printer. */
 extern void openmmo_glyph_colors(void);
-extern int openmmo_font_draw_latin1(uint32_t *surf, int x, int y, const char *s,
-                                    uint32_t fg);
+extern int openmmo_font_draw_utf8(uint32_t *surf, int x, int y, const char *s,
+                                  uint32_t fg);
 
 #define LINE_H 14
 #define PAD_X  4
@@ -46,11 +46,11 @@ static void FillRect(uint32_t *surf, int x, int y, int w, int h, uint32_t color)
     }
 }
 
-static int DrawLatin1(uint32_t *surf, int x, int y, const char *s, uint32_t fg)
+static int DrawUtf8(uint32_t *surf, int x, int y, const char *s, uint32_t fg)
 {
     if (s == NULL || !Font_HasManager(FONT_SYSTEM))
         return x;
-    return openmmo_font_draw_latin1(surf, x, y, s, fg);
+    return openmmo_font_draw_utf8(surf, x, y, s, fg);
 }
 
 void openmmo_chat_draw(const mmo_chatwin *w, const mmo_chatwin_line *log, int n,
@@ -85,11 +85,11 @@ void openmmo_chat_draw(const mmo_chatwin *w, const mmo_chatwin_line *log, int n,
     for (i = 0; i < vis; i++) {
         if (!mmo_chatwin_get_row(w, log, n, i, &row))
             continue;
-        DrawLatin1(surf, PAD_X, y, row.text, mmo_chatwin_color(row.type));
+        DrawUtf8(surf, PAD_X, y, row.text, mmo_chatwin_color(row.type));
         y += LINE_H;
     }
 
-    DrawLatin1(surf, PAD_X, PC_VIDEO_HEIGHT - 14,
+    DrawUtf8(surf, PAD_X, PC_VIDEO_HEIGHT - 14,
                upper ? "ENTER SENDS  START CLOSES" : "START TO TALK",
                0x00A0A0A8u);
 }

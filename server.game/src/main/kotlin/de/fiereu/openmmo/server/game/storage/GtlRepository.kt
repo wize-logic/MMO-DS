@@ -1,5 +1,7 @@
 package de.fiereu.openmmo.server.game.storage
 
+import de.fiereu.openmmo.common.ContestConditions
+import de.fiereu.openmmo.common.DEFAULT_FRIENDSHIP
 import de.fiereu.openmmo.common.Pokemon
 import de.fiereu.openmmo.common.PokemonMove
 import de.fiereu.openmmo.common.enums.EVs
@@ -109,6 +111,12 @@ interface GtlRepository {
   /** The seller's own shelf: active listings, newest first. Sold ones pay out on login instead. */
   suspend fun ownPage(sellerId: Long, offset: Int, limit: Int): GtlPage
 
+  /**
+   * One of the seller's own listings by its id, on the same terms [ownPage] shows them: a listing
+   * closed with nothing owed on it is off their shelf, and somebody else's is never theirs.
+   */
+  suspend fun findOwn(sellerId: Long, id: Long): GtlListing?
+
   /** The cheapest active listings of one item, for a market buy that fills across sellers. */
   suspend fun cheapestItemListings(itemId: Int, limit: Int): List<GtlListing>
 
@@ -162,9 +170,6 @@ interface GtlRepository {
 
   /** Put a just-closed listing back on the shelf, for a take-back whose return had no room. */
   suspend fun reopen(id: Long, sellerId: Long): Boolean
-
-  /** The seller's sold-unpaid listings, oldest first, for paying out on their next session. */
-  suspend fun soldUnpaid(sellerId: Long): List<GtlListing>
 }
 
 class JooqGtlRepository
@@ -255,6 +260,18 @@ constructor(
                 .map { it.toListing() }
                 .toList()
         GtlPage(total, rows)
+      }
+
+  override suspend fun findOwn(sellerId: Long, id: Long): GtlListing? =
+      withContext(dispatcher) {
+        dsl.selectFrom(GTL_LISTINGS)
+            .where(GTL_LISTINGS.ID.eq(id))
+            .and(GTL_LISTINGS.SELLER_ID.eq(sellerId))
+            .and(
+                GTL_LISTINGS.STATE.ne(GTL_STATE_CLOSED.toShort())
+                    .or(GTL_LISTINGS.UNCLAIMED_UNITS.gt(0)))
+            .fetchOne()
+            ?.toListing()
       }
 
   override suspend fun cheapestItemListings(itemId: Int, limit: Int): List<GtlListing> =
@@ -453,16 +470,6 @@ constructor(
             .execute() == 1
       }
 
-  override suspend fun soldUnpaid(sellerId: Long): List<GtlListing> =
-      withContext(dispatcher) {
-        dsl.selectFrom(GTL_LISTINGS)
-            .where(GTL_LISTINGS.SELLER_ID.eq(sellerId))
-            .and(GTL_LISTINGS.STATE.eq(GTL_STATE_SOLD.toShort()))
-            .orderBy(GTL_LISTINGS.SOLD_AT.asc())
-            .fetch()
-            .map { it.toListing() }
-      }
-
   private fun GtlListing.toRecord(): GtlListingsRecord =
       GtlListingsRecord(
           id = id,
@@ -506,6 +513,22 @@ constructor(
           monMove3Pp = pokemon?.moves?.getOrNull(2)?.pp?.toShort(),
           monMove4Id = pokemon?.moves?.getOrNull(3)?.id,
           monMove4Pp = pokemon?.moves?.getOrNull(3)?.pp?.toShort(),
+          monHeldItemId = pokemon?.heldItemId,
+          monOfflineOrigin = pokemon?.offlineOrigin,
+          monForm = pokemon?.form?.toShort(),
+          monCondCool = pokemon?.conditions?.cool?.toShort(),
+          monCondBeauty = pokemon?.conditions?.beauty?.toShort(),
+          monCondCute = pokemon?.conditions?.cute?.toShort(),
+          monCondSmart = pokemon?.conditions?.smart?.toShort(),
+          monCondTough = pokemon?.conditions?.tough?.toShort(),
+          monSheen = pokemon?.sheen?.toShort(),
+          monSuperContestRibbons = pokemon?.superContestRibbons,
+          monCaughtRegionId = pokemon?.caughtRegionId?.toShort(),
+          monCaughtBankId = pokemon?.caughtBankId?.toShort(),
+          monCaughtMapId = pokemon?.caughtMapId?.toShort(),
+          monCaughtLocationLabel = pokemon?.caughtLocationLabel?.toShort(),
+          monFriendship = pokemon?.friendship?.toShort(),
+          monStatus = pokemon?.status?.toShort(),
           monIsShiny = pokemon?.isShiny,
           monHasHiddenAbility = pokemon?.hasHiddenAbility,
           monIsAlpha = pokemon?.isAlpha,
@@ -613,6 +636,25 @@ constructor(
                             PokemonMove(monMove3Id ?: 0, (monMove3Pp ?: 0).toByte()),
                             PokemonMove(monMove4Id ?: 0, (monMove4Pp ?: 0).toByte()),
                         ),
+                    heldItemId = monHeldItemId ?: 0,
+                    offlineOrigin = monOfflineOrigin ?: false,
+                    form = (monForm ?: 0).toInt(),
+                    conditions =
+                        ContestConditions(
+                            cool = (monCondCool ?: 0).toInt(),
+                            beauty = (monCondBeauty ?: 0).toInt(),
+                            cute = (monCondCute ?: 0).toInt(),
+                            smart = (monCondSmart ?: 0).toInt(),
+                            tough = (monCondTough ?: 0).toInt(),
+                        ),
+                    sheen = (monSheen ?: 0).toInt(),
+                    superContestRibbons = monSuperContestRibbons ?: 0L,
+                    caughtRegionId = (monCaughtRegionId ?: -1).toInt(),
+                    caughtBankId = (monCaughtBankId ?: -1).toInt(),
+                    caughtMapId = (monCaughtMapId ?: -1).toInt(),
+                    caughtLocationLabel = (monCaughtLocationLabel ?: 0).toInt(),
+                    friendship = (monFriendship ?: DEFAULT_FRIENDSHIP.toShort()).toInt(),
+                    status = (monStatus ?: 0).toInt(),
                     isShiny = monIsShiny ?: false,
                     hasHiddenAbility = monHasHiddenAbility ?: false,
                     isAlpha = monIsAlpha ?: false,

@@ -21,12 +21,13 @@ static int failures;
  * catches that our mirror did not. */
 #define ENGINE_SAVE_TABLE_ENTRY_MAX 38
 
-/* The blocks Phase 1 named as state the client legitimately keeps. Everything
- * else must not be LOCAL. */
+/* The blocks the client legitimately keeps whole: the device's own identity
+ * and the recorded cry. Everything else must not be LOCAL, POKETCH used to
+ * be here and is not, because the Poketch block is the only record that a gift
+ * app was ever handed over and openmmo_save_blocks.c carries it. */
 static int is_expected_local(int id)
 {
-    return id == MMO_SAVE_ENTRY_SYSTEM || id == MMO_SAVE_ENTRY_POKETCH ||
-        id == MMO_SAVE_ENTRY_CHATOT;
+    return id == MMO_SAVE_ENTRY_SYSTEM || id == MMO_SAVE_ENTRY_CHATOT;
 }
 
 int save_policy_tests_run(void)
@@ -61,7 +62,7 @@ int save_policy_tests_run(void)
             service++;
             break;
         }
-        /* The load-bearing invariant: LOCAL is exactly the Phase-1 set. */
+        /* The load-bearing invariant: LOCAL is exactly that pair. */
         if (is_expected_local(id)) {
             CHECK(c == MMO_SAVE_LOCAL, mmo_save_entry_name(id));
         } else {
@@ -70,7 +71,7 @@ int save_policy_tests_run(void)
     }
     CHECK(local + server + service == MMO_SAVE_ENTRY_MAX,
         "the three classes partition all blocks");
-    CHECK(local == 3, "exactly three blocks are client-local");
+    CHECK(local == 2, "exactly two blocks are client-local");
 
     printf("the derived predicates agree with the class:\n");
     for (id = 0; id < MMO_SAVE_ENTRY_MAX; id++) {
@@ -81,7 +82,7 @@ int save_policy_tests_run(void)
             "seat-from-server iff server");
     }
 
-    printf("named server-owned and service blocks land where Phase 1 put them:\n");
+    printf("named server-owned and service blocks are where the split put them:\n");
     CHECK(mmo_save_class_of(MMO_SAVE_ENTRY_PLAYER) == MMO_SAVE_SERVER,
         "PLAYER (money/badges/name) is server-owned");
     CHECK(mmo_save_class_of(MMO_SAVE_ENTRY_PARTY) == MMO_SAVE_SERVER,
@@ -94,6 +95,8 @@ int save_policy_tests_run(void)
         "FIELD_PLAYER_STATE (position) is server-owned");
     CHECK(mmo_save_class_of(MMO_SAVE_ENTRY_PC_BOXES) == MMO_SAVE_SERVER,
         "PC_BOXES is server-owned");
+    CHECK(mmo_save_class_of(MMO_SAVE_ENTRY_POKETCH) == MMO_SAVE_SERVER,
+        "POKETCH (the registry of gift apps) is server-owned");
     CHECK(mmo_save_class_of(MMO_SAVE_ENTRY_GLOBAL_TRADE) == MMO_SAVE_SERVICE,
         "GLOBAL_TRADE (GTS) is a networked service");
     CHECK(mmo_save_class_of(MMO_SAVE_ENTRY_MYSTERY_GIFT) == MMO_SAVE_SERVICE,

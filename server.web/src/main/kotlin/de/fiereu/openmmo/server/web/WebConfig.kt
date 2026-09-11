@@ -20,7 +20,10 @@ data class WebConfig(
     val loginPort: Int = 2106,
     val gameHost: String = LOOPBACK,
     val gamePort: Int = 7777,
-    /** Where the game server's online-count endpoint answers. Loopback on both ends. */
+    /**
+     * Where the game server's online-count endpoint answers. Loopback on both ends by default: the
+     * endpoint binds it and this is the one caller, on the same machine.
+     */
     val gameStatusHost: String = LOOPBACK,
     val gameStatusPort: Int = 7779,
     val registrationsPerHour: Int = 5,

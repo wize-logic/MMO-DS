@@ -1,0 +1,35 @@
+--- a/src/trainer_case.c	2026-09-02 12:24:32.864294989 -0400
++++ b2/src/trainer_case.c	2026-09-02 14:24:46.784873598 -0400
+@@ -222,7 +222,18 @@
+     TrainerCaseSaveData *tcSaveData = SaveData_GetTrainerCaseSaveData(fieldSystem->saveData);
+     TrainerCaseSaveDataBadge *badges = TrainerCaseSaveData_GetTrainerCaseSaveDataBadges(tcSaveData);
+ 
++    /* A ported region's card keeps none of this game's eight: its badges are
++     * the server's, drawn on HeartGold's page from the world state, and a
++     * record marked obtained here would rub this game's dirt palettes over
++     * that page's (mods/openmmo/src/openmmo_card.c). */
++    extern int openmmo_card_region(void);
++
+     for (badgeID = 0; badgeID < MAX_BADGES; badgeID++) {
++        if (openmmo_card_region() != 0) {
++            trainerCase->badges[badgeID].obtained = FALSE;
++            trainerCase->badges[badgeID].polish = BADGE_POLISH_THRESHOLD_NORMAL;
++            continue;
++        }
+         if (TrainerInfo_HasBadge(trainerInfo, badgeID)) {
+             trainerCase->badges[badgeID].obtained = TRUE;
+         } else {
+@@ -236,6 +247,13 @@
+ void TrainerCase_SaveBadgePolish(FieldSystem *fieldSystem, const TrainerCase *trainerCase)
+ {
+     u8 badgeID;
++    /* A ported region's records are empty, and writing their nothing over
++     * this game's eight would rub them dull. */
++    extern int openmmo_card_region(void);
++
++    if (openmmo_card_region() != 0) {
++        return;
++    }
+     TrainerCaseSaveData *tcSaveData = SaveData_GetTrainerCaseSaveData(fieldSystem->saveData);
+     TrainerCaseSaveDataBadge *badges = TrainerCaseSaveData_GetTrainerCaseSaveDataBadges(tcSaveData);
+ 

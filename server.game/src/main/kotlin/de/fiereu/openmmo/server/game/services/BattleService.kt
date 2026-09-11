@@ -95,6 +95,8 @@ constructor(
     private val blackout: BlackoutService,
     private val budget: GrantBudget,
     private val violations: ViolationLog,
+    private val safariService: SafariService,
+    private val chatLimits: ChatLimits,
 ) {
 
   private val pokeBallItemId: Short by lazy { items.idOf(Items.POKE_BALL).toShort() }
@@ -113,7 +115,11 @@ constructor(
   fun onBattleChat(event: PacketEvent<BattleChatMessagePacket>) {
     val session = event.session
     val charId = session.attributes[PLAYER_STATE]?.characterId ?: return
-    val text = event.packet.message.trim()
+    // The same rate and the same ceiling ordinary chat goes through. This packet had neither: its
+    // string is null-terminated with no ceiling of its own, so a full frame of text went to the
+    // other side of the battle as fast as a socket would carry it.
+    if (!chatLimits.allow(charId)) return
+    val text = chatLimits.cut(charId, event.packet.message).trim()
     if (text.isEmpty()) return
     val battle = battles.byChar(charId)
     if (battle == null) {
@@ -143,9 +149,18 @@ constructor(
     val active = if (isFoe) battle.opponentMon() else battle.activeMon()
     // While the active mon is fainted the player owes a replacement and may only switch.
     if (active.fainted && action.action != BattleAction.SWITCH) return
+    // A Safari game has no fight in it. The cartridge builds this battle from
+    // `FieldBattleDTO_NewSafari`, whose menu is a ball, bait, mud and run, never a move, so a
+    // move arriving here is a client offering one the Great Marsh does not have.
+    if (battle.safari && action.action == BattleAction.MOVE) {
+      log.warn { "char=$charId picked a move in a Safari battle" }
+      emitter.sendNotice(battle, "There is no battling in the Great Marsh!")
+      emitter.sendPrompt(battle)
+      return
+    }
     // The move id is the client's, and the engine looked it up in the whole move table rather than
-    // in the monster's four, so any monster could use any move in the game. A move it does not
-    // know also costs no pp, because there is no slot to take it from.
+    // in the monster's four. A level 5 starter could fire Explosion every turn, and a move it does
+    // not know costs no pp because there is no slot to take it from.
     if (action.action == BattleAction.MOVE && !knowsMove(active, action.moveOrItemId)) {
       log.warn {
         "char=$charId picked move ${action.moveOrItemId} for ${active.entityId}," +
@@ -234,11 +249,7 @@ constructor(
     )
   }
 
-  /**
-   * Takes the monster, for the developer command that exists to skip the game. No ball, so no roll
-   * and no allowance: /catch is gated on the account's own developer bit, and a testing shortcut
-   * that had to get lucky would not be one.
-   */
+  /** Takes the monster, for the developer command that exists to skip the game. */
   suspend fun catchActiveWild(charId: Long): Boolean {
     val battle = battles.byChar(charId) ?: return false
     catchWild(battle, ball = null)
@@ -250,13 +261,17 @@ constructor(
     val charId = session.attributes[PLAYER_STATE]?.characterId ?: return
     pendingLearns.values.removeIf { it.charId == charId }
     val battle = battles.byChar(charId) ?: return
+    // A battle that already has a result is one the client is only being shown out of. It is
+    // over, and what it settled was settled before the connection went: the white out a defeat
+    // owes, and the branch a script waiting on it takes.
+    val result = battle.pendingResult ?: BattleResult.DISCONNECTED
     if (battle.isPvp) {
       forfeit(battle, foeForfeited = charId == battle.foeCharId)
-      finishBattle(battle, BattleResult.DISCONNECTED)
+      finishBattle(battle, result)
       return
     }
     persistParty(battle)
-    finishBattle(battle, BattleResult.DISCONNECTED)
+    finishBattle(battle, result)
   }
 
   /** Resumes scripts after returning to the overworld. */
@@ -271,9 +286,17 @@ constructor(
   /** True while the character has a battle running, so callers can skip starting another. */
   fun inBattle(charId: Long): Boolean = battles.byChar(charId) != null
 
-  fun startWildBattle(session: SessionContext, dexId: Int, level: Int) {
-    createWildBattle(session, dexId, level, catchable = true, escapable = true)
+  fun startWildBattle(session: SessionContext, dexId: Int, level: Int, safari: Boolean = false) {
+    createWildBattle(session, dexId, level, catchable = true, escapable = true, safari = safari)
   }
+
+  /**
+   * A fight a script stages on a person, one wild monster at the species and level the source's own
+   * script names, catchable and escapable like any other, handed back so that its end can be acted
+   * on ([StaticEncounterService]).
+   */
+  fun startStaticBattle(session: SessionContext, dexId: Int, level: Int): BattleInstance? =
+      createWildBattle(session, dexId, level, catchable = true, escapable = true)
 
   /** Starts a 1v1 between [session] and [foe]. Each side fights with its stored party. */
   fun startPlayerBattle(session: SessionContext, foe: SessionContext) {
@@ -392,8 +415,14 @@ constructor(
       catchable: Boolean,
       escapable: Boolean,
       moveIds: List<Int> = emptyList(),
+      safari: Boolean = false,
   ): BattleInstance? =
-      createBattle(session, listOf(OpponentSpec(dexId, level, moveIds)), catchable, escapable)
+      createBattle(
+          session,
+          listOf(OpponentSpec(dexId, level, moveIds)),
+          catchable,
+          escapable,
+          safari = safari)
 
   private fun partyFrom(
       stored: StoredCharacter,
@@ -421,6 +450,7 @@ constructor(
       catchable: Boolean,
       escapable: Boolean,
       trainer: TrainerDef? = null,
+      safari: Boolean = false,
   ): BattleInstance? {
     val charId = session.attributes[PLAYER_STATE]?.characterId ?: return null
     if (battles.byChar(charId) != null) {
@@ -474,7 +504,12 @@ constructor(
     }
     val battle =
         battles.create(
-            charId, session, party, enemies, rng, BattleRules(catchable, escapable, trainer))
+            charId,
+            session,
+            party,
+            enemies,
+            rng,
+            BattleRules(catchable, escapable, trainer, safari))
             ?: run {
               session.send(notice(ALREADY_IN_BATTLE))
               return null
@@ -493,11 +528,7 @@ constructor(
     return battle
   }
 
-  /**
-   * Whether this monster may use the move the client picked: one of its own four, with pp left. Pp
-   * is checked here rather than in the engine, whose own fallback for a monster with nothing left
-   * is to swing anyway, which is the game's behaviour and not something a client asked for.
-   */
+  /** Whether this monster may use the move the client picked: one of its own four, with pp left. */
   private fun knowsMove(mon: BattleMonState, moveId: Short): Boolean =
       mon.moves.any { it.id == moveId && it.id.toInt() != 0 && it.pp > 0 }
 
@@ -510,8 +541,20 @@ constructor(
       return
     }
     if (item.isBall) {
-      // A ball has to be in the bag and leaves it when thrown. Neither was asked, so one packet
-      // naming a ball id caught anything from an empty bag, as often as you liked.
+      // In the Great Marsh the ball is the game's, not the bag's: the allowance pays for it, and
+      // what is thrown is a Safari Ball whichever ball the client named, because that is the only
+      // one the marsh hands out (SafariService).
+      if (battle.safari) {
+        if (!safariService.spendBall(battle.charId)) {
+          emitter.sendNotice(battle, "You have no Safari Balls left!")
+          emitter.sendPrompt(battle)
+          return
+        }
+        catchWild(battle, Items.SAFARI_BALL)
+        return
+      }
+      // A ball has to be in the bag and leaves it when it is thrown. Neither was asked before, so
+      // one packet naming any ball id caught anything, from an empty bag, as often as you liked.
       val ballId = action.moveOrItemId.toInt()
       val held = characterStore.getCharacter(battle.charId)?.items?.get(ballId) ?: 0
       if (held < 1) {
@@ -810,8 +853,9 @@ constructor(
       emitter.sendPrompt(battle)
       return
     }
-    // The ball has to hold. It always did, which was the wrong game and an unattended bot's whole
-    // program: answer every battle with one packet and take the monster.
+    // The ball has to hold. It always did, which was the wrong game and also an unattended bot's
+    // whole program: answer every battle with one packet and take the monster. [CatchRoll] is the
+    // games' own arithmetic, off the species catch rate and the health left.
     val target = battle.opponentMon()
     if (ball != null &&
         !CatchRoll.holds(
@@ -820,8 +864,9 @@ constructor(
       emitter.sendPrompt(battle)
       return
     }
-    // Counted the way a client-reported grant is. Nothing here is a claim, but the allowance is
-    // about how many monsters one character takes out of the world in a stretch.
+    // Counted the same way a client-reported grant is. This path is the server's own, so nothing
+    // here is a claim, but the allowance is about how many monsters one character takes out of the
+    // world in a stretch and that question does not care which door they came through.
     if (ball != null &&
         (!budget.allow(battle.charId, GrantBudget.Kind.MONSTERS, 1) ||
             !budget.allow(battle.charId, GrantBudget.Kind.MONSTERS_HOURLY, 1))) {
@@ -875,8 +920,8 @@ constructor(
     // event, so the client can resolve the monster when the throw lands.
     battle.session.send(SocialListEntryAddPacket(caught))
     battle.session.send(acquiredMonsterDelta(caught, battle.opponentMon().species))
-    // The throw event, naming the ball that was actually thrown. It used to name the Poke Ball
-    // whatever went in, which drew the wrong ball for every other kind.
+    // "Player threw a ball" event, naming the ball that was actually thrown. It used to name the
+    // Poke Ball whatever went in, which drew the wrong ball for every other kind.
     battle.session.send(
         BattleListEventPacket(
             kind = 0,
@@ -890,14 +935,8 @@ constructor(
     // on screen until the next join. The cartridge says so in the battle text too.
     if (caught.container == PokemonContainer.PC) {
       emitter.sendNotice(battle, "${battle.opponentMon().species.name} was transferred to a Box.")
-      battle.session.send(
-          PokemonContainerPacket(
-              container = PokemonContainer.PC,
-              hasChange = true,
-              delete = false,
-              pokemon = characterStore.getCharacter(battle.charId)?.pcStorage.orEmpty(),
-          ),
-      )
+      battle.session.sendContainer(
+          PokemonContainer.PC, characterStore.getCharacter(battle.charId)?.pcStorage.orEmpty())
     }
     Pokedex.markCaught(characterStore, battle.session, battle.charId, caught.dexId)
     endBattle(battle, BattleResult.CAUGHT)

@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 #define OPENMMO_HUD_MAGIC   0x4F4D4855u /* 'OMHU' */
-#define OPENMMO_HUD_VERSION 11u
+#define OPENMMO_HUD_VERSION 13u
 #define OPENMMO_HUD_SUFFIX  ".hud"
 
 #define OPENMMO_HUD_LOWER_POKETCH 0u
@@ -39,13 +39,17 @@ extern "C" {
 #define OPENMMO_HUD_CHAT_NOTICE  17u
 #define OPENMMO_HUD_CHAT_BATTLE  18u
 
-#define OPENMMO_HUD_NAME    24
-/* Holds the client's whole 128-byte chat line; at 80 the page was a third
+/* The caps these mirror are counts of UTF-16 code units, not of bytes, so each
+ * one is three UTF-8 bytes plus a terminator wide (game.h MMO_TEXT_BYTES). At
+ * 24 a 32-character name reached the window as seven, which is the same cut the
+ * client's own buffers used to make before it. */
+#define OPENMMO_HUD_NAME    97
+/* Holds the client's whole 128-unit chat line; at 80 the page was a third
  * truncation on top of the wire's and the window could never show what the
  * server actually said. */
-#define OPENMMO_HUD_TEXT    136
-#define OPENMMO_HUD_MOTD    128
-#define OPENMMO_HUD_TAG     8
+#define OPENMMO_HUD_TEXT    385
+#define OPENMMO_HUD_MOTD    385
+#define OPENMMO_HUD_TAG     25
 #define OPENMMO_HUD_REASON  128
 #define OPENMMO_HUD_BATTLE  64
 #define OPENMMO_HUD_CHAT_N  64
@@ -106,15 +110,17 @@ extern "C" {
  */
 #define OPENMMO_HUD_CMD_GTL 10u
 
+/* The verbs marked "names one" carry the thing they name in cmd_id, and the
+ * row byte beside it is a label for the log line, nothing more. */
 #define OPENMMO_HUD_GTL_ASK       0 /* arg: kind<<8 | sort<<12 | page<<16 */
-#define OPENMMO_HUD_GTL_BUY       1 /* arg: row<<8, cmd_gtl.qty units of it */
-#define OPENMMO_HUD_GTL_BACK      2 /* arg: row<<8, take that own row back */
+#define OPENMMO_HUD_GTL_BUY       1 /* names one, cmd_gtl.qty units of it */
+#define OPENMMO_HUD_GTL_BACK      2 /* names one, take that own listing back */
 #define OPENMMO_HUD_GTL_SELL      3 /* arg: party slot<<8, cmd_gtl.price */
 #define OPENMMO_HUD_GTL_SELL_ITEM 4 /* arg: bag row<<8, cmd_gtl.qty+price */
-#define OPENMMO_HUD_GTL_CLAIM     5 /* arg: row<<8; row 255 = whole page */
-#define OPENMMO_HUD_GTL_REPRICE   6 /* arg: row<<8, cmd_gtl.price */
+#define OPENMMO_HUD_GTL_CLAIM     5 /* names one; row 255 = whole page */
+#define OPENMMO_HUD_GTL_REPRICE   6 /* names one, at cmd_gtl.price */
 #define OPENMMO_HUD_GTL_LOG       7 /* ask for the trade log */
-#define OPENMMO_HUD_GTL_MARKET    8 /* arg: quote row<<8, cmd_gtl.qty, .price
+#define OPENMMO_HUD_GTL_MARKET    8 /* names an ITEM id: cmd_gtl.qty, .price
                                      * the whole-purchase budget */
 
 /* The mailbox, from the window's own Mail frame. Verb in the low byte, the
@@ -124,12 +130,18 @@ extern "C" {
 #define OPENMMO_HUD_CMD_MAIL 11u
 
 #define OPENMMO_HUD_MAIL_ASK     0 /* arg: sent<<8 | page<<16, ask for a page */
-#define OPENMMO_HUD_MAIL_READ    1 /* arg: row<<8, open that row's letter */
-#define OPENMMO_HUD_MAIL_DELETE  2 /* arg: row<<8 */
+#define OPENMMO_HUD_MAIL_READ    1 /* names one, and opens it */
+#define OPENMMO_HUD_MAIL_DELETE  2 /* names one */
 #define OPENMMO_HUD_MAIL_SEND    3 /* cmd_mail carries to / subject / body */
 /* Open the letter on the engine's own stationery (applications/mail.c),
- * which is the screen the game already draws. arg: row<<8. */
+ * which is the screen the game already draws. Names one. */
 #define OPENMMO_HUD_MAIL_PAPER   4
+
+/*
+ * Leave the server and carry on offline: the guest writes the seated save image out where the
+ * front door's offline row will find it, says so beside it, and ends the session.
+ */
+#define OPENMMO_HUD_CMD_EXPORT 12u
 
 #define OPENMMO_HUD_ACT_CHALLENGE 0
 #define OPENMMO_HUD_ACT_WHISPER   1
@@ -143,6 +155,11 @@ extern "C" {
 #define OPENMMO_HUD_SCREEN_PARTY   1
 #define OPENMMO_HUD_SCREEN_DEX     2
 #define OPENMMO_HUD_SCREEN_TRAINER 3
+/* The TRAINER screen's slot byte (bits 8..15 of the argument) says whose
+ * card: this engine's own, or the ported regions', Johto's eight and
+ * Kanto's eight in the same case, one page each. */
+#define OPENMMO_HUD_CARD_SINNOH 0
+#define OPENMMO_HUD_CARD_JOHTO_KANTO 1
 #define OPENMMO_HUD_SCREEN_OPTIONS 4
 #define OPENMMO_HUD_SCREEN_START   5
 /* One party member's status page, the slot in the argument's next byte
@@ -152,7 +169,12 @@ extern "C" {
 /* The global trade link. Not an engine app: the guest's own list screen
  * (openmmo_gtl.c) opens on the next settled field. */
 #define OPENMMO_HUD_SCREEN_GTL     7
-#define OPENMMO_HUD_SCREEN_N       8
+/* HeartGold's Pokegear: the device with the map, the radio, the phone and
+ * the skins (mods/openmmo/src/openmmo_pokegear.c). The window's own button
+ * and the M key open it; the guest refuses when no package carries it, and
+ * a release builds neither (endpoint.h, openmmo_dev_features). */
+#define OPENMMO_HUD_SCREEN_POKEGEAR 8
+#define OPENMMO_HUD_SCREEN_N       9
 
 struct openmmo_hud_chat {
     uint32_t type; /* OPENMMO_HUD_CHAT_* */
@@ -217,15 +239,15 @@ struct openmmo_hud_net {
 
 /*
  * One page of the trade link's shelf, as the guest's client store holds it
- * (openmmo_client_gtl). The window draws rows and answers clicks by row index; the guest
- * resolves an index against this same store, so the two sides can never name different
- * listings.
+ * (openmmo_client_gtl).
  */
 #define OPENMMO_HUD_GTL_ROWS  10
 #define OPENMMO_HUD_GTL_LOG_N 30
 #define OPENMMO_HUD_GTL_NONE  255u /* nature/level "not carried" marker */
 
 struct openmmo_hud_gtl_row {
+    uint32_t id_lo;    /* the listing's id, split so the -m32 game and the */
+    uint32_t id_hi;    /* 64-bit window lay the struct out the same way */
     uint32_t kind;     /* 0 a monster, 1 an item stack */
     uint32_t price;    /* the unit price */
     uint32_t quantity;
@@ -285,8 +307,8 @@ struct openmmo_hud_gtl {
  * so a page here and a page on the wire are the same thing.
  */
 #define OPENMMO_HUD_MAIL_ROWS    10
-#define OPENMMO_HUD_MAIL_SUBJECT 48
-#define OPENMMO_HUD_MAIL_BODY    2048
+#define OPENMMO_HUD_MAIL_SUBJECT 121
+#define OPENMMO_HUD_MAIL_BODY    6001
 
 struct openmmo_hud_mail_row {
     uint32_t id_lo;    /* the letter's id, split so the -m32 game and the */
@@ -424,6 +446,11 @@ struct openmmo_hud_shm {
      * argument. Written by the window before the command word, so the
      * ACQUIRE on cmd_head orders both. */
     char     cmd_name[OPENMMO_HUD_CMD_SLOTS][OPENMMO_HUD_NAME];
+    /*
+     * The 64-bit id a row verb names (a listing, a letter, an item), split lo/hi and indexed
+     * by the ring slot the command lands in, the way cmd_name is.
+     */
+    uint32_t cmd_id[OPENMMO_HUD_CMD_SLOTS][2];
     /* CMD_GTL's wide arguments, same ordering discipline. */
     struct openmmo_hud_gtl_ask cmd_gtl;
     /* CMD_MAIL_SEND's three strings, same discipline again. */
@@ -489,8 +516,12 @@ static inline void openmmo_hud_push_player(struct openmmo_hud_shm *h,
         return;
     head = h->cmd_head;
     slot = head % OPENMMO_HUD_CMD_SLOTS;
+    /* Cut between characters, not between the bytes of one: the names here
+     * are UTF-8 and half a sequence is not a shorter name. */
     for (i = 0; i < OPENMMO_HUD_NAME - 1u && name[i] != '\0'; i++)
         h->cmd_name[slot][i] = name[i];
+    while (i > 0 && ((unsigned char)name[i] & 0xC0u) == 0x80u)
+        i--;
     h->cmd_name[slot][i] = '\0';
     openmmo_hud_push(h, OPENMMO_HUD_CMD_PLAYER,
                      (int32_t)((uint32_t)verb << 8 | slot));
@@ -507,6 +538,40 @@ static inline const char *openmmo_hud_player_name(
     const struct openmmo_hud_shm *h, int32_t arg)
 {
     return h->cmd_name[((uint32_t)arg & 0xFFu) % OPENMMO_HUD_CMD_SLOTS];
+}
+
+/* Push a verb that names a row by the row's own id. The id rides the slot the
+ * command lands in, the way CMD_PLAYER's name does; the slot number rides
+ * bits 16..23 of the argument, which every row verb leaves free. `arg` keeps
+ * its low sixteen bits: the verb and the row label. */
+static inline void openmmo_hud_push_id(struct openmmo_hud_shm *h, uint32_t kind,
+                                       int32_t arg, uint32_t id_lo,
+                                       uint32_t id_hi)
+{
+    uint32_t head, slot;
+
+    if (h == 0 || h->magic != OPENMMO_HUD_MAGIC ||
+        h->version != OPENMMO_HUD_VERSION)
+        return;
+    head = h->cmd_head;
+    slot = head % OPENMMO_HUD_CMD_SLOTS;
+    h->cmd_id[slot][0] = id_lo;
+    h->cmd_id[slot][1] = id_hi;
+    openmmo_hud_push(h, kind,
+                     (int32_t)(((uint32_t)arg & 0xFFFFu) | (slot << 16)));
+}
+
+/* The id a consumed row verb carried. Zero when the window named nothing,
+ * which is a refusal on the guest rather than a row taken by position. */
+static inline void openmmo_hud_cmd_id(const struct openmmo_hud_shm *h,
+                                      int32_t arg, uint32_t *lo, uint32_t *hi)
+{
+    uint32_t slot = (((uint32_t)arg >> 16) & 0xFFu) % OPENMMO_HUD_CMD_SLOTS;
+
+    if (lo)
+        *lo = h->cmd_id[slot][0];
+    if (hi)
+        *hi = h->cmd_id[slot][1];
 }
 
 static inline unsigned openmmo_hud_read_cmds(const struct openmmo_hud_shm *h,

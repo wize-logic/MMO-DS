@@ -18,6 +18,7 @@
 /* The client's own charcode bridge. The engine header of the same name won the
  * include above (a mod's sources compile with the game's include path), so ours
  * is reached by path, the same seam openmmo_name.c documents. */
+#include "../../../include/endpoint.h"
 #include "../../../include/charcode.h"
 #include "../../../include/entity.h"
 
@@ -42,16 +43,16 @@ extern BOOL Font_HasManager(enum Font font);
  * a glyph is read from outside the printer system; without it a plate drawn
  * after the lobby printed a card was painted entirely in the shadow colour. */
 extern void openmmo_glyph_colors(void);
-extern int openmmo_font_draw_latin1(uint32_t *surf, int x, int y, const char *s,
-                                    uint32_t fg);
-extern int openmmo_font_width_latin1(const char *s);
+extern int openmmo_font_draw_utf8(uint32_t *surf, int x, int y, const char *s,
+                                  uint32_t fg);
+extern int openmmo_font_width_utf8(const char *s);
 /* Whether a window is attached and reading the hud page. */
 extern int openmmo_hud_windowed(void);
 
 static struct {
     int used;
     int width;   /* pixels, measured once the font is loadable; -1 = not yet */
-    char latin1[LABEL_MAX + 1]; /* the string we painted, for the report */
+    char utf8[LABEL_MAX + 1]; /* the string we painted, for the report */
     charcode_t text[LABEL_MAX + 1];
 } sLabels[OPENMMO_ENTITY_NETID_CEIL];
 
@@ -111,10 +112,10 @@ static void ReadEnv(void)
 {
     const char *e;
 
-    e = getenv("OPENMMO_LABELS");
+    e = openmmo_dev_env("OPENMMO_LABELS");
     sEnabled = !(e != NULL && e[0] == '0' && e[1] == '\0');
 
-    e = getenv("OPENMMO_LABEL_LIFT");
+    e = openmmo_dev_env("OPENMMO_LABEL_LIFT");
     sLift = (e != NULL && e[0] != '\0') ? atoi(e) : LABEL_LIFT_DEFAULT;
 
     e = getenv("OPENMMO_LABEL_REPORT");
@@ -126,15 +127,15 @@ static void ReadEnv(void)
 
 /* --- the store ----------------------------------------------------------- */
 
-/* A name as the wire carried it: the server's UTF-16 name is decoded to Latin-1
- * bytes by the codec (codec.c, mmo_get_utf16_nt), so widening each byte back to
- * a UTF-16 code unit is exact, not a guess, and the client's own bridge turns
- * that into engine charcodes with the substitution counted rather than silent. */
-void openmmo_label_set(int slot, const char *latin1)
+/*
+ * A name as the wire carried it: UTF-8, which is what the codec decodes a server UTF-16 name
+ * into (codec.c, mmo_get_utf16_nt), and what the charcode bridge takes directly, so nothing
+ * here reinterprets a byte, and an unmapped glyph is counted rather than silent.
+ */
+void openmmo_label_set(int slot, const char *name)
 {
-    uint8_t utf16[LABEL_MAX * 2];
     mmo_charcode_result r;
-    size_t n = 0;
+    size_t n;
 
     if (slot < 0 || slot >= OPENMMO_ENTITY_NETID_CEIL) {
         return;
@@ -142,29 +143,31 @@ void openmmo_label_set(int slot, const char *latin1)
     /* A missing name is still a person. "?" is the same visible fallback the
      * charcode bridge uses for an unmapped glyph, it cannot be mistaken for
      * a real name the server sent. */
-    if (latin1 == NULL || latin1[0] == '\0') {
-        latin1 = "?";
+    if (name == NULL || name[0] == '\0') {
+        name = "?";
     }
 
-    while (latin1[n] != '\0' && n < LABEL_MAX) {
-        utf16[n * 2] = (uint8_t)latin1[n];
-        utf16[n * 2 + 1] = 0;
-        n++;
+    n = strlen(name);
+    if (n > LABEL_MAX) {
+        n = LABEL_MAX;
+        while (n > 0 && ((unsigned char)name[n] & 0xC0u) == 0x80u) {
+            n--;
+        }
     }
+    memcpy(sLabels[slot].utf8, name, n);
+    sLabels[slot].utf8[n] = '\0';
 
-    r = mmo_utf16le_to_charcode(utf16, n * 2, (mmo_charcode *)sLabels[slot].text,
-        LABEL_MAX + 1);
+    r = mmo_utf8_to_charcode(sLabels[slot].utf8,
+        (mmo_charcode *)sLabels[slot].text, LABEL_MAX + 1);
     sLabels[slot].used = r.written > 0;
     sLabels[slot].width = -1;
-    memcpy(sLabels[slot].latin1, latin1, n);
-    sLabels[slot].latin1[n] = '\0';
 }
 
-const char *openmmo_label_latin1(int slot)
+const char *openmmo_label_text(int slot)
 {
     if (slot < 0 || slot >= OPENMMO_ENTITY_NETID_CEIL || !sLabels[slot].used)
         return "";
-    return sLabels[slot].latin1;
+    return sLabels[slot].utf8;
 }
 
 void openmmo_label_clear(int slot)
@@ -175,7 +178,7 @@ void openmmo_label_clear(int slot)
 
     sLabels[slot].used = 0;
     sLabels[slot].width = -1;
-    sLabels[slot].latin1[0] = '\0';
+    sLabels[slot].utf8[0] = '\0';
     sLabels[slot].text[0] = CHAR_EOS;
 }
 
@@ -240,7 +243,7 @@ static void FillRect(uint32_t *surf, int x, int y, int w, int h, uint32_t color)
  * twice. */
 static int LabelWidth(int slot)
 {
-    int w = openmmo_font_width_latin1(sLabels[slot].latin1);
+    int w = openmmo_font_width_utf8(sLabels[slot].utf8);
 
     sLabels[slot].width = w;
     return w;
@@ -290,7 +293,7 @@ void openmmo_label_draw_for(int slot, const MapObject *obj)
     if (sReport >= 2 || (sReport == 1 && (sFrame % 60) == 0)) {
         printf("openmmo: frame %llu label slot %d \"%s\" world (%d,%d,%d) ->"
                " screen (%d,%d)%s w=%d\n",
-            (unsigned long long)sFrame, slot, sLabels[slot].latin1,
+            (unsigned long long)sFrame, slot, sLabels[slot].utf8,
             (int)(world.x >> FX32_SHIFT), (int)(world.y >> FX32_SHIFT),
             (int)(world.z >> FX32_SHIFT), sx, sy, onScreen ? "" : " off-screen", w);
         fflush(stdout);
@@ -306,7 +309,7 @@ void openmmo_label_draw_for(int slot, const MapObject *obj)
         sPlates[sPlateN].x = sx;
         sPlates[sPlateN].y = sy;
         snprintf(sPlates[sPlateN].name, sizeof sPlates[sPlateN].name, "%s",
-                 sLabels[slot].latin1);
+                 sLabels[slot].utf8);
         sPlateN++;
     }
 
@@ -317,7 +320,7 @@ void openmmo_label_draw_for(int slot, const MapObject *obj)
     }
 
     FillRect(surf, x - 2, y - 1, w + 4, 14, 0x00101018u);
-    openmmo_font_draw_latin1(surf, x, y, sLabels[slot].latin1, 0x00F8F8F8u);
+    openmmo_font_draw_utf8(surf, x, y, sLabels[slot].utf8, 0x00F8F8F8u);
 
     sDrawn++;
 }

@@ -20,8 +20,10 @@ warn() { printf '\033[33m[openmmo]\033[0m %s\n' "$1"; }
 
 listening() { ss -ltn 2>/dev/null | grep -q ":$1 "; }
 
-# Under systemd, stopping the processes by hand only earns them a restart five seconds
-# later, so stop the target instead. The databases keep running either way.
+# Under systemd, stopping the processes by hand only earns them a restart five
+# seconds later, so stop the target instead. The databases keep running either
+# way: openmmo-db.service has no ExecStop, for the same reason this script
+# leaves the containers alone unless asked.
 if systemctl cat openmmo.target &>/dev/null && [[ "${OPENMMO_IGNORE_SYSTEMD:-0}" != 1 ]]; then
     say "stopping openmmo.target (login, game, website)"
     sudo systemctl stop openmmo.target
@@ -36,16 +38,24 @@ fi
 # and main class so a compiling gradle daemon, and anything else on this
 # machine, are left alone.
 kill_servers() {
-    local sig="$1" pat pid comm hit=0
-    for pat in ':server.login:run' \
-               ':server.game:run' \
-               'de.fiereu.openmmo.server.login.MainKt' \
-               'de.fiereu.openmmo.server.game.MainKt'; do
-        for pid in $(pgrep -f "$pat" 2>/dev/null); do
-            comm=$(cat "/proc/$pid/comm" 2>/dev/null) || continue
-            [[ "$comm" == java ]] || continue
-            kill "-$sig" "$pid" 2>/dev/null && hit=1
-        done
+    local sig="$1" d pid cmd hit=0
+    for d in /proc/[0-9]*; do
+        pid=${d#/proc/}
+        [[ "$(cat "$d/comm" 2>/dev/null)" == java ]] || continue
+        cmd=$(tr '\0' '\n' < "$d/cmdline" 2>/dev/null) || continue
+        case "$cmd" in
+            # Spared first, so a daemon is spared even if a task name has found
+            # its way into its arguments. A daemon never holds a port.
+            *org.gradle.launcher.daemon.bootstrap.GradleDaemon*) continue ;;
+            *org.jetbrains.kotlin.daemon.KotlinCompileDaemon*)   continue ;;
+        esac
+        case "$cmd" in
+            *de.fiereu.openmmo.server.login.MainKt*|\
+            *de.fiereu.openmmo.server.game.MainKt*|\
+            *gradle-wrapper.jar*:server.login:run*|\
+            *gradle-wrapper.jar*:server.game:run*)
+                kill "-$sig" "$pid" 2>/dev/null && hit=1 ;;
+        esac
     done
     return $(( ! hit ))
 }

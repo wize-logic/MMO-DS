@@ -3,6 +3,10 @@
 #ifndef OPENMMO_VIEW_UI_GAME_H
 #define OPENMMO_VIEW_UI_GAME_H
 
+/* DEV_FEATURES, out of the build (mmo/Makefile): a release is a Sinnoh
+ * client and the bar has no Pokegear button and no card menu in it. */
+#include "endpoint_pin.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -33,7 +37,9 @@ enum view_ui_act {
     VIEW_UI_ACT_WINDOW, /* arg: a view_ui_win_id, raise that frame */
     VIEW_UI_ACT_NOTICE, /* say why not, the way the official client does */
     VIEW_UI_ACT_LOGOUT, /* back to character select, after the official client's confirm */
-    VIEW_UI_ACT_QUIT    /* end the session */
+    VIEW_UI_ACT_EXPORT, /* leave the server and carry on offline, after one */
+    VIEW_UI_ACT_QUIT,   /* end the session */
+    VIEW_UI_ACT_POKETCH /* show or hide the game's own second screen */
 };
 
 /* One button or row: what it says, what it does, the key that does it
@@ -71,11 +77,27 @@ enum view_ui_bar_id {
     VIEW_UI_BAR_TRADE,
     VIEW_UI_BAR_MAIL,
     VIEW_UI_BAR_SHOP,
+    VIEW_UI_BAR_POKETCH,    /* ours: the game's own second screen, on or off */
+#if OPENMMO_PIN_DEV_FEATURES
+    VIEW_UI_BAR_POKEGEAR,   /* a working build's; a release has no Pokegear */
+#endif
     VIEW_UI_BAR_MENU,
     VIEW_UI_BAR_N
 };
 
 const struct view_ui_item *view_ui_bar_item(int i);
+
+/* Playing with no server. */
+void view_ui_offline_set(int on);
+int  view_ui_offline(void);
+
+/* Whether button `i` is on the bar at all. False only offline, and only for
+ * the four above; the ids never move, so a hidden one is still itself. */
+int view_ui_bar_shown(int i);
+
+/* Whether the bar is up at all, from the page the game publishes. Both arms
+ * of it are here rather than in view_ui_bar.c so the suite can hold them. */
+int view_ui_bar_live(const struct openmmo_hud_snap *s);
 
 /* The label to print for button `i`: its short form when the layout says the
  * bar had to shorten, its own otherwise. */
@@ -110,10 +132,13 @@ enum view_ui_menu_id {
     VIEW_UI_MENU_COMMUNITY,
     VIEW_UI_MENU_PVP,
     VIEW_UI_MENU_GAME,
+    /* Ours, not the official client's: the trainer card is one region's at a time here,
+     * and a visitor who holds Johto's badges has two cards to look at. */
+    VIEW_UI_MENU_CARD,
     VIEW_UI_MENU_N
 };
 
-#define VIEW_UI_MENU_ROWS 8
+#define VIEW_UI_MENU_ROWS 9
 
 struct view_ui_menu_def {
     const char *title;
@@ -145,6 +170,13 @@ void view_ui_menu_place(const struct openmmo_rect *canvas,
 
 /* Which row, or -1. */
 int view_ui_menu_hit(const struct view_ui_menu_layout *L, int x, int y);
+
+/*
+ * Whether a row of a popup is on the screen at all, the way view_ui_bar_shown answers for a
+ * button. Offline most of the game menu is about a service that is not there, and one row of
+ * it exists only offline.
+ */
+int view_ui_menu_row_shown(int id, int row);
 
 /* ------------------------------------------------------------------ */
 /* The frames                                                          */

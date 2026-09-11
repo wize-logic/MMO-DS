@@ -11,6 +11,7 @@
 
 #include "soundcompose.h"
 #include "soundtables.gen.h"   /* mmo/src, on the launcher include path */
+#include "nitrorom.h"
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -31,67 +32,27 @@ enum { K_SEQ, K_SEQARC, K_BANK, K_WAVEARC, K_PLAYER, K_GROUP, K_PLAYER2,
 #define PT_BANK_LO 700
 #define PT_BANK_HI 705
 
-/* ------------------------------------------------------------------ err */
-static jmp_buf sJmp;
-static char *sErr;
-static size_t sErrCap;
+/* The SHARED reader, under this FILE'S own names. */
+typedef MmoBlob blob;
+typedef MmoMembers members;
+#define die         mmo_nitro_die
+#define xmalloc     mmo_nitro_alloc
+#define xrealloc    mmo_nitro_grow
+#define rd16        mmo_nitro_rd16
+#define rd32        mmo_nitro_rd32
+#define wr16        mmo_nitro_wr16
+#define wr32        mmo_nitro_wr32
+#define blob_dup    mmo_nitro_dup
+#define read_file   mmo_nitro_read_file
 
-static void die(const char *fmt, ...)
+/* The engine porter's NitroRom, one question of it: the bytes of one file by
+ * its NitroFS path. No hint, a sound archive that is not there is named by
+ * the label the caller already chose. */
+static blob nds_file(const blob rom, const char *want, const char *label)
 {
-    va_list ap;
-
-    va_start(ap, fmt);
-    if (sErr != NULL && sErrCap > 0)
-        vsnprintf(sErr, sErrCap, fmt, ap);
-    va_end(ap);
-    longjmp(sJmp, 1);
+    return mmo_nitro_file(rom, want, label, NULL);
 }
 
-static void *xmalloc(size_t n)
-{
-    void *p = malloc(n ? n : 1);
-
-    if (p == NULL)
-        die("out of memory (%zu bytes)", n);
-    return p;
-}
-
-static void *xrealloc(void *p, size_t n)
-{
-    void *q = realloc(p, n ? n : 1);
-
-    if (q == NULL)
-        die("out of memory (%zu bytes)", n);
-    return q;
-}
-
-/* ------------------------------------------------------------------ blob */
-typedef struct {
-    u8 *p;
-    u32 len;
-} blob;
-
-static blob blob_dup(const u8 *p, u32 len)
-{
-    blob b;
-
-    b.p = xmalloc(len);
-    if (len)
-        memcpy(b.p, p, len);
-    b.len = len;
-    return b;
-}
-
-static u16 rd16(const u8 *p) { return (u16)(p[0] | (p[1] << 8)); }
-static u32 rd32(const u8 *p)
-{
-    return (u32)p[0] | ((u32)p[1] << 8) | ((u32)p[2] << 16) | ((u32)p[3] << 24);
-}
-static void wr16(u8 *p, u16 v) { p[0] = (u8)v; p[1] = (u8)(v >> 8); }
-static void wr32(u8 *p, u32 v)
-{
-    p[0] = (u8)v; p[1] = (u8)(v >> 8); p[2] = (u8)(v >> 16); p[3] = (u8)(v >> 24);
-}
 
 typedef struct {
     u8 *p;
@@ -125,98 +86,6 @@ static void buf_zero(buf *b, u32 n)
 
 static void buf_u16(buf *b, u16 v) { u8 t[2]; wr16(t, v); buf_bytes(b, t, 2); }
 static void buf_u32(buf *b, u32 v) { u8 t[4]; wr32(t, v); buf_bytes(b, t, 4); }
-
-static blob read_file(const char *path)
-{
-    FILE *f = fopen(path, "rb");
-    long n;
-    blob b;
-
-    if (f == NULL)
-        die("cannot open %s", path);
-    fseek(f, 0, SEEK_END);
-    n = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (n < 0)
-        die("cannot size %s", path);
-    b.p = xmalloc((size_t)n);
-    b.len = (u32)n;
-    if (fread(b.p, 1, b.len, f) != b.len)
-        die("cannot read %s", path);
-    fclose(f);
-    return b;
-}
-
-/* ------------------------------------------------------------------ nds */
-/* The engine porter's NitroRom, reduced to one question: the bytes of one
- * file by its NitroFS path. */
-static blob nds_file(const blob rom, const char *want, const char *label)
-{
-    u32 fnt_off, fnt_sz, fat_off;
-    const u8 *fnt, *fat;
-    struct walk { u32 dir; char prefix[192]; } stack[64];
-    int top = 0;
-
-    if (rom.len < 0x160)
-        die("%s is too small to be a cartridge image", label);
-    fnt_off = rd32(rom.p + 0x40);
-    fnt_sz = rd32(rom.p + 0x44);
-    fat_off = rd32(rom.p + 0x48);
-    if (fnt_off + fnt_sz > rom.len || fnt_sz < 8)
-        die("%s has a broken NitroFS table", label);
-    fnt = rom.p + fnt_off;
-    fat = rom.p + fat_off;
-    stack[top].dir = 0xF000;
-    stack[top].prefix[0] = '\0';
-    top++;
-    while (top > 0) {
-        u32 off;
-        u16 first;
-        u32 p;
-        u16 fid;
-        char prefix[192];
-
-        top--;
-        off = rd32(fnt + (stack[top].dir & 0xFFF) * 8);
-        first = rd16(fnt + (stack[top].dir & 0xFFF) * 8 + 4);
-        snprintf(prefix, sizeof prefix, "%s", stack[top].prefix);
-        p = off;
-        fid = first;
-        while (p < fnt_sz && fnt[p] != 0) {
-            u8 flag = fnt[p++];
-            u8 namelen = flag & 0x7F;
-            char name[224];
-
-            if (p + namelen > fnt_sz)
-                die("%s has a broken name table", label);
-            snprintf(name, sizeof name, "%s%.*s", prefix, namelen, fnt + p);
-            p += namelen;
-            if (flag & 0x80) {
-                u16 sub = rd16(fnt + p);
-
-                p += 2;
-                if (top < 64) {
-                    stack[top].dir = sub;
-                    snprintf(stack[top].prefix, sizeof stack[top].prefix,
-                             "%s/", name);
-                    top++;
-                }
-            } else {
-                if (strcmp(name, want) == 0) {
-                    u32 a = rd32(fat + fid * 8);
-                    u32 b = rd32(fat + fid * 8 + 4);
-
-                    if (b > rom.len || a > b)
-                        die("%s: %s is off the end of the image", label, want);
-                    return blob_dup(rom.p + a, b - a);
-                }
-                fid++;
-            }
-        }
-    }
-    die("%s holds no %s", label, want);
-    return (blob){ 0, 0 };
-}
 
 /* ------------------------------------------------------------------ sdat */
 typedef struct {
@@ -2004,17 +1873,194 @@ static void load_game(sdat *out, const char *path, const char *label)
         label);
 }
 
+/* ------------------------------------------------------------------ cries */
+/* The 156 cries a gen 5 cartridge adds, as host PCM. */
+#define CRY_FIRST   494
+#define CRY_LAST    649
+
+/* The NDS/IMA step walk, the arithmetic the hardware decodes with. */
+static const short CRY_STEPS[89] = {
+    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41,
+    45, 50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190,
+    209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724,
+    796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272,
+    2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132,
+    7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500,
+    20350, 22385, 24623, 27086, 29794, 32767
+};
+static const signed char CRY_INDEX_STEP[8] = { -1, -1, -1, -1, 2, 4, 6, 8 };
+
+static u32 cry_adpcm(const u8 *p, u32 len, short *out)
+{
+    int sample = (short)rd16(p);
+    int index = rd16(p + 2);
+    u32 at = 0, i;
+
+    if (index > 88)
+        index = 88;
+    for (i = 4; i < len; i++) {
+        int half;
+
+        for (half = 0; half < 2; half++) {
+            int nib = half == 0 ? (p[i] & 0xF) : (p[i] >> 4);
+            int step = CRY_STEPS[index];
+            int diff = step >> 3;
+
+            if (nib & 1)
+                diff += step >> 2;
+            if (nib & 2)
+                diff += step >> 1;
+            if (nib & 4)
+                diff += step;
+            sample = (nib & 8) ? sample - diff : sample + diff;
+            if (sample < -32768)
+                sample = -32768;
+            if (sample > 32767)
+                sample = 32767;
+            index += CRY_INDEX_STEP[nib & 7];
+            if (index < 0)
+                index = 0;
+            if (index > 88)
+                index = 88;
+            if (out != NULL)
+                out[at] = (short)sample;
+            at++;
+        }
+    }
+    return at;
+}
+
+/* One SWAV's samples as PCM16. Returns the count; `out` may be NULL to ask
+ * only how many there would be. */
+static u32 cry_decode(const slice *s, int *rate, short *out, int species)
+{
+    u32 kind, len;
+    const u8 *data;
+
+    if (s->len < 12)
+        die("species %d's cry is %u bytes, too short to have a header",
+            species, s->len);
+    kind = s->p[0];
+    *rate = (int)rd16(s->p + 2);
+    data = s->p + 12;
+    len = s->len - 12;
+    switch (kind) {
+    case 0: {                   /* PCM8, and on the DS it is signed */
+        u32 i;
+
+        if (out != NULL) {
+            for (i = 0; i < len; i++)
+                out[i] = (short)((signed char)data[i] << 8);
+        }
+        return len;
+    }
+    case 1: {                   /* PCM16 already */
+        u32 i, n = len / 2;
+
+        if (out != NULL) {
+            for (i = 0; i < n; i++)
+                out[i] = (short)rd16(data + i * 2);
+        }
+        return n;
+    }
+    case 2:
+        return cry_adpcm(data, len, out);
+    default:
+        die("species %d's cry is sample kind %u, which this has no decoder for",
+            species, kind);
+    }
+    return 0;
+}
+
+int mmo_soundcompose_cries(const char *bw_rom, const char *out_path,
+                           char *err, size_t errcap)
+{
+    static sdat bw;
+    jmp_buf jb;
+    struct { int species, rate; u32 n; short *pcm; } *got;
+    int count = 0, species, i;
+    u32 total = 0, offset;
+    blob out;
+    FILE *f;
+
+    if (err != NULL && errcap > 0)
+        err[0] = '\0';
+    if (setjmp(jb))
+        return -1;
+    mmo_nitro_catch(&jb, err, errcap);
+    if (bw_rom == NULL || bw_rom[0] == '\0')
+        die("the ported cries need a Black or White cartridge");
+
+    load_game(&bw, bw_rom, "the Black cartridge");
+    got = xmalloc((size_t)(CRY_LAST - CRY_FIRST + 1) * sizeof *got);
+    for (species = CRY_FIRST; species <= CRY_LAST; species++) {
+        slice *sl = NULL;
+        int n, rate = 0;
+        u16 arc = wavearc_file(&bw, species);
+
+        if (arc >= bw.nfat || bw.fat[arc].p == NULL)
+            continue;
+        n = swar_split(bw.fat[arc], &sl);
+        if (n <= 0) {
+            free(sl);
+            continue;           /* an empty wave arc; the stand-in answers */
+        }
+        got[count].species = species;
+        got[count].n = cry_decode(&sl[0], &rate, NULL, species);
+        got[count].rate = rate;
+        got[count].pcm = xmalloc((size_t)got[count].n * sizeof(short));
+        cry_decode(&sl[0], &rate, got[count].pcm, species);
+        total += got[count].n;
+        count++;
+        free(sl);
+    }
+    if (count == 0)
+        die("that cartridge holds no cries past species %d", CRY_FIRST - 1);
+
+    out.len = 8 + (u32)count * 16 + total * 2;
+    out.p = xmalloc(out.len);
+    memcpy(out.p, "OCRY", 4);
+    wr16(out.p + 4, (u16)count);
+    wr16(out.p + 6, 0);
+    offset = 8 + (u32)count * 16;
+    for (i = 0; i < count; i++) {
+        u8 *row = out.p + 8 + (u32)i * 16;
+
+        wr16(row, (u16)got[i].species);
+        wr16(row + 2, (u16)got[i].rate);
+        wr32(row + 4, got[i].n);
+        wr32(row + 8, offset);
+        wr32(row + 12, 0);
+        memcpy(out.p + offset, got[i].pcm, (size_t)got[i].n * sizeof(short));
+        offset += got[i].n * 2;
+        free(got[i].pcm);
+    }
+    free(got);
+
+    f = fopen(out_path, "wb");
+    if (f == NULL)
+        die("cannot write %s", out_path);
+    if (fwrite(out.p, 1, out.len, f) != out.len) {
+        fclose(f);
+        die("cannot write %s", out_path);
+    }
+    fclose(f);
+    free(out.p);
+    mmo_nitro_catch(NULL, NULL, 0);
+    return 0;
+}
+
 int mmo_soundcompose(int track, int font, const char *pt_rom,
                      const char *hg_rom, const char *bw_rom,
                      const char *out_path, char *err, size_t errcap)
 {
     static sdat base, fo_font, fo_track;
     const char *font_rom, *track_rom;
+    jmp_buf jb;
 
-    sErr = err;
-    sErrCap = errcap;
-    if (setjmp(sJmp))
+    if (setjmp(jb))
         return -1;
+    mmo_nitro_catch(&jb, err, errcap);
     if (track == 0 && font == 0)
         die("platinum with platinum is the stock archive; nothing to compose");
     font_rom = font == 1 ? hg_rom : font == 2 ? bw_rom : NULL;
@@ -2089,71 +2135,6 @@ static int sc_dir_exists(const char *path)
     return path[0] != '\0' && stat(path, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
-static void mods_root(const mmo_launch_settings *s, const char *port_exe,
-                      char *out, size_t cap)
-{
-    if (sc_dir_exists(s->mods_dir)) {
-        snprintf(out, cap, "%s", s->mods_dir);
-        return;
-    }
-    {
-        const char *slash = mmo_plat_last_sep(port_exe);
-        char bindir[MMO_LAUNCH_PATH];
-        const char *slash2 = NULL;
-
-        if (slash != NULL) {
-            snprintf(bindir, sizeof bindir, "%.*s",
-                     (int)(slash - port_exe), port_exe);
-            slash2 = mmo_plat_last_sep(bindir);
-        }
-        if (slash2 != NULL)
-            snprintf(out, cap, "%.*s%smods",
-                     (int)(slash2 - bindir), bindir, mmo_plat_sep());
-        else
-            snprintf(out, cap, "mods");
-    }
-}
-
-/* find a cartridge of one game in a folder by the code in its header:
- * IPK/IPG are the Heart Gold pair, IRB/IRA the Black pair */
-static int cart_scan(const char *dir, int want, char *out, size_t cap)
-{
-    DIR *d = opendir(dir);
-    struct dirent *ent;
-    int hit = 0;
-
-    if (d == NULL)
-        return 0;
-    while (!hit && (ent = readdir(d)) != NULL) {
-        size_t n = strlen(ent->d_name);
-        char path[MMO_LAUNCH_PATH];
-        FILE *f;
-        char code[4];
-
-        if (n < 5 || strcmp(ent->d_name + n - 4, ".nds") != 0)
-            continue;
-        snprintf(path, sizeof path, "%s%s%s", dir, mmo_plat_sep(),
-                 ent->d_name);
-        f = fopen(path, "rb");
-        if (f == NULL)
-            continue;
-        if (fseek(f, 0x0C, SEEK_SET) == 0 && fread(code, 1, 4, f) == 4) {
-            int is_hg = memcmp(code, "IPK", 3) == 0
-                     || memcmp(code, "IPG", 3) == 0;
-            int is_bw = memcmp(code, "IRB", 3) == 0
-                     || memcmp(code, "IRA", 3) == 0;
-
-            if ((want == 1 && is_hg) || (want == 2 && is_bw)) {
-                snprintf(out, cap, "%s", path);
-                hit = 1;
-            }
-        }
-        fclose(f);
-    }
-    closedir(d);
-    return hit;
-}
-
 /* the folder the Platinum cartridge sits in */
 static int rom_folder(const mmo_launch_settings *s, char *out, size_t cap)
 {
@@ -2223,10 +2204,10 @@ int mmo_sound_slot_status(const mmo_launch_settings *s, int slot,
         if (path[0] != '\0') {
             char code[5] = "";
             const char *nm = file_cart_name(path, code);
-            int right = (slot == 1 && (strncmp(code, "IPK", 3) == 0
-                                       || strncmp(code, "IPG", 3) == 0))
-                     || (slot == 2 && (strncmp(code, "IRB", 3) == 0
-                                       || strncmp(code, "IRA", 3) == 0));
+            /* The same gate the front door uses, off the same registry: the
+             * settings face and a refusal must not disagree about what a
+             * cartridge is. */
+            int right = mmo_launch_cart_is(slot, code);
             const char *base = mmo_plat_last_sep(path);
             FILE *mf = fopen(path, "rb");
             char magic[4] = "";
@@ -2256,9 +2237,12 @@ int mmo_sound_slot_status(const mmo_launch_settings *s, int slot,
                          "%s ready: %s", nm, base);
                 last_rc[ix] = 1;
             }
-        } else if (dir[0] != '\0'
-                   && cart_scan(dir, slot, last_file[ix],
-                                sizeof last_file[ix])) {
+        } else if ((dir[0] != '\0'
+                    && mmo_launch_cart_scan(dir, slot, last_file[ix],
+                                            sizeof last_file[ix]))
+                   || mmo_launch_cart_scan(mmo_launch_roms_fallback_dir(),
+                                           slot, last_file[ix],
+                                           sizeof last_file[ix])) {
             const char *nm = file_cart_name(last_file[ix], NULL);
             const char *base = mmo_plat_last_sep(last_file[ix]);
 
@@ -2316,7 +2300,7 @@ int mmo_soundcompose_ensure(const mmo_launch_settings *s, const char *port_exe,
 
     if (!mmo_sound_pair(s, &track, &font))
         return 0;
-    mods_root(s, port_exe, root, sizeof root);
+    mmo_launch_mods_root(s, port_exe, root, sizeof root);
     snprintf(pkg, sizeof pkg, "%s%ssound_%s_%s", root, mmo_plat_sep(),
              SLOT_SLUG[track], SLOT_SLUG[font]);
     snprintf(path, sizeof path, "%s%sreplace%sdata%ssound%spl_sound_data.sdat",

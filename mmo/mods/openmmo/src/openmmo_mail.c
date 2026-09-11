@@ -19,6 +19,7 @@
 #include "text.h"
 
 #include "../../../include/charcode.h"
+#include "../../../include/endpoint.h"
 #include "../../../include/client.h"
 #include "../../../include/hud_channel.h"
 
@@ -27,6 +28,8 @@ typedef char openmmo_mail_charcode_width_check[
 
 extern const ApplicationManagerTemplate gMailAppArgsTemplate;
 extern const struct openmmo_hud_mail_send *openmmo_hud_mail_args(void);
+/* The letter a row verb named, out of the ring slot it rode. */
+extern s64 openmmo_hud_cmd_row_id(int32_t arg);
 
 /* Defined below, and called by openmmo_mail_attach above it. Without this the
  * call is an implicit int(), which the definition then conflicts with, a
@@ -45,12 +48,12 @@ static int s_show;
 static int s_pending;   /* the stationery was asked for; open when settled */
 static s64 s_want_id;   /* which letter it was asked for; 0 = the first */
 static s64 s_asked_id;
-static char s_subject[MMO_MAIL_SUBJECT_MAX + 1];
-static char s_body[MMO_MAIL_BODY_MAX + 1];
+static char s_subject[MMO_TEXT_BYTES(MMO_MAIL_SUBJECT_MAX)];
+static char s_body[MMO_TEXT_BYTES(MMO_MAIL_BODY_MAX)];
 
 static int want_open(void)
 {
-    const char *env = getenv("OPENMMO_MAIL");
+    const char *env = openmmo_dev_env("OPENMMO_MAIL");
 
     if (env == NULL || env[0] == '\0' || env[0] == '0')
         return 0;
@@ -101,14 +104,6 @@ static const mmo_mail *pick_letter(const openmmo_mail *box)
     if (box->count > 0)
         return &box->entry[0];
     return NULL;
-}
-
-/* The row the window means, against the page the window was drawn from. */
-static const mmo_mail *row_letter(const openmmo_mail *box, int row)
-{
-    if (box == NULL || !box->valid || row < 0 || row >= box->count)
-        return NULL;
-    return &box->entry[row];
 }
 
 static const char *letter_name(const openmmo_mail *box, const mmo_mail *letter)
@@ -341,17 +336,14 @@ int openmmo_mail_try_open(FieldSystem *fs)
     return 1;
 }
 
-/* One command from the window's Mail frame (OPENMMO_HUD_CMD_MAIL). Row verbs
- * resolve against the same held page the snapshot was published from, so the
- * window and the guest can never name different letters; a compose's three
- * strings ride the page's cmd_mail slot, written before the command word. */
+/* One command from the window's Mail frame (OPENMMO_HUD_CMD_MAIL). */
 void openmmo_mail_window_cmd(unsigned arg)
 {
     const struct openmmo_hud_mail_send *wide = openmmo_hud_mail_args();
     unsigned verb = arg & 0xFFu;
     int row = (int)((arg >> 8) & 0xFFu);
+    s64 id = openmmo_hud_cmd_row_id((int32_t)arg);
     const openmmo_mail *box;
-    const mmo_mail *letter;
 
     if (s_client == NULL)
         return;
@@ -367,23 +359,20 @@ void openmmo_mail_window_cmd(unsigned arg)
         return;
     }
     case OPENMMO_HUD_MAIL_READ:
-        letter = row_letter(box, row);
-        if (letter == NULL) {
-            printf("openmmo: mail row %d is off the page\n", row);
+        if (id == 0) {
+            printf("openmmo: mail row %d named no letter\n", row);
             return;
         }
-        printf("openmmo: mail window opens %lld\n", (long long)letter->mail_id);
-        openmmo_client_mail_read(s_client, letter->mail_id);
+        printf("openmmo: mail window opens %lld\n", (long long)id);
+        openmmo_client_mail_read(s_client, id);
         return;
     case OPENMMO_HUD_MAIL_DELETE:
-        letter = row_letter(box, row);
-        if (letter == NULL) {
-            printf("openmmo: mail row %d is off the page\n", row);
+        if (id == 0) {
+            printf("openmmo: mail row %d named no letter\n", row);
             return;
         }
-        printf("openmmo: mail window deletes %lld\n",
-               (long long)letter->mail_id);
-        openmmo_client_mail_delete(s_client, letter->mail_id, box->page);
+        printf("openmmo: mail window deletes %lld\n", (long long)id);
+        openmmo_client_mail_delete(s_client, id, box->page);
         return;
     case OPENMMO_HUD_MAIL_SEND: {
         struct openmmo_hud_mail_send m;
@@ -399,14 +388,12 @@ void openmmo_mail_window_cmd(unsigned arg)
         return;
     }
     case OPENMMO_HUD_MAIL_PAPER:
-        letter = row_letter(box, row);
-        if (letter == NULL) {
-            printf("openmmo: mail row %d is off the page\n", row);
+        if (id == 0) {
+            printf("openmmo: mail row %d named no letter\n", row);
             return;
         }
-        openmmo_mail_request(letter->mail_id);
-        printf("openmmo: mail stationery asked for %lld\n",
-               (long long)letter->mail_id);
+        openmmo_mail_request(id);
+        printf("openmmo: mail stationery asked for %lld\n", (long long)id);
         return;
     default:
         printf("openmmo: mail verb %u is not one of ours\n", verb);

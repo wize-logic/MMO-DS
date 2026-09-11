@@ -1,0 +1,27 @@
+--- a/src/rtc.c
++++ b/src/rtc.c
+@@ -34,6 +34,24 @@
+ 
+ void UpdateRTC(void)
+ {
++    // The world's own clock, once the server has said what time it is out
++    // there. A cartridge asks the console it is sitting in, which makes every
++    // player's world a different hour; one answer covers everybody here, and
++    // it is the same one the night encounter tables roll against.
++    //
++    // Taken here rather than in the read callback because the modeled chip's
++    // asynchronous read does not complete a second time on this host: the
++    // cache is filled once at boot and would otherwise stand still for the
++    // whole session, which is why nothing ever reached dusk.
++    {
++        extern int openmmo_world_clock(RTCDate *date, RTCTime *time);
++
++        if (openmmo_world_clock(&sRTCState.date, &sRTCState.time)) {
++            sRTCState.valid = 1;
++            return;
++        }
++    }
++
+     if (sRTCState.readInProgress) {
+         return;
+     }

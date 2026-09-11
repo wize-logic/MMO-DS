@@ -1,0 +1,68 @@
+--- a/src/applications/trainer_case/sprites.c	2026-09-02 12:24:32.990294991 -0400
++++ b2/src/applications/trainer_case/sprites.c	2026-09-02 14:24:46.781273598 -0400
+@@ -62,10 +62,24 @@
+         spriteData->spriteResourceCollection[resourceType] = SpriteResourceCollection_New(sSpriteResourceCapacities[resourceType], resourceType, HEAP_ID_TRAINER_CASE);
+     }
+ 
+-    spriteData->spriteResources[SPRITE_RESOURCE_CHAR] = SpriteResourceCollection_AddTilesFrom(spriteData->spriteResourceCollection[SPRITE_RESOURCE_CHAR], narc, badge_case_sprites_NCGR, FALSE, 1, NNS_G2D_VRAM_TYPE_2DMAIN, HEAP_ID_TRAINER_CASE);
+-    spriteData->spriteResources[SPRITE_RESOURCE_PLTT] = SpriteResourceCollection_AddPaletteFrom(spriteData->spriteResourceCollection[SPRITE_RESOURCE_PLTT], narc, badge_case_sprites_NCLR, FALSE, 1, NNS_G2D_VRAM_TYPE_2DMAIN, 9, HEAP_ID_TRAINER_CASE);
+-    spriteData->spriteResources[SPRITE_RESOURCE_CELL] = SpriteResourceCollection_AddFrom(spriteData->spriteResourceCollection[SPRITE_RESOURCE_CELL], narc, badge_case_sprites_cell_NCER, FALSE, 1, SPRITE_RESOURCE_CELL, HEAP_ID_TRAINER_CASE);
+-    spriteData->spriteResources[SPRITE_RESOURCE_ANIM] = SpriteResourceCollection_AddFrom(spriteData->spriteResourceCollection[SPRITE_RESOURCE_ANIM], narc, badge_case_sprites_anim_NANR, FALSE, 1, SPRITE_RESOURCE_ANIM, HEAP_ID_TRAINER_CASE);
++    /* A ported region's card draws HeartGold's own badges: its tiles, its
++     * palette of sixteen blocks, its cell bank and its animations, appended
++     * to this archive as they are (mods/openmmo/src/openmmo_card.c). The
++     * formats and the 128-byte char units are the same on both sides. */
++    extern int openmmo_card_page_ready(void);
++    extern int openmmo_card_member(const char *key);
++
++    if (openmmo_card_page_ready()) {
++        spriteData->spriteResources[SPRITE_RESOURCE_CHAR] = SpriteResourceCollection_AddTilesFrom(spriteData->spriteResourceCollection[SPRITE_RESOURCE_CHAR], narc, openmmo_card_member("badge_char"), FALSE, 1, NNS_G2D_VRAM_TYPE_2DMAIN, HEAP_ID_TRAINER_CASE);
++        spriteData->spriteResources[SPRITE_RESOURCE_PLTT] = SpriteResourceCollection_AddPaletteFrom(spriteData->spriteResourceCollection[SPRITE_RESOURCE_PLTT], narc, openmmo_card_member("badge_pal"), FALSE, 1, NNS_G2D_VRAM_TYPE_2DMAIN, 16, HEAP_ID_TRAINER_CASE);
++        spriteData->spriteResources[SPRITE_RESOURCE_CELL] = SpriteResourceCollection_AddFrom(spriteData->spriteResourceCollection[SPRITE_RESOURCE_CELL], narc, openmmo_card_member("badge_cell"), FALSE, 1, SPRITE_RESOURCE_CELL, HEAP_ID_TRAINER_CASE);
++        spriteData->spriteResources[SPRITE_RESOURCE_ANIM] = SpriteResourceCollection_AddFrom(spriteData->spriteResourceCollection[SPRITE_RESOURCE_ANIM], narc, openmmo_card_member("badge_anim"), FALSE, 1, SPRITE_RESOURCE_ANIM, HEAP_ID_TRAINER_CASE);
++    } else {
++        spriteData->spriteResources[SPRITE_RESOURCE_CHAR] = SpriteResourceCollection_AddTilesFrom(spriteData->spriteResourceCollection[SPRITE_RESOURCE_CHAR], narc, badge_case_sprites_NCGR, FALSE, 1, NNS_G2D_VRAM_TYPE_2DMAIN, HEAP_ID_TRAINER_CASE);
++        spriteData->spriteResources[SPRITE_RESOURCE_PLTT] = SpriteResourceCollection_AddPaletteFrom(spriteData->spriteResourceCollection[SPRITE_RESOURCE_PLTT], narc, badge_case_sprites_NCLR, FALSE, 1, NNS_G2D_VRAM_TYPE_2DMAIN, 9, HEAP_ID_TRAINER_CASE);
++        spriteData->spriteResources[SPRITE_RESOURCE_CELL] = SpriteResourceCollection_AddFrom(spriteData->spriteResourceCollection[SPRITE_RESOURCE_CELL], narc, badge_case_sprites_cell_NCER, FALSE, 1, SPRITE_RESOURCE_CELL, HEAP_ID_TRAINER_CASE);
++        spriteData->spriteResources[SPRITE_RESOURCE_ANIM] = SpriteResourceCollection_AddFrom(spriteData->spriteResourceCollection[SPRITE_RESOURCE_ANIM], narc, badge_case_sprites_anim_NANR, FALSE, 1, SPRITE_RESOURCE_ANIM, HEAP_ID_TRAINER_CASE);
++    }
+ 
+     SpriteTransfer_RequestChar(spriteData->spriteResources[SPRITE_RESOURCE_CHAR]);
+     SpriteTransfer_RequestPlttWholeRange(spriteData->spriteResources[SPRITE_RESOURCE_PLTT]);
+@@ -133,6 +147,36 @@
+     template.vramType = NNS_G2D_VRAM_TYPE_2DMAIN;
+     template.heapID = HEAP_ID_TRAINER_CASE;
+ 
++    /* HeartGold's page: sixteen badges, badge i on its own sequence's front
++     * frame at the centre its table gives, drawn only where the world state
++     * holds it (ov51_021E7AF4; mods/openmmo/src/openmmo_card.c). Nothing
++     * sparkles on it and no button springs. */
++    {
++        extern int openmmo_card_page_ready(void);
++        extern int openmmo_card_badge_held(int index);
++        extern void openmmo_card_badge_at(int index, int *x, int *y);
++
++        if (openmmo_card_page_ready()) {
++            int badge, x, y;
++
++            for (badge = 0; badge < MAX_BADGES * 2; badge++) {
++                openmmo_card_badge_at(badge, &x, &y);
++                template.position.x = FX32_ONE * x;
++                template.position.y = FX32_ONE * y;
++                spriteData->sprites[badge] = SpriteList_AddAffine(&template);
++                Sprite_SetAnimateFlag(spriteData->sprites[badge], FALSE);
++                Sprite_SetAnim(spriteData->sprites[badge], badge);
++                if (!openmmo_card_badge_held(badge)) {
++                    Sprite_SetDrawFlag(spriteData->sprites[badge], FALSE);
++                }
++            }
++            for (; badge < MAX_BADGES * 3 + 1; badge++) {
++                spriteData->sprites[badge] = NULL;
++            }
++            return;
++        }
++    }
++
+     for (int badgeID = 0; badgeID < MAX_BADGES; badgeID++) {
+         template.position.x = FX32_ONE * sBadgeCoordinates[badgeID].x;
+         template.position.y = FX32_ONE * sBadgeCoordinates[badgeID].y;

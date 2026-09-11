@@ -12,6 +12,7 @@ import de.fiereu.openmmo.net.game.packets.PokemonMove
 import de.fiereu.openmmo.net.game.packets.PokemonMovePacket
 import de.fiereu.openmmo.server.game.battle.BattleRegistry
 import de.fiereu.openmmo.server.game.storage.CharacterStore
+import de.fiereu.openmmo.server.game.storage.Containers
 import de.fiereu.openmmo.server.game.storage.EntityIdService
 import de.fiereu.openmmo.server.game.storage.PC_STORAGE_SIZE
 import de.fiereu.openmmo.server.game.testsupport.FakeCharacterRepository
@@ -52,12 +53,18 @@ private class StorageFixture(scope: CoroutineScope) {
   val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), scope)
   val service = PokemonStorageService(store, BattleRegistry())
 
-  suspend fun trainer(party: Int, pc: List<Short>): Pair<FakeSession, Long> {
+  suspend fun trainer(
+      party: Int,
+      pc: List<Short>,
+      daycare: List<Short> = emptyList(),
+  ): Pair<FakeSession, Long> {
     val created = store.createCharacter(1, "Ash", CharacterGender.MALE, Region.HOENN)
     val id = created.info.id
-    store.rearrangeMonsters(id) { _, _ ->
-      List(party) { mon(it + 1L, id, PokemonContainer.PARTY, it.toShort()) } to
-          pc.mapIndexed { i, slot -> mon(100L + i, id, PokemonContainer.PC, slot) }
+    store.rearrangeMonsters(id) { _, _, _ ->
+      Containers(
+          List(party) { mon(it + 1L, id, PokemonContainer.PARTY, it.toShort()) },
+          pc.mapIndexed { i, slot -> mon(100L + i, id, PokemonContainer.PC, slot) },
+          daycare.mapIndexed { i, slot -> mon(200L + i, id, PokemonContainer.DAYCARE, slot) })
     }
     val session = FakeSession(id)
     session.sent.clear()
@@ -71,6 +78,8 @@ private class StorageFixture(scope: CoroutineScope) {
   fun party(id: Long) = store.getCharacter(id)!!.pokemon
 
   fun pc(id: Long) = store.getCharacter(id)!!.pcStorage
+
+  fun daycare(id: Long) = store.getCharacter(id)!!.daycare
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -132,10 +141,69 @@ class PokemonStorageServiceTest :
           fx.move(
               session,
               PokemonMove(PokemonContainer.PARTY, 0, PokemonContainer.PC, 0),
-              PokemonMove(PokemonContainer.PARTY, 0, PokemonContainer.DAYCARE, 0),
+              PokemonMove(PokemonContainer.PARTY, 0, PokemonContainer.BATTLE_BOX_1, 0),
           )
           fx.party(id).map { it.id } shouldBe listOf(1L, 2L)
           fx.pc(id) shouldBe emptyList()
+        }
+      }
+
+      test("a monster handed over the day care counter leaves the party for the day care") {
+        runTest {
+          val fx = StorageFixture(this)
+          val (session, id) = fx.trainer(party = 3, pc = emptyList())
+          fx.move(session, PokemonMove(PokemonContainer.PARTY, 2, PokemonContainer.DAYCARE, 0))
+
+          fx.party(id).map { it.id } shouldBe listOf(1L, 2L)
+          fx.daycare(id).map { it.id to it.containerSlot } shouldBe listOf(3L to 0.toShort())
+          fx.daycare(id).single().container shouldBe PokemonContainer.DAYCARE
+          fx.pc(id) shouldBe emptyList()
+        }
+      }
+
+      test("a boarder taken back is the same monster, not a second one") {
+        runTest {
+          val fx = StorageFixture(this)
+          val (session, id) = fx.trainer(party = 2, pc = emptyList(), daycare = listOf(0))
+          val boarding = fx.daycare(id).single().id
+          fx.move(session, PokemonMove(PokemonContainer.DAYCARE, 0, PokemonContainer.PARTY, 2))
+
+          fx.daycare(id) shouldBe emptyList()
+          fx.party(id).map { it.id } shouldBe listOf(1L, 2L, boarding)
+          fx.party(id).last().container shouldBe PokemonContainer.PARTY
+        }
+      }
+
+      test("the day care holds two, and a third is refused") {
+        runTest {
+          val fx = StorageFixture(this)
+          val (session, id) = fx.trainer(party = 3, pc = emptyList(), daycare = listOf(0, 1))
+          fx.move(session, PokemonMove(PokemonContainer.PARTY, 2, PokemonContainer.DAYCARE, 2))
+
+          fx.party(id).map { it.id } shouldBe listOf(1L, 2L, 3L)
+          fx.daycare(id).map { it.containerSlot } shouldBe listOf<Short>(0, 1)
+        }
+      }
+
+      test("the day care keeps the slot it was given rather than being packed down") {
+        runTest {
+          val fx = StorageFixture(this)
+          val (session, id) = fx.trainer(party = 2, pc = emptyList(), daycare = listOf(0, 1))
+          val second = fx.daycare(id).last().id
+          fx.move(session, PokemonMove(PokemonContainer.DAYCARE, 0, PokemonContainer.PARTY, 2))
+
+          fx.daycare(id).map { it.id to it.containerSlot } shouldBe listOf(second to 1.toShort())
+        }
+      }
+
+      test("the last party member may not be handed over the counter") {
+        runTest {
+          val fx = StorageFixture(this)
+          val (session, id) = fx.trainer(party = 1, pc = emptyList())
+          fx.move(session, PokemonMove(PokemonContainer.PARTY, 0, PokemonContainer.DAYCARE, 0))
+
+          fx.party(id).map { it.id } shouldBe listOf(1L)
+          fx.daycare(id) shouldBe emptyList()
         }
       }
 
@@ -151,17 +219,18 @@ class PokemonStorageServiceTest :
         }
       }
 
-      test("both containers come back on the wire, refused or not") {
+      test("every container comes back on the wire, refused or not") {
         runTest {
           val fx = StorageFixture(this)
-          val (session, _) = fx.trainer(party = 2, pc = emptyList())
+          val (session, _) = fx.trainer(party = 2, pc = emptyList(), daycare = listOf(0))
           fx.move(session, PokemonMove(PokemonContainer.PARTY, 0, PokemonContainer.PC, 700))
 
           val containers = session.sent.filterIsInstance<PokemonContainerPacket>()
           containers.map { it.container } shouldBe
-              listOf(PokemonContainer.PARTY, PokemonContainer.PC)
+              listOf(PokemonContainer.PARTY, PokemonContainer.DAYCARE, PokemonContainer.PC)
           containers.all { it.hasChange } shouldBe true
           containers.first().pokemon.map { it.id } shouldBe listOf(1L, 2L)
+          containers[1].pokemon.map { it.id } shouldBe listOf(200L)
         }
       }
     })

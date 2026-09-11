@@ -100,6 +100,11 @@ class FakeGtlRepository : GtlRepository {
     return GtlPage(all.size, all.drop(offset).take(limit))
   }
 
+  override suspend fun findOwn(sellerId: Long, id: Long): GtlListing? =
+      rows[id]?.takeIf {
+        it.sellerId == sellerId && (it.state != GTL_STATE_CLOSED || it.unclaimedUnits > 0)
+      }
+
   override suspend fun cheapestItemListings(itemId: Int, limit: Int): List<GtlListing> =
       rows.values
           .filter {
@@ -252,9 +257,4 @@ class FakeGtlRepository : GtlRepository {
     }
     return done
   }
-
-  override suspend fun soldUnpaid(sellerId: Long): List<GtlListing> =
-      rows.values
-          .filter { it.sellerId == sellerId && it.state == GTL_STATE_SOLD }
-          .sortedBy { it.soldAt }
 }

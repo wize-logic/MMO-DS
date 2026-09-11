@@ -1,0 +1,38 @@
+# port.recipe, the region this package carries, and where it comes from.
+#
+# Two lines, and they are the whole world Heart Gold draws: every map its own
+# map headers put in Johto or in Kanto, converted into this game's field
+# archives out of the player's image by `tools/portmap.py`. Nothing here is
+# bytes. The bytes come from the cartridge, land in .cooked/ beside this file,
+# and are not committed.
+#
+# BOTH REGIONS ARE ONE PACKAGE AND ONE RUN. A package's appended members must
+# start at the built image's own counts and run without a gap, so two packages
+# would both start there and claim the same numbers, and the doors between
+# the two regions only work when both ends are in the same one. They do not
+# share a matrix (Johto is 24x14 cells of the source's shared overworld and
+# Kanto 23x15, but together they span 45 against the engine's 30), so each gets
+# its own and crossing between them is a matrix change, which is what a door
+# has always been.
+#
+#   <game code>  <kind>  <source name>  <destination name>
+#
+# A REGION HAS NO DESTINATION, which is why the fourth column is `-`. Every
+# other kind in this grammar is a PAIRING, this species' sprite onto that
+# one's, and a region is not: its maps are appended with addresses of their
+# own, `594 + the map's own source header`, because there is no Sinnoh map for
+# a Johto one to land on. Not an index over the run: an index would have moved
+# every Johto map the day the Kanto line was added below it. The server derives
+# the same numbers from mmo/MAPS without ever seeing this package, which is
+# what makes a ported map addressable at all.
+#
+# WHAT CROSSES is the design notes list, and the short version is: the
+# ground, the buildings, the people, the doors, the music, the text, and as
+# much of each script as a world with no story can honestly run. 964 of the two
+# regions' people and signs say their piece; the rest stand there, as every one
+# of them did before 2026-08-30.
+#
+# `make -C mmo import IMPORT_PKG=mods/hgss IMPORT_ROM=<your heartgold.nds>`
+
+IPKE  region  johto  -
+IPKE  region  kanto  -

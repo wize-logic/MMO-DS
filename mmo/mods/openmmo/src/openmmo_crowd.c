@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../../../include/endpoint.h"
 #include "../../../include/platform.h"
 
 /* What this build uses. The engine's own numbers are 64, 32 and 80. */
@@ -23,9 +24,13 @@ enum {
     ASSERT_WARN = 0,
 };
 
+/* A ceiling out of the environment. Every caller of this is a door, the
+ * three below resize the engine's own map-object, texture and animation
+ * tables, so the read goes through openmmo_dev_env (endpoint.h) and a
+ * release keeps the numbers it was built with whatever the environment says. */
 static int env_int(const char *name, int fallback, int lo, int hi)
 {
-    const char *v = getenv(name);
+    const char *v = openmmo_dev_env(name);
     char *end;
     long n;
 
@@ -116,7 +121,7 @@ static int assert_mode(void)
     static int mode = -1;
 
     if (mode < 0) {
-        const char *v = getenv("OPENMMO_ASSERT");
+        const char *v = openmmo_dev_env("OPENMMO_ASSERT");
         mode = (v != NULL && strcmp(v, "fatal") == 0) ? ASSERT_FATAL : ASSERT_WARN;
     }
 
@@ -157,11 +162,20 @@ void openmmo_texture_pool_full(int id)
  * ErrorHandling_AssertFail's own body only speaks when CommManager is up, so a
  * failed GF_ASSERT on a host returned quietly and the caller carried on into
  * whatever the assertion existed to prevent. This is called before that body. */
-void openmmo_engine_assert_failed(void)
+void openmmo_engine_assert_failed(const void *caller)
 {
     static long count;
+    extern void ErrorHandling_AssertFail(void);
 
     report("engine assertion failed", ++count);
+    /*
+     * The official client's assert carries no file or line, so the one thing that names the asserter is
+     * where it will return to.
+     */
+    fprintf(stderr, "openmmo:   the asserter returns to ErrorHandling_AssertFail%+ld (%p)\n",
+            (long)((const char *)caller - (const char *)ErrorHandling_AssertFail),
+            caller);
+    fflush(stderr);
     if (assert_mode() == ASSERT_FATAL) {
         stop();
     }

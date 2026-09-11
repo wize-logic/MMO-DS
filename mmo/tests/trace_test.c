@@ -58,7 +58,7 @@ static int capture_mock_session(mmo_trace *t)
 
     mmo_wbuf shello;
     mmo_wbuf_init(&shello);
-    mmo_mock_server_hello(&m, &shello);
+    mmo_mock_server_hello(&m, &shello, SEED_TIME);
     mmo_trace_add(t, MMO_TRACE_S2C, MMO_TRACE_HS, shello.data, shello.len, NULL, 0);
     const u8 *sh_body;
     size_t sh_n;

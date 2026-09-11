@@ -1,0 +1,109 @@
+# MOVE_ANIMS, which Gen 4 animation a Gen 5 move borrows.
+#
+# <gen5 move>  <gen4 donor>   # <gen5 name> <- <gen4 name>: why
+#
+# A Gen 5 move has no animation script in this game, and the scripts it has in
+# its own game are cell animations this engine cannot play. So tools/portmoves.py
+# writes a Gen 4 move's script bytes under the Gen 5 id, one cartridge's member
+# under another id, the same act as every recipe line, and this file says
+# which. The two presentation flag bits (hides HP gauges, hides shadows) follow
+# the donor, because they describe the animation that actually plays.
+#
+# `tools/portmoves.py --propose-anims` printed the first cut of this table by
+# rule: same type and class, the nearest power for a damaging move, the same
+# effect where a Gen 4 move has it, the newest otherwise. Rows marked "by hand"
+# are where the rule was blind, it gave Hone Claws a sleep animation and Drill
+# Run a move that buries the user, and every one carries its own reason. It is
+# a first cut: anyone who plays a battle and winces at a row should change it.
+468 14    # Hone Claws <- Swords Dance: by hand, a stat-boost dance rather than Dark Void's sleep
+469 182   # Wide Guard <- Protect: by hand, a guard
+470 385   # Guard Split <- Guard Swap: by hand, this game's own defence-sharing swap
+471 384   # Power Split <- Power Swap: by hand, this game's own attack-sharing swap
+472 433   # Wonder Room <- Trick Room: by hand, a room
+473 326   # Psyshock <- Extrasensory: same type and class, nearest power (80 for 80)
+474 124   # Venoshock <- Sludge: same type and class, nearest power (65 for 65)
+475 97    # Autotomize <- Agility: by hand, a speed boost
+476 78    # Rage Powder <- Stun Spore: by hand, a powder
+477 95    # Telekinesis <- Hypnosis: by hand, a psychic wave on the target
+478 433   # Magic Room <- Trick Room: by hand, a room
+479 317   # Smack Down <- Rock Tomb: same type and class, nearest power (50 for 50)
+480 233   # Storm Throw <- Vital Throw: by hand, a throw
+481 436   # Flame Burst <- Lava Plume: same type and class, nearest power (80 for 70)
+482 188   # Sludge Wave <- Sludge Bomb: same type and class, same effect
+483 349   # Quiver Dance <- Dragon Dance: by hand, a stat-boost dance
+484 442   # Heavy Slam <- Iron Head: by hand, a Steel body blow; the rule matched Metal Burst on power 1
+485 296   # Synchronoise <- Mist Ball: same type and class, nearest power (70 for 70)
+486 84    # Electro Ball <- ThunderShock: same type and class, nearest power (40 for 1)
+487 392   # Soak <- Aqua Ring: same type and class, newest
+488 172   # Flame Charge <- Flame Wheel: same type and class, nearest power (60 for 50)
+489 349   # Coil <- Dragon Dance: by hand, a stat-boost dance
+490 280   # Low Sweep <- Brick Break: by hand, a kick rather than Drain Punch's drain
+491 51    # Acid Spray <- Acid: same type and class, nearest power (40 for 40)
+492 389   # Foul Play <- Sucker Punch: same type and class, nearest power (80 for 95)
+493 388   # Simple Beam <- Worry Seed: by hand, this game's own ability-changing move
+494 285   # Entrainment <- Skill Swap: by hand, an ability handed over
+495 226   # After You <- Baton Pass: by hand, the turn handed over
+496 304   # Round <- Hyper Voice: by hand, a sound move
+497 304   # Echoed Voice <- Hyper Voice: by hand, a sound move
+498 290   # Chip Away <- Secret Power: same type and class, nearest power (70 for 70)
+499 123   # Clear Smog <- Smog: by hand, smog
+500 60    # Stored Power <- Psybeam: by hand, a psychic beam; the rule matched Mirror Coat on power 1
+501 182   # Quick Guard <- Protect: by hand, a guard
+502 100   # Ally Switch <- Teleport: by hand, a place swap
+503 362   # Scald <- Brine: same type and class, nearest power (65 for 80)
+504 187   # Shell Smash <- Belly Drum: by hand, the user tears into itself for power
+505 105   # Heal Pulse <- Recover: by hand, a heal
+506 247   # Hex <- Shadow Ball: by hand, a ghost projectile
+507 19    # Sky Drop <- Fly: by hand, the two-turn flying move; hides the shadow the way Fly does
+508 97    # Shift Gear <- Agility: by hand, a speed boost
+509 69    # Circle Throw <- Seismic Toss: by hand, a throw
+510 52    # Incinerate <- Ember: same type and class, nearest power (40 for 30)
+511 259   # Quash <- Torment: same type and class; by hand over Dark Void's sleep
+512 365   # Acrobatics <- Pluck: same type and class, nearest power (60 for 55)
+513 160   # Reflect Type <- Conversion: by hand, the user's type changes
+514 290   # Retaliate <- Secret Power: same type and class, nearest power (70 for 70)
+515 120   # Final Gambit <- Selfdestruct: by hand, the user goes down with the blow
+516 271   # Bestow <- Trick: by hand, an item changes hands
+517 436   # Inferno <- Lava Plume: same type and class, same effect
+518 352   # Water Pledge <- Water Pulse: same type and class, nearest power (60 for 50)
+519 52    # Fire Pledge <- Ember: same type and class, nearest power (40 for 50)
+520 345   # Grass Pledge <- Magical Leaf: same type and class, nearest power (60 for 50)
+521 85    # Volt Switch <- Thunderbolt: by hand, a single-target bolt rather than Discharge's spread
+522 318   # Struggle Bug <- Silver Wind: same type and class, nearest power (60 for 30)
+523 89    # Bulldoze <- Earthquake: by hand, the ground hits everyone
+524 181   # Frost Breath <- Powder Snow: same type and class, nearest power (40 for 40)
+525 337   # Dragon Tail <- Dragon Claw: same type and class, nearest power (80 for 60)
+526 74    # Work Up <- Growth: by hand, a stat boost
+527 451   # Electroweb <- Charge Beam: same type and class, nearest power (50 for 55)
+528 344   # Wild Charge <- Volt Tackle: by hand, the recoil charge
+529 32    # Drill Run <- Horn Drill: by hand, a drill; the rule's Dig buries the user
+530 337   # Dual Chop <- Dragon Claw: same type and class, nearest power (80 for 40)
+531 428   # Heart Stamp <- Zen Headbutt: same type and class, same effect
+532 202   # Horn Leech <- Giga Drain: by hand, a drain
+533 327   # Sacred Sword <- Sky Uppercut: same type and class, nearest power (85 for 90)
+534 401   # Razor Shell <- Aqua Tail: by hand, a water slash; the rule's Dive sinks the user
+535 172   # Heat Crash <- Flame Wheel: same type and class, nearest power (60 for 1)
+536 75    # Leaf Tornado <- Razor Leaf: by hand, whirling leaves
+537 205   # Steamroller <- Rollout: by hand, a roll
+538 178   # Cotton Guard <- Cotton Spore: by hand, cotton
+539 399   # Night Daze <- Dark Pulse: same type and class, nearest power (80 for 85)
+540 94    # Psystrike <- Psychic: by hand, the plain psychic blast rather than Dream Eater
+541 154   # Tail Slap <- Fury Swipes: same type and class, same effect
+542 177   # Hurricane <- Aeroblast: same type and class, nearest power (100 for 120)
+543 36    # Head Charge <- Take Down: same type and class, same effect
+544 232   # Gear Grind <- Metal Claw: same type and class, nearest power (50 for 50)
+545 436   # Searing Shot <- Lava Plume: same type and class, same effect
+546 449   # Techno Blast <- Judgment: same type and class, same effect
+547 161   # Relic Song <- Tri Attack: same type and class, nearest power (80 for 75)
+548 396   # Secret Sword <- Aura Sphere: same type and class, nearest power (90 for 85)
+549 62    # Glaciate <- Aurora Beam: same type and class, nearest power (65 for 65)
+550 344   # Bolt Strike <- Volt Tackle: by hand, the big electric charge
+551 126   # Blue Flare <- Fire Blast: by hand, the big fire blast
+552 436   # Fiery Dance <- Lava Plume: same type and class, nearest power (80 for 80)
+553 59    # Freeze Shock <- Blizzard: by hand, the big ice move; the rule matched Ice Punch
+554 59    # Ice Burn <- Blizzard: same type and class, nearest power (120 for 140)
+555 399   # Snarl <- Dark Pulse: same type and class, nearest power (80 for 55)
+556 8     # Icicle Crash <- Ice Punch: same type and class, nearest power (75 for 85)
+557 394   # V-create <- Flare Blitz: same type and class, nearest power (120 for 180)
+558 126   # Fusion Flare <- Fire Blast: by hand, the big fire blast
+559 344   # Fusion Bolt <- Volt Tackle: same type and class, nearest power (120 for 100)

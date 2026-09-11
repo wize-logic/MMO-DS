@@ -3,6 +3,7 @@ package de.fiereu.openmmo.server.game.services
 import de.fiereu.network.PacketEvent
 import de.fiereu.network.SessionContext
 import de.fiereu.openmmo.common.enums.PokemonContainer
+import de.fiereu.openmmo.net.game.codecs.SkinSet
 import de.fiereu.openmmo.net.game.packets.DuelInviteOutcomePacket
 import de.fiereu.openmmo.net.game.packets.DuelInvitePacket
 import de.fiereu.openmmo.net.game.packets.InGameChallengeResponsePacket
@@ -14,6 +15,7 @@ import de.fiereu.openmmo.server.game.session.SessionRegistry
 import de.fiereu.openmmo.server.game.storage.CharacterStore
 import io.github.oshai.kotlinlogging.KotlinLogging
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -23,8 +25,11 @@ private val log = KotlinLogging.logger {}
 /** How long a challenge stands before it lapses. */
 private const val INVITE_TTL_MS = 60_000L
 
-/** The widest link battle blob the receiving client will accept. */
+/** `MMO_LINK_BLOB_MAX`, the widest link battle blob the receiving client will accept. */
 private const val MAX_LINK_BLOB_BYTES = 512
+
+/** What both sides hear when nothing opened. */
+private const val COULD_NOT_START = "The battle could not start."
 
 /**
  * The three answers the challenger can hear. The official client's byte has no measured meaning.
@@ -50,6 +55,9 @@ private class LinkBattle(
     val guestId: Long,
 ) {
   val result = ConcurrentHashMap<Long, Int>()
+
+  /** Set once the fight has been settled, so a second report changes nothing. */
+  val settled = AtomicBoolean(false)
 
   fun peerOf(charId: Long): Long? =
       when (charId) {
@@ -102,6 +110,13 @@ constructor(
       return
     }
     invites[foeId] = PendingInvite(charId, foeId, self.info.name, System.currentTimeMillis())
+    // A duel is the one door the mark does not close.
+    if (self.pokemon.partyHoldsOfflineOrigin()) {
+      foeSession.send(notice(offlineOriginNotice(self.info.name)))
+    }
+    if (foe.pokemon.partyHoldsOfflineOrigin()) {
+      session.send(notice(offlineOriginNotice(foe.info.name)))
+    }
     foeSession.send(DuelInvitePacket(flags = 0, requestType = 0, name = self.info.name))
     foeSession.send(notice("${self.info.name} wants to battle! Answer the challenge."))
     session.send(notice("Waiting for ${foe.info.name} to answer..."))
@@ -183,11 +198,7 @@ constructor(
     }
   }
 
-  /** True while this character is inside a native link battle. */
-  /**
-   * Whether a blob is wider than the peer could hold anyway. The client refuses a body past its own
-   * buffer whole, so relaying more is the peer's bandwidth and parser spent on something dropped.
-   */
+  /** Whether a blob is wider than the peer could hold anyway. */
   private fun tooWide(charId: Long, bytes: Int): Boolean {
     if (bytes <= MAX_LINK_BLOB_BYTES) return false
     log.warn {
@@ -197,6 +208,7 @@ constructor(
     return true
   }
 
+  /** True while this character is inside a native link battle. */
   fun inLinkBattle(charId: Long): Boolean = running.containsKey(charId)
 
   /** Open a link battle between two players who have already agreed to one. */
@@ -211,9 +223,19 @@ constructor(
     val hostParty = host.pokemon.filter { it.container == PokemonContainer.PARTY }
     val guestParty = guest.pokemon.filter { it.container == PokemonContainer.PARTY }
     if (hostParty.isEmpty() || guestParty.isEmpty()) {
-      hostSession.send(notice("The battle could not start."))
-      guestSession.send(notice("The battle could not start."))
-      return false
+      return refuse(hostSession, guestSession, COULD_NOT_START)
+    }
+    // Whoever is already fighting is not free to be seated again, however the caller reached
+    // here.
+    val busy =
+        when {
+          battles.inBattle(hostId) || running.containsKey(hostId) -> host.info.name
+          battles.inBattle(guestId) || running.containsKey(guestId) -> guest.info.name
+          else -> null
+        }
+    if (busy != null) {
+      log.info { "Duel char=$hostId vs char=$guestId refused: $busy is already in a battle" }
+      return refuse(hostSession, guestSession, "$busy is already in a battle.")
     }
     // A link battle needs two engines. Anything else keeps the server-side turn engine.
     if (hostSession.attributes[CLIENT_RUNS_SCRIPTS] != true ||
@@ -223,16 +245,28 @@ constructor(
       return true
     }
     val battle = LinkBattle(nextId.getAndIncrement(), hostId, guestId)
-    running[hostId] = battle
-    running[guestId] = battle
+    if (!claim(battle)) {
+      log.warn { "Duel char=$hostId vs char=$guestId lost the race for a seat" }
+      return refuse(hostSession, guestSession, COULD_NOT_START)
+    }
     // Each side is told the *other* party: its own it already holds, and both build the same two
     // from the same records.
     hostSession.send(
         LinkBattleOpenPacket(
-            battle.id, 0, guest.info.name, guest.info.rivalSex.toInt() and 0xFF, guestParty))
+            battle.id,
+            0,
+            guest.info.name,
+            guest.info.rivalSex.toInt() and 0xFF,
+            guestParty,
+            SkinSet(guest.info.skinRegionSelectionIndex, guest.skins)))
     guestSession.send(
         LinkBattleOpenPacket(
-            battle.id, 1, host.info.name, host.info.rivalSex.toInt() and 0xFF, hostParty))
+            battle.id,
+            1,
+            host.info.name,
+            host.info.rivalSex.toInt() and 0xFF,
+            hostParty,
+            SkinSet(host.info.skinRegionSelectionIndex, host.skins)))
     hostSession.send(notice("Battle with ${guest.info.name}!"))
     guestSession.send(notice("Battle with ${host.info.name}!"))
     log.info {
@@ -244,6 +278,8 @@ constructor(
 
   /** Both scenes ended. */
   private fun finish(battle: LinkBattle) {
+    // Exactly one thread ends it, whichever gets here first with both reports in.
+    if (!battle.settled.compareAndSet(false, true)) return
     val hostResult = battle.result[battle.hostId] ?: 0
     val guestResult = battle.result[battle.guestId] ?: 0
     close(battle)
@@ -258,6 +294,23 @@ constructor(
     sessions.getByCharacterId(battle.hostId)?.send(notice(resultLine(hostResult, guestName)))
     sessions.getByCharacterId(battle.guestId)?.send(notice(resultLine(guestResult, hostName)))
     log.info { "Link battle ${battle.id} ended: $hostName=$hostResult $guestName=$guestResult" }
+  }
+
+  /** Tell both sides nothing opened, and answer [seat] with it. */
+  private fun refuse(host: SessionContext, guest: SessionContext, message: String): Boolean {
+    host.send(notice(message))
+    guest.send(notice(message))
+    return false
+  }
+
+  /** Take both seats or neither. */
+  private fun claim(battle: LinkBattle): Boolean {
+    if (running.putIfAbsent(battle.hostId, battle) != null) return false
+    if (running.putIfAbsent(battle.guestId, battle) != null) {
+      running.remove(battle.hostId, battle)
+      return false
+    }
+    return true
   }
 
   private fun close(battle: LinkBattle) {

@@ -35,8 +35,9 @@ internal data class NewGameStart(
      */
     val money: Int = 30000,
     /**
-     * Low eight bits of CharacterInfo.permissions as the list capture writes them. What an account
-     * may do lives on the account, in AccountRole.
+     * Low eight bits of CharacterInfo.permissions as the list capture writes them. This is what the
+     * client is told about the character and nothing more; what an account may do lives on the
+     * account, in AccountRole.
      */
     val permissions: Int = 8,
 )
@@ -48,6 +49,10 @@ internal object NewGameStarts {
         Region.HOENN -> hoenn(female)
         Region.KANTO -> kanto()
         Region.SINNOH -> sinnoh()
+        // Nobody is made in Johto. It exists as a region so the trainers of the ported cartridge
+        // have one key to live under; a ported map itself travels as Sinnoh, because it is a
+        // Platinum header. `Region.JOHTO.creatable` says the same thing to the character screen.
+        Region.JOHTO -> error("no character starts in ${region.displayName}")
       }
 
   /**

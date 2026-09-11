@@ -1,0 +1,24 @@
+--- a/src/overlay005/area_light.c
++++ b/src/overlay005/area_light.c
+@@ -12,6 +12,7 @@
+ #include "ascii_util.h"
+ #include "graphics.h"
+ #include "heap.h"
++#include "pc_modfs.h"
+ #include "rtc.h"
+ 
+ #define AREA_LIGHT_FILE_COUNT 4
+@@ -26,7 +27,12 @@
+ 
+ AreaLightManager *AreaLightManager_New(ModelAttributes *areaModelAttrs, const u8 archiveID)
+ {
+-    GF_ASSERT(archiveID < AREA_LIGHT_FILE_COUNT);
++    // A ported area is lit by its own game's schedule, which rides as an
++    // appended member past the four this game was built with. The read below
++    // goes through the same path an appended member is served on, so the
++    // count is the only thing that had to learn about them.
++    GF_ASSERT(archiveID < AREA_LIGHT_FILE_COUNT
++        || archiveID < pc_modfs_narc_file_count("data/arealight.narc", AREA_LIGHT_FILE_COUNT));
+ 
+     AreaLightManager *areaLightMan = Heap_Alloc(HEAP_ID_FIELD1, sizeof(AreaLightManager));
+ 

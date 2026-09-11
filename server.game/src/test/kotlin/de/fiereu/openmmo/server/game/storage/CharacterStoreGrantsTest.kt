@@ -8,6 +8,8 @@ import de.fiereu.openmmo.common.enums.EVs
 import de.fiereu.openmmo.common.enums.IVs
 import de.fiereu.openmmo.common.enums.PokemonContainer
 import de.fiereu.openmmo.common.enums.Region
+import de.fiereu.openmmo.server.game.services.BAG_MAX_QUANTITY_ITEM
+import de.fiereu.openmmo.server.game.services.BAG_MAX_QUANTITY_TMHM
 import de.fiereu.openmmo.server.game.testsupport.FakeCharacterRepository
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -20,6 +22,14 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 
 /** Where a grant lands, and what a balance does under two writers. */
+/** The Potion, line 18 of the engine's item table, so index 17 on a wire based at 5000. */
+private const val POTION = 5017
+
+/** The first and last of the TM and HM pocket, lines 329 and 428 of the same table. */
+private const val TM01 = 5328
+
+private const val HM08 = 5427
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class CharacterStoreGrantsTest :
     FunSpec({
@@ -73,6 +83,56 @@ class CharacterStoreGrantsTest :
           store.addPokemon(id, monster(id)) shouldBe null
 
           store.getCharacter(id)!!.pokemon.size shouldBe MAX_PARTY_SIZE
+        }
+      }
+
+      /**
+       * The bag on the other end refuses a stack past its pocket's ceiling and skips it whole
+       * (`Bag_TryAddItem` through `Pocket_FindSlotToAddItem`, the engine's `src/bag.c`), so a
+       * deeper stack than this is an item the player owns and can never see or use.
+       */
+      test("a grant past the pocket's ceiling is refused, and a Potion's is 999") {
+        runTest {
+          val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+          val id = store.player()
+
+          store.addItem(id, POTION, BAG_MAX_QUANTITY_ITEM) shouldBe true
+          store.addItem(id, POTION, 1) shouldBe false
+
+          store.getCharacter(id)!!.items[POTION] shouldBe BAG_MAX_QUANTITY_ITEM
+        }
+      }
+
+      test("a TM's ceiling is a tenth of that, the pocket it sits in") {
+        runTest {
+          val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+          val id = store.player()
+
+          store.addItem(id, TM01, BAG_MAX_QUANTITY_TMHM) shouldBe true
+          store.addItem(id, TM01, 1) shouldBe false
+          store.addItem(id, HM08, BAG_MAX_QUANTITY_TMHM + 1) shouldBe false
+          // One id either side of the run, which the key items and the ordinary pocket hold.
+          store.addItem(id, TM01 - 1, BAG_MAX_QUANTITY_TMHM + 1) shouldBe true
+          store.addItem(id, HM08 + 1, BAG_MAX_QUANTITY_TMHM + 1) shouldBe true
+
+          store.getCharacter(id)!!.items[TM01] shouldBe BAG_MAX_QUANTITY_TMHM
+        }
+      }
+
+      /**
+       * The ceiling is measured on the way up only. A bag filled before there was one is still a
+       * bag someone is carrying, and refusing its takes as well would lock those items away for
+       * good rather than letting the stack come back down.
+       */
+      test("a full stack can still be spent") {
+        runTest {
+          val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+          val id = store.player()
+          store.addItem(id, POTION, BAG_MAX_QUANTITY_ITEM) shouldBe true
+
+          store.addItem(id, POTION, -1) shouldBe true
+
+          store.getCharacter(id)!!.items[POTION] shouldBe BAG_MAX_QUANTITY_ITEM - 1
         }
       }
 
@@ -131,7 +191,7 @@ class CharacterStoreGrantsTest :
                         container = PokemonContainer.PC,
                         containerSlot = it.toShort())
               }
-          store.rearrangeMonsters(id) { party, _ -> party to full }
+          store.rearrangeMonsters(id) { party, _, _ -> Containers(party, full, emptyList()) }
 
           store.addPokemon(id, monster(id).copy(container = PokemonContainer.PC)) shouldBe null
         }

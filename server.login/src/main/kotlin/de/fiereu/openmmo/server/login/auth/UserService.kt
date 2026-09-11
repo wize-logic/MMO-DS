@@ -11,15 +11,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 interface UserService {
-  data class AuthResult(val state: LoginState, val userId: Int? = null, val tokenEpoch: Int = 0)
+  data class AuthResult(val state: LoginState, val userId: Int? = null)
 
-  /** Identity a remember me token resolves to, with the epoch that token has to still match. */
-  data class TokenUser(
-      val id: Int,
-      val username: String,
-      val displayName: String,
-      val tokenEpoch: Int,
-  )
+  /** Identity a remember me token resolves to. */
+  data class TokenUser(val id: Int, val username: String, val displayName: String)
 
   suspend fun authenticate(username: String, password: String): AuthResult
 
@@ -39,11 +34,7 @@ interface UserService {
   suspend fun setRoles(userId: Int, roles: AccountRoles): Boolean
 
   companion object {
-    /**
-     * What the first account on a server is given. Somebody has to be able to run the developer
-     * commands on a server that has nobody on it yet. Everyone after them is a plain player until
-     * an operator says otherwise.
-     */
+    /** What the first account on a server is given. */
     val FIRST_ACCOUNT_ROLES = AccountRoles.of(AccountRole.DEVELOPER)
   }
 }
@@ -59,7 +50,6 @@ class InMemoryUserStore @Inject constructor() : UserService {
       val id: Int,
       val passwordHash: String,
       val username: String,
-      val tokenEpoch: Int = 0,
       val roles: AccountRoles = AccountRoles.NONE,
   )
 
@@ -91,7 +81,7 @@ class InMemoryUserStore @Inject constructor() : UserService {
     if (!PasswordHash.verify(user.passwordHash, password)) {
       return UserService.AuthResult(LoginState.INVALID_PASSWORD)
     }
-    return UserService.AuthResult(LoginState.AUTHED, user.id, user.tokenEpoch)
+    return UserService.AuthResult(LoginState.AUTHED, user.id)
   }
 
   override suspend fun getUserId(username: String): Int? = users[username.lowercase()]?.id
@@ -99,16 +89,10 @@ class InMemoryUserStore @Inject constructor() : UserService {
   override suspend fun findForToken(userId: Int): UserService.TokenUser? =
       users.values
           .firstOrNull { it.id == userId }
-          ?.let {
-            UserService.TokenUser(it.id, it.username.lowercase(), it.username, it.tokenEpoch)
-          }
+          ?.let { UserService.TokenUser(it.id, it.username.lowercase(), it.username) }
 }
 
-/**
- * Whether the stored credential matches the one that arrived, compared in constant time. Kotlin's
- * == on a String returns as soon as it differs, and this is the one comparison guarding every
- * account.
- */
+/** Whether the stored credential matches the one that arrived, compared in constant time. */
 internal fun samePassword(stored: String?, offered: String): Boolean =
     stored != null &&
         MessageDigest.isEqual(

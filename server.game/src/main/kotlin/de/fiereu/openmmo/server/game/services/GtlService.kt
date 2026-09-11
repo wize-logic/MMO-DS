@@ -10,7 +10,6 @@ import de.fiereu.openmmo.net.game.packets.LocalCharacterDeltaPacket
 import de.fiereu.openmmo.net.game.packets.MarketBoardPagePacket
 import de.fiereu.openmmo.net.game.packets.MarketListingsRequestPacket
 import de.fiereu.openmmo.net.game.packets.MarketSearchFilterPacket
-import de.fiereu.openmmo.net.game.packets.PokemonContainerPacket
 import de.fiereu.openmmo.net.game.packets.SceneObjectFrame
 import de.fiereu.openmmo.net.game.packets.SceneObjectState
 import de.fiereu.openmmo.net.game.packets.SceneObjectStatesPacket
@@ -62,6 +61,7 @@ import de.fiereu.openmmo.server.game.storage.GtlListing
 import de.fiereu.openmmo.server.game.storage.GtlMonsterQuery
 import de.fiereu.openmmo.server.game.storage.GtlRepository
 import de.fiereu.openmmo.server.game.storage.GtlSaleRow
+import de.fiereu.openmmo.server.game.storage.ImportRepository
 import de.fiereu.openmmo.server.game.storage.MONEY_MAX
 import io.github.oshai.kotlinlogging.KotlinLogging
 import java.time.LocalDateTime
@@ -116,6 +116,7 @@ constructor(
     private val shelf: GtlRepository,
     private val species: SpeciesRegistry,
     private val battles: BattleRegistry,
+    private val imports: ImportRepository,
 ) {
 
   /**
@@ -215,15 +216,16 @@ constructor(
     val state = session.attributes[PLAYER_STATE] ?: return
     val charId = state.characterId ?: return
     val self = store.getCharacter(charId) ?: return
-    // Listing takes a monster out of the party, the same gesture a box move is, and is refused for
-    // the same reason: it lands between the two writes of a settlement.
+    // Listing takes a monster out of the party, which is the same gesture a box move is, and it
+    // has to be refused for the same reason: a settlement is two writes and this one lands between
+    // them, leaving the second nothing to give back. PokemonStorageService.onMove carries the rest.
     if (state.atTradeTable) {
       session.send(notice("You cannot list a monster while trading."))
       return
     }
     // And for the same reason again, a fight. A battle holds its own copy of the party and
-    // writes it back when it ends, so a monster listed out from under one is given away twice or
-    // taken back by the writeback.
+    // writes it back when it ends, so a monster listed out from under one is either given away
+    // twice or taken back by the writeback.
     if (battles.byChar(charId) != null) {
       session.send(notice("You cannot list a monster while battling."))
       return
@@ -252,6 +254,12 @@ constructor(
                 session.send(notice("That monster is not yours to list."))
                 return
               }
+      // Before the monster leaves the party, because the take-back path is the expensive one and
+      // a marked monster has no business being on the shelf at any point of it.
+      if (mon.offlineOrigin) {
+        session.send(notice(refusedForOfflineOrigin(mon)))
+        return
+      }
       if (!store.releasePokemon(charId, monId)) {
         session.send(notice("Your last party monster cannot be listed."))
         return
@@ -274,6 +282,9 @@ constructor(
         session.send(notice("The listing could not be written."))
         return
       }
+      // The monster is in escrow now, so the player cannot quietly undo the save import that may
+      // have brought the one they listed in its place.
+      imports.seal(charId, LocalDateTime.now(), "a monster was listed on the market")
       resendContainers(session, charId)
       sendMoney(session, charId)
       session.send(GtlResultPacket(GtlResultPacket.CODE_LISTED, inserted.id, fee))
@@ -312,6 +323,9 @@ constructor(
       session.send(notice("The listing could not be written."))
       return
     }
+    // The stack is in escrow now, for the same reason the monster above it is: a bag a save
+    // brought can be sold and then quietly un-imported, and the buyer would keep the copy.
+    imports.seal(charId, LocalDateTime.now(), "goods were listed on the market")
     session.send(itemStackUpdatePacket(itemId, store.getCharacter(charId)?.items?.get(itemId) ?: 0))
     sendMoney(session, charId)
     session.send(GtlResultPacket(GtlResultPacket.CODE_LISTED, inserted.id, fee))
@@ -398,6 +412,9 @@ constructor(
       total += units.toLong() * row.price
     }
     if (total > 0) {
+      // Somebody is holding what this paid for, so an undo of the import behind it would put the
+      // goods back beside the money they sold for.
+      imports.seal(charId, LocalDateTime.now(), "money was claimed from the market")
       sendMoney(session, charId)
       session.send(GtlResultPacket(GtlResultPacket.CODE_CLAIMED, total, 0))
     } else {
@@ -529,8 +546,7 @@ constructor(
     log.debug { "gtl legacy 0xE1 create ignored (${event.packet.categoryIndex})" }
   }
 
-  private suspend fun ownRow(charId: Long, id: Long): GtlListing? =
-      shelf.ownPage(charId, 0, LISTING_CAP * 2).listings.firstOrNull { it.id == id }
+  private suspend fun ownRow(charId: Long, id: Long): GtlListing? = shelf.findOwn(charId, id)
 
   private suspend fun buy(
       session: SessionContext,
@@ -559,9 +575,8 @@ constructor(
       if (!quiet) session.send(GtlResultPacket(GtlResultPacket.CODE_GONE, listingId, 0))
       return false
     }
-    // The money moves before the goods do, because the undo in the other order cannot be relied
-    // on: a monster goes back through a release that refuses to empty a party, so a buyer with an
-    // empty party and too little money kept it for nothing and the listing went back on the shelf.
+    // The money moves before the goods do, because the undo in the other order cannot be
+    // relied on.
     val cost = listing.price * units
     if (!store.addMoney(charId, -cost)) {
       shelf.revertUnits(listing.id, units)
@@ -592,6 +607,10 @@ constructor(
             unitPrice = listing.price,
             soldAt = LocalDateTime.now(),
         ))
+    // The seller is holding this money now and no undo of ours can reach it, so the import that
+    // may have brought it can no longer be taken back: that would leave the payment behind as a
+    // second copy of money this character no longer has.
+    imports.seal(charId, LocalDateTime.now(), "money was spent on the market")
     sendMoney(session, charId)
     if (!quiet)
         session.send(GtlResultPacket(GtlResultPacket.CODE_BOUGHT, listingId, listing.price * units))
@@ -641,23 +660,8 @@ constructor(
 
   private fun resendContainers(session: SessionContext, charId: Long) {
     val stored = store.getCharacter(charId) ?: return
-    session.send(
-        PokemonContainerPacket(
-            container = PokemonContainer.PARTY,
-            hasChange = true,
-            delete = false,
-            pokemon = stored.pokemon,
-        ))
-    val pc = stored.pcStorage.chunked(255).ifEmpty { listOf(emptyList()) }
-    pc.forEachIndexed { i, chunk ->
-      session.send(
-          PokemonContainerPacket(
-              container = PokemonContainer.PC,
-              hasChange = i == 0,
-              delete = false,
-              pokemon = chunk,
-          ))
-    }
+    session.sendContainer(PokemonContainer.PARTY, stored.pokemon)
+    session.sendContainer(PokemonContainer.PC, stored.pcStorage)
   }
 
   private fun newListing(

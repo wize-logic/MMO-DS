@@ -35,4 +35,6 @@ data class NpcDef(
      * those there is nothing to port and the fight is the table's.
      */
     val trainerId: Int = 0,
+    /** Which shelf this person sells, or -1 for the overwhelming majority who sell nothing. */
+    val martShelf: Int = -1,
 )

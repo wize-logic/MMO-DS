@@ -1,4 +1,4 @@
-/* The MonMMO transport session handshake. See session.h. */
+/* The OpenMMO transport session handshake. See session.h. */
 #include "session.h"
 
 #include "platform.h"
@@ -56,6 +56,16 @@ int mmo_hs_read_server_hello(mmo_rbuf *r, mmo_server_hello *out)
     out->checksum_size = mmo_get_u8(r);
 
     return r->err ? -1 : 0;
+}
+
+void mmo_hs_signed_bytes(const u8 pub[MMO_P256_POINT], u8 checksum_size,
+                         s64 hello_timestamp, u8 out[MMO_HS_SIGNED])
+{
+    memcpy(out, pub, MMO_P256_POINT);
+    out[MMO_P256_POINT] = checksum_size;
+    u64 ts = (u64)hello_timestamp;
+    for (int i = 0; i < 8; i++)
+        out[MMO_P256_POINT + 1 + i] = (u8)(ts >> (56 - 8 * i));
 }
 
 /* --- key derivation ---------------------------------------------------- */
@@ -220,11 +230,18 @@ static int start_from_priv(mmo_session *s, mmo_wbuf *out,
         return -1;
     }
 
+    /* Remembered because the ServerHello's signature is taken over it. */
+    s->hello_timestamp = timestamp;
     s->phase = MMO_SESS_HELLO_SENT;
     return 0;
 }
 
 int mmo_session_start(mmo_session *s, mmo_wbuf *out)
+{
+    return mmo_session_start_at(s, out, 0);
+}
+
+int mmo_session_start_at(mmo_session *s, mmo_wbuf *out, s64 timestamp)
 {
     memset(s, 0, sizeof *s);
 
@@ -256,9 +273,11 @@ int mmo_session_start(mmo_session *s, mmo_wbuf *out)
     for (int i = 0; i < 8; i++)
         random |= (s64)rnd[i] << (8 * i);
 
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    s64 timestamp = (s64)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    if (timestamp == 0) {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        timestamp = (s64)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    }
 
     return start_from_priv(s, out, random, timestamp);
 }
@@ -290,14 +309,32 @@ int mmo_session_on_server_hello(mmo_session *s,
     }
 
     /*
-     * The signature covers the 65-byte ephemeral point; verify it under the pinned root (or
-     * the caller's override) before trusting the point.
+     * The signature covers the point, the checksum size and the timestamp this session's own
+     * ClientHello sent (MMO_HS_SIGNED); verify it under the pinned root (or the caller's
+     * override) before trusting any of the three.
      */
+    u8 signed_bytes[MMO_HS_SIGNED];
+    mmo_hs_signed_bytes(sh.ephemeral_pub, sh.checksum_size, s->hello_timestamp,
+                        signed_bytes);
     const u8 *root = s->root_pub ? s->root_pub : mmo_root_pubkey;
     if (!mmo_p256_ecdsa_verify(root,
-                               sh.ephemeral_pub, MMO_P256_POINT,
+                               signed_bytes, sizeof signed_bytes,
                                sh.signature, sh.siglen)) {
-        fail(s, "ServerHello signature does not verify: this client was built for another server");
+        fail(s, "ServerHello signature does not verify: built for another server, "
+                "or its point, checksum size or hello timestamp was altered");
+        return -1;
+    }
+
+    /* The size is a signed fact only now, so this is where it is judged. A tag
+     * shorter than four bytes is either absent or the keyless CRC-16: real
+     * profiles, but neither says who wrote the frame, and a session opened on
+     * one would take every later frame from anyone who could reach the socket. */
+    if (sh.checksum_size < MMO_HS_MIN_CHECKSUM) {
+        char msg[96];
+        snprintf(msg, sizeof msg,
+                 "ServerHello asks for checksum size %u, under the keyed minimum of %u",
+                 (unsigned)sh.checksum_size, (unsigned)MMO_HS_MIN_CHECKSUM);
+        fail(s, msg);
         return -1;
     }
 

@@ -25,6 +25,25 @@ def decomp_dir(name: str) -> Path | None:
     return Path(out.stdout.strip())
 
 
+STATIC_PREFIX = "FOLLOWER_MON_STATIC_"
+# The parameter word's top bits in the sprite table: 19 and 20 are what every
+# follower row carries (591 and 37 rows), 63 the placeholder rows.
+FOLLOWER_KINDS = {19, 20}
+
+
+def sprite_table(path: Path) -> dict[str, tuple[str, int, int]]:
+    """HeartGold's own sprite table: name -> (mmodel name, flags, kind)."""
+    if not path.is_file():
+        return {}
+    out: dict[str, tuple[str, int, int]] = {}
+    for m in re.finditer(r"\.short\s+SPRITE_(\w+),\s*MMODEL_(\w+),\s*"
+                         r"(0x[0-9A-Fa-f]+|\d+)\s*\|\s*\((\d+)\s*<<\s*10\)",
+                         path.read_text()):
+        out.setdefault(m.group(1), (m.group(2), int(m.group(3), 0),
+                                    int(m.group(4))))
+    return out
+
+
 def defines(path: Path, prefix: str) -> dict[str, int]:
     out: dict[str, int] = {}
     for m in re.finditer(r"#define\s+%s(\w+)\s+(\d+)" % prefix,
@@ -43,10 +62,27 @@ def main(argv: list[str]) -> int:
     models = defines(hg / "include/constants/mmodel.h", "MMODEL_")
     if not sprites or not models:
         die("no SPRITE_/MMODEL_ constants in %s/include/constants" % hg)
+    table = sprite_table(hg / "asm/overlay_01_sprite_data.s")
+    if not table:
+        die("no sprite rows in %s/asm/overlay_01_sprite_data.s" % hg)
 
     rows = []
+    static = 0
     for name, sid in sorted(sprites.items(), key=lambda kv: kv[1]):
         mid = models.get(name)
+        row = table.get(name)
+        if mid is not None and row is not None and models.get(row[0]) != mid:
+            die("sprite %s: its name pairs with member %d and the sprite table "
+                "sends it to MMODEL_%s" % (name, mid, row[0]))
+        if mid is None and row is not None and name.startswith(STATIC_PREFIX):
+            if row[2] not in FOLLOWER_KINDS:
+                die("sprite %s is a static follower and the sprite table gives "
+                    "it kind %d, not a follower kind" % (name, row[2]))
+            mid = models.get(row[0])
+            if mid is None:
+                die("sprite %s: the sprite table names MMODEL_%s and no such "
+                    "member is defined" % (name, row[0]))
+            static += 1
         rows.append((sid, mid, name))
     named = sum(1 for _, mid, _ in rows if mid is not None)
 
@@ -66,11 +102,19 @@ def main(argv: list[str]) -> int:
         "# member whose palette disagrees with the name here is refused rather",
         "# than carried. Both ends have to say the same thing.",
         "#",
-        "# `-` in the member column is a sprite id with no member of its own",
-        "# name: the BABYBOY1_2-style variants and the FOLLOWER_MON_STATIC_*",
-        "# set. Nothing places one on a map, and a port that meets one refuses.",
+        "# A FOLLOWER_MON_STATIC_* sprite, a Pokemon standing on a map --",
+        "# has no member of its own name; its member is the species' follower",
+        "# sheet, read off HeartGold's own sprite table",
+        "# (asm/overlay_01_sprite_data.s), which agrees with the name pairing",
+        "# on every sprite both answer. The porter accepts the follower",
+        "# palette for these and draws them on the follower walk.",
         "#",
-        "# %d sprite ids, %d with a member." % (len(rows), named),
+        "# `-` in the member column is a sprite id with no art: the",
+        "# BABYBOY1_2-style variants and the gate shutters, which that table",
+        "# sends to BABYBOY1 as a placeholder. A port that meets one refuses.",
+        "#",
+        "# %d sprite ids, %d with a member (%d static followers)."
+        % (len(rows), named, static),
         "#",
         "# Rows: <sprite id> <mmodel member> <name>",
         "",

@@ -14,6 +14,7 @@ import de.fiereu.openmmo.server.game.session.PENDING_MAP_LOAD
 import de.fiereu.openmmo.server.game.session.PLAYER_STATE
 import de.fiereu.openmmo.server.game.session.PlayerState
 import de.fiereu.openmmo.server.game.session.SCRIPT_SCOPE
+import de.fiereu.openmmo.server.game.session.setMapAddress
 import de.fiereu.openmmo.server.game.storage.CharacterStore
 import de.fiereu.openmmo.server.game.storage.StoredCharacter
 import de.fiereu.openmmo.server.game.world.WarpExitRules
@@ -143,9 +144,13 @@ constructor(
     characterStore.flushCharacterAsync(charId)
 
     if (state != null) {
-      state.regionId = warp.targetRegionId.toInt()
-      state.bankId = warp.targetBankId.toInt()
-      state.mapId = warp.targetMapId.toInt()
+      // Through the masking setter: a ported map's id is a byte above 127, and the signed value
+      // would leave the session on an address no map answers to.
+      state.setMapAddress(
+          warp.targetRegionId.toInt(),
+          warp.targetBankId.toInt(),
+          warp.targetMapId.toInt(),
+      )
       state.x = offsetX.toShort()
       state.y = offsetY.toShort()
       state.elevation = playerZ

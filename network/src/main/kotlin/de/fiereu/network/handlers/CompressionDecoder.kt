@@ -35,8 +35,8 @@ class CompressionDecoder(private val maxInflated: Int = DEFAULT_MAX_INFLATED) :
         input[payloadLen + 3] = 0xFF.toByte()
         inflater.setInput(input)
         // A deflate stream says how much it unpacks to only by unpacking, so a small frame can
-        // name a very large one. Nothing stopped this loop, so a peer could hand over a few
-        // kilobytes and have the server allocate for as long as it kept producing.
+        // name a very large one. Nothing stopped the loop below, so a peer could hand over a
+        // few kilobytes and have the server allocate for as long as it kept producing.
         while (!inflater.needsInput()) {
           val written = inflater.inflate(chunk)
           if (written == 0) break

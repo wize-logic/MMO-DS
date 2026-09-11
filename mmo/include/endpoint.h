@@ -30,4 +30,14 @@ void openmmo_endpoint_forget(char *buf, size_t cap);
  * say where they are going should say it through this rather than guess. */
 int openmmo_endpoint_is_pinned(void);
 
+/*
+ * 1 in a build from this tree, 0 in a release: whether the screens that are not a Sinnoh
+ * release's, travel between PCs, HeartGold's Pokegear, the Johto and Kanto card, are in
+ * this program at all.
+ */
+int openmmo_dev_features(void);
+
+/* getenv for a variable that must do nothing in a release. */
+const char *openmmo_dev_env(const char *name);
+
 #endif /* MMO_ENDPOINT_H */

@@ -4,11 +4,16 @@
 #include <string.h>
 
 #include "p256.h"
-#include "mock_keys.gen.h"  /* MOCK_ROOT_PUB, MOCK_EPH_PRIV/PUB, MOCK_HELLO_SIG */
+#include "mock_keys.gen.h"  /* MOCK_ROOT_PUB, MOCK_EPH_PRIV/PUB, MOCK_HELLO_* */
 
 /* Export the generated test-root point as a stable pointer; MOCK_ROOT_PUB is a
  * static const with program lifetime, so pointing at it is safe. */
 const u8 *const mmo_mock_root_pub = MOCK_ROOT_PUB;
+
+/* The timestamp callers are told to use and the one the fixtures were signed
+ * for have to be the same millisecond; a regeneration that moved it would
+ * otherwise show up as every handshake failing its signature. */
+typedef char mmo_mock_hello_ts_agrees[MMO_MOCK_HELLO_TS == MOCK_HELLO_TS ? 1 : -1];
 
 void mmo_mock_server_init(mmo_mock_server *m, u8 checksum_size)
 {
@@ -16,18 +21,37 @@ void mmo_mock_server_init(mmo_mock_server *m, u8 checksum_size)
     m->checksum_size = checksum_size;
 }
 
-void mmo_mock_server_hello(mmo_mock_server *m, mmo_wbuf *out)
+int mmo_mock_server_hello(mmo_mock_server *m, mmo_wbuf *out, s64 client_timestamp)
 {
+    /*
+     * The signature covers the size and the client's hello timestamp as well as the point, and
+     * the mock cannot sign: it holds a table minted by openssl at generation time
+     * (tools/gen_mock_keys.py).
+     */
+    if (client_timestamp != MMO_MOCK_HELLO_TS)
+        return -1;
+    size_t which = (size_t)-1;
+    for (size_t i = 0; i < sizeof MOCK_HELLO_SIZES; i++) {
+        if (MOCK_HELLO_SIZES[i] == m->checksum_size) {
+            which = i;
+            break;
+        }
+    }
+    if (which == (size_t)-1)
+        return -1;
+
     mmo_wbuf pkt;
     mmo_wbuf_init(&pkt);
     mmo_put_u8(&pkt, MMO_HS_SERVER_HELLO);
     mmo_put_u16le(&pkt, MMO_P256_POINT);
     mmo_put_bytes(&pkt, MOCK_EPH_PUB, MMO_P256_POINT);
-    mmo_put_u16le(&pkt, (u16)sizeof MOCK_HELLO_SIG);
-    mmo_put_bytes(&pkt, MOCK_HELLO_SIG, sizeof MOCK_HELLO_SIG);
+    mmo_put_u16le(&pkt, MOCK_HELLO_SIGLEN[which]);
+    mmo_put_bytes(&pkt, MOCK_HELLO_SIGS[which], MOCK_HELLO_SIGLEN[which]);
     mmo_put_u8(&pkt, m->checksum_size);
     mmo_frame_put(out, pkt.data, pkt.len);
+    int err = pkt.err || out->err;
     mmo_wbuf_free(&pkt);
+    return err ? -1 : 0;
 }
 
 int mmo_mock_server_on_client_ready(mmo_mock_server *m,

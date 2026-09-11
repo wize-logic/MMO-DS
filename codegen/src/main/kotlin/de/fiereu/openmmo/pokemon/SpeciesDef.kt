@@ -35,6 +35,12 @@ data class SpeciesDef(
     val eggGroup2: EggGroup,
     val ability1: Ability,
     val ability2: Ability,
+    /**
+     * The third ability, which only a Dream World monster is born with. Gen 5's invention, and read
+     * out of a Black cartridge for the whole dex because Gen 4's species data has no slot for one:
+     * the alternative was half a table.
+     */
+    val abilityHidden: Ability,
     val safariZoneFleeRate: Int,
     val bodyColor: BodyColor,
     /** Whether the game draws this species' sprite mirrored. */

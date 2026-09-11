@@ -14,9 +14,11 @@ import de.fiereu.openmmo.server.login.auth.RememberMeTokens
 import de.fiereu.openmmo.server.login.auth.UserService
 import de.fiereu.openmmo.server.login.config.GameServerEndpointConfig
 import de.fiereu.openmmo.server.login.config.LoginServerConfig
+import de.fiereu.openmmo.server.login.update.ClientRevisionFloor
 import io.netty.channel.EventLoopGroup
 import io.netty.channel.MultiThreadIoEventLoopGroup
 import io.netty.channel.nio.NioIoHandler
+import java.nio.file.Path
 import java.security.interfaces.ECPrivateKey
 import javax.inject.Named
 import javax.inject.Singleton
@@ -46,6 +48,12 @@ abstract class LoginServerModule {
     @Provides
     @Singleton
     fun gameServerEndpoint(config: LoginServerConfig): GameServerEndpointConfig = config.gameServer
+
+    // Read at start by main(), not here: a provider is built on first use. See the component.
+    @Provides
+    @Singleton
+    fun clientRevisionFloor(config: LoginServerConfig): ClientRevisionFloor =
+        ClientRevisionFloor(config.clientFeed?.let { Path.of(it) })
 
     @Provides
     @Singleton

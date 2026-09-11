@@ -60,8 +60,8 @@ else
         "$CHANH no longer says the game samples input once a frame"
 fi
 
-# A published-frame interpolator would have to hold the previous picture
-# and blend it. Repeating the last frame is the decoupled present.
+# A published-frame interpolator would have to hold the previous picture and
+# blend it. Repeating the last frame is the decoupled present.
 if grep -Eiq 'interpolat' "$VIEWC" "$GEOM"; then
     bad "the window still has no published-frame interpolator" \
         "viewer sources name interpolation"

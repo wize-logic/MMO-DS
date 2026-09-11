@@ -33,9 +33,30 @@ declared() {
 c2s=$(bound c2s)
 s2c=$(bound s2c)
 
+# An empty list is not a gap that closed, it is a line this reader did not
+# find: the four names below are the whole tie between the page and the
+# protocol, so a heading that was renamed or a table that reflowed leaves every
+# check with nothing to check and passing. A gap that really has closed says so
+# on its line, in the word `none`.
+declares() {
+    case "$2" in
+    '')
+        echo "  FAIL $1"
+        echo "       SURFACES.md declares an empty list; a line that reads empty"
+        echo "       is one this test did not find. Write 'none' if it closed."
+        fail=1
+        return 1 ;;
+    none)
+        echo "  ok   $1 (the page declares this gap closed)"
+        return 1 ;;
+    esac
+    return 0
+}
+
 # absent <label> <opcode list> <bound list>, every listed opcode must be unbound
 absent() {
     label=$1; want=$2; have=$3
+    declares "$label" "$want" || return 0
     n=0; bad=
     for op in $want; do
         n=$((n + 1))
@@ -53,6 +74,7 @@ absent() {
 # present <label> <opcode list> <bound list>, every listed opcode must be bound
 present() {
     label=$1; want=$2; have=$3
+    declares "$label" "$want" || return 0
     n=0; bad=
     for op in $want; do
         n=$((n + 1))

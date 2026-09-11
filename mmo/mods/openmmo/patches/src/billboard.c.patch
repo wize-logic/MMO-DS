@@ -1,0 +1,80 @@
+--- a/src/billboard.c
++++ b/src/billboard.c
+@@ -570,9 +570,77 @@
+     return billboard->draw;
+ }
+ 
++/* openmmo: the run animations are the walk animations plus this, one per
++ * facing, ov5_021EDF18 reads { 0, 1, 2, 3 } and ov5_021EDF24 reads
++ * { 4, 5, 6, 7 } out of the same four directions. */
++#define BILLBOARD_ANIM_RUN_BASE 4
++
++/* openmmo: how many animations this billboard's table actually holds.
++ *
++ * The tables are self-terminating, billboard.h gives the last row an
++ * animType of BILLBOARD_ANIM_TYPE_TABLE_END and says so, which is why this
++ * counts rather than carrying a second table that could fall out of step with
++ * the first. The cap is for a table that arrives from a content package
++ * without a sentinel: a missing terminator should not be an unbounded walk. */
++static int Billboard_AnimCount(const Billboard *billboard)
++{
++    int n = 0;
++
++    if (billboard == NULL || billboard->anims == NULL) {
++        return 0;
++    }
++
++    while (n < 64 && billboard->anims[n].animType != BILLBOARD_ANIM_TYPE_TABLE_END) {
++        n++;
++    }
++
++    return n;
++}
++
+ void Billboard_SetAnimNum(Billboard *billboard, int animNum)
+ {
++    int count;
++
+     GF_ASSERT(billboard);
++
++    /* openmmo: AN ANIMATION THIS SPRITE DOES NOT HAVE IS SKIPPED, NOT READ.
++     *
++     * Billboard_GetAnimAt is `anims + index` with no bound of any kind, and
++     * every overworld body but the player's own two models carries
++     * BILLBOARD_FRAME_SEQ_GENERIC_WALK, four animations, one per facing.
++     * The player's sequence has eight (walk 0..3, run 4..7) and the bicycle's
++     * has ten. So the moment a player wearing a catalog body runs, fishes or
++     * rides, the engine indexes past the end of a four-entry table and reads
++     * whatever rodata follows it as a frame range.
++     *
++     * Running is the one case with a right answer rather than no answer,
++     * because a run IS its own walk plus BILLBOARD_ANIM_RUN_BASE, in the same
++     * facing. A body with no run frames therefore walks the way it is
++     * running, at whatever speed the movement action already set, which is
++     * the whole of "they still walk, they just walk faster". A bicycle's first
++     * four are that same facing set, so a ride takes the same path.
++     *
++     * Everything else a body does not have, a fishing cast, a bicycle hop,
++     * the save and Poketch poses, has no walk underneath it to fall back to,
++     * so the request is dropped and the body holds the pose it is already in.
++     * That is a skipped animation rather than a wrong one, and it is never a
++     * read past the end of the table. */
++    count = Billboard_AnimCount(billboard);
++
++    if (animNum < 0) {
++        return;
++    }
++
++    if (animNum >= count) {
++        int walk = animNum - BILLBOARD_ANIM_RUN_BASE;
++
++        if (animNum < BILLBOARD_ANIM_RUN_BASE || walk >= count) {
++            return;
++        }
++
++        animNum = walk;
++    }
++
+     billboard->animNum = animNum;
+ }
+ 

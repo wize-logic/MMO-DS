@@ -49,6 +49,7 @@
 #include "unk_02099500.h"
 
 #include "../../../include/charcode.h"
+#include "../../../include/endpoint.h"
 #include "../../../include/client.h"
 
 /* The one overlay this file names. The engine's own declaration of it lives
@@ -562,9 +563,11 @@ int openmmo_underground_item_menu(FieldSystem *fs, void *menuVoid)
 #define UG_COMM_HEAP_SIZE    ug_heap_size("OPENMMO_UG_COMM_HEAP", UG_COMM_HEAP_DEFAULT)
 #define UG_TEXT_HEAP_SIZE    ug_heap_size("OPENMMO_UG_TEXT_HEAP", UG_TEXT_HEAP_DEFAULT)
 
+/* Both callers are doors, so this reads openmmo_dev_env (endpoint.h) and a
+ * release keeps the two sizes above. */
 static u32 ug_heap_size(const char *name, u32 fallback)
 {
-    const char *v = getenv(name);
+    const char *v = openmmo_dev_env(name);
     char *end;
     unsigned long n;
 
@@ -699,6 +702,22 @@ TrainerInfo *openmmo_ug_trainer_info(int netId)
         return NULL;
 
     return SaveData_GetTrainerInfo(fs->saveData);
+}
+
+/*
+ * Who a net id is when there is no comm information block at all: the whole of the engine's
+ * answer, since the block only exists after a DS comm boot this client never runs
+ * (src/communication_information.c).
+ */
+TrainerInfo *openmmo_comm_trainer_info(int netId)
+{
+    extern TrainerInfo *openmmo_contest_trainer_info(int netId);
+    TrainerInfo *contestant = openmmo_contest_trainer_info(netId);
+
+    if (contestant != NULL)
+        return contestant;
+
+    return openmmo_ug_trainer_info(netId);
 }
 
 int openmmo_ug_send(int cmd, const void *data, int size)
@@ -1212,8 +1231,14 @@ static void talk_pump(void)
                        " conversation\n");
             }
             break;
-        default:
+        default: {
+            /* The fishing kinds ride this opcode (game.h); nobody fishes
+             * down here, but a late verdict is theirs to log, not ours. */
+            extern void openmmo_fishing_recv(const mmo_underground_talk *msg);
+
+            openmmo_fishing_recv(&msg);
             break;
+        }
         }
     }
 }
@@ -1536,6 +1561,8 @@ static void resources_down(void)
     UndergroundMan_FreeAllResources();
     ug_queue_clear();
     Heap_Destroy(HEAP_ID_UNDERGROUND);
+    /* Before the heap it was allocated from. */
+    sub_020327E0();
     Heap_Destroy(HEAP_ID_COMMUNICATION);
     printf("openmmo: underground, resources down\n");
 }

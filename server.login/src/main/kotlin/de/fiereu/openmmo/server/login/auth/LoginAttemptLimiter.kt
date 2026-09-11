@@ -5,21 +5,7 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * How many failed passwords one source may offer before it is told to wait.
- *
- * Nothing bounded this, so a peer could try every password in a list against every account in it,
- * as fast as the socket allowed. Checking a password also costs real work now ([PasswordHash]), so
- * an unbounded attempt is unbounded server CPU somebody else asked for. The check runs before the
- * hash, not after.
- *
- * Two counters, and neither is "this account, from anywhere": an account from one address, which is
- * somebody working through passwords for one player, and an address, which is somebody working
- * through a list of accounts. Locking an account outright is deliberately absent, because it would
- * let anybody lock any player out by failing a few logins on their behalf.
- *
- * Only failures count, and a success clears what that pair has spent.
- */
+/** How many failed passwords one source may offer before it is told to wait. */
 @Singleton
 class LoginAttemptLimiter(
     private val perAccount: Int,

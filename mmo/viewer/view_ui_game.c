@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "status_channel.h"
+
 int view_ui_scale(int v, int text_px)
 {
     if (text_px < 1)
@@ -40,15 +42,24 @@ static int label_w(view_ui_measure measure, void *ctx, const char *s,
 /* The tables                                                          */
 /* ------------------------------------------------------------------ */
 
-/* f/x71's ten, in the order it lays them out, with the official client's own labels and
- * the keys config/main.properties binds by default. Five name a screen the
- * engine already draws and are asked for over the page; two raise a popup;
- * three have no server on this side and say so the way the official client does. */
+/*
+ * f/x71's ten, in the order it lays them out, with the official client's own labels and the keys
+ * config/main.properties binds by default, and two of ours before the last: the Poketch, which
+ * is the game's own lower screen, and the Pokegear, HeartGold's own device.
+ */
 static const struct view_ui_item bar_items[VIEW_UI_BAR_N] = {
     { "Bag",     "Bag",  'b', VIEW_UI_ACT_SCREEN, OPENMMO_HUD_SCREEN_BAG,
       NULL },
-    { "Trainer", "Trnr", 'c', VIEW_UI_ACT_SCREEN, OPENMMO_HUD_SCREEN_TRAINER,
-      NULL },
+#if OPENMMO_PIN_DEV_FEATURES
+    /* The official client opens the card outright. A working build asks which region's,
+     * because a ported region's badges are a card of their own
+     * (VIEW_UI_MENU_CARD); a release is a Sinnoh client and opens the card
+     * the way the official client does. */
+    { "Trainer", "Trnr", 'c', VIEW_UI_ACT_MENU, VIEW_UI_MENU_CARD, NULL },
+#else
+    { "Trainer", "Trnr", 'c', VIEW_UI_ACT_SCREEN,
+      OPENMMO_HUD_SCREEN_TRAINER | (OPENMMO_HUD_CARD_SINNOH << 8), NULL },
+#endif
     { "Community", "Comm", 0, VIEW_UI_ACT_MENU, VIEW_UI_MENU_COMMUNITY,
       NULL },
     { "PvP",     "PvP",    0, VIEW_UI_ACT_MENU, VIEW_UI_MENU_PVP, NULL },
@@ -60,6 +71,19 @@ static const struct view_ui_item bar_items[VIEW_UI_BAR_N] = {
     { "Mail",    "Mail",   0, VIEW_UI_ACT_WINDOW, VIEW_UI_WIN_MAIL, NULL },
     { "Gift Shop", "Shop", 0, VIEW_UI_ACT_NOTICE, 0,
       "Gift shop is not available at this time." },
+    /* Not the official client's either, and not a screen the guest is asked for: the
+     * Poketch is already running down there, and this says whether the
+     * window draws it. K is a key the official client leaves free. Every build has it, 
+     * the device is Sinnoh's and so is the release. */
+    { "Poketch", "Ptch", 'k', VIEW_UI_ACT_POKETCH, 0, NULL },
+#if OPENMMO_PIN_DEV_FEATURES
+    /* Not the official client's: HeartGold's device, drawn by the guest from the package
+     * that carries Johto (mods/openmmo/src/openmmo_pokegear.c). M is a key
+     * the official client leaves free. A working build's button; a release is a Sinnoh
+     * client and has none (endpoint_pin.h, DEV_FEATURES). */
+    { "Pokegear", "Gear", 'm', VIEW_UI_ACT_SCREEN, OPENMMO_HUD_SCREEN_POKEGEAR,
+      NULL },
+#endif
     { "Menu",    "Menu", 'd', VIEW_UI_ACT_MENU, VIEW_UI_MENU_GAME, NULL }
 };
 
@@ -90,8 +114,18 @@ static const struct view_ui_menu_def menus[VIEW_UI_MENU_N] = {
         { "Tournaments",        NULL, 0, VIEW_UI_ACT_NOTICE, 0, NULL },
         { "PvP Statistics",     NULL, 0, VIEW_UI_ACT_NOTICE, 0, NULL }
       } },
-    /* Seven, not eight: no Logout row. */
-    { "Menu", 7, {
+    /*
+     * Still no logout row. The action behind it is a fresh boot of the program, which the
+     * desktop does by exec and an app cannot do at all, and the attempt to give the app one
+     * of its own disturbed the running session in ways nobody wanted before a release.
+     */
+    { "Menu", 9, {
+        /*
+         * Saving, which offline is the one thing a player must not miss and had no button
+         * anywhere.
+         */
+        { "Save", NULL, 0, VIEW_UI_ACT_SCREEN, OPENMMO_HUD_SCREEN_START,
+          NULL },
         { "Party", NULL, 0, VIEW_UI_ACT_SCREEN, OPENMMO_HUD_SCREEN_PARTY,
           NULL },
         { "Settings", NULL, 0, VIEW_UI_ACT_SCREEN, OPENMMO_HUD_SCREEN_OPTIONS,
@@ -101,7 +135,19 @@ static const struct view_ui_menu_def menus[VIEW_UI_MENU_N] = {
         { "Instance Info", NULL, 0, VIEW_UI_ACT_WINDOW, VIEW_UI_WIN_INSTANCE,
           NULL },
         { "Support Request", NULL, 0, VIEW_UI_ACT_NOTICE, 0, NULL },
+        { "Continue Offline", NULL, 0, VIEW_UI_ACT_EXPORT, 0,
+          "Continue Offline is not available at this time." },
         { "Exit", NULL, 0, VIEW_UI_ACT_QUIT, 0, NULL }
+      } },
+    /* The two cards. The screen command's slot byte carries the region
+     * (hud_channel.h): 0 is this engine's own case, 1 the ported regions'
+     * sixteen, drawn by the same case (mods/openmmo/src/openmmo_card.c). */
+    { "Trainer Card", 2, {
+        { "Sinnoh", NULL, 0, VIEW_UI_ACT_SCREEN,
+          OPENMMO_HUD_SCREEN_TRAINER | (OPENMMO_HUD_CARD_SINNOH << 8), NULL },
+        { "Johto & Kanto", NULL, 0, VIEW_UI_ACT_SCREEN,
+          OPENMMO_HUD_SCREEN_TRAINER | (OPENMMO_HUD_CARD_JOHTO_KANTO << 8),
+          NULL }
       } }
 };
 
@@ -123,6 +169,68 @@ static const struct view_ui_win_def wins[VIEW_UI_WIN_N] = {
      * Body form need the height. The body is view_ui_mail.c's. */
     { "Mail", 660, 520 }
 };
+
+/* Offline the window is the same window, minus everything that would have to
+ * ask a server. It is set once from the command line and never changes, so
+ * the layout below can read it as a constant of the run. */
+static int g_offline;
+
+void view_ui_offline_set(int on)
+{
+    g_offline = on ? 1 : 0;
+}
+
+int view_ui_offline(void)
+{
+    return g_offline;
+}
+
+int view_ui_bar_shown(int i)
+{
+    if (i < 0 || i >= VIEW_UI_BAR_N)
+        return 0;
+    if (!g_offline)
+        return 1;
+    /* The four with nobody on the other end. Bag, Trainer, Pokedex and Menu
+     * are the engine's own screens and are drawn from the save file; the
+     * Poketch is a window preference; the two notices are notices. */
+    return i != VIEW_UI_BAR_COMMUNITY && i != VIEW_UI_BAR_PVP
+        && i != VIEW_UI_BAR_TRADE && i != VIEW_UI_BAR_MAIL
+        /*
+         * And the two that are only ever a sentence about the service: "the Egg Incubator has
+         * not been unlocked yet" and "gift shop is not available at this time" are answers
+         * about an account, and there is no account here.
+         */
+        && i != VIEW_UI_BAR_INCUBATOR && i != VIEW_UI_BAR_SHOP;
+}
+
+/* The same question a row at a time. */
+int view_ui_menu_row_shown(int id, int row)
+{
+    const struct view_ui_menu_def *d = view_ui_menu_def(id);
+
+    if (d == NULL || row < 0 || row >= d->n)
+        return 0;
+    if (id != VIEW_UI_MENU_GAME)
+        return 1;
+    if (d->item[row].act == VIEW_UI_ACT_SCREEN
+        && d->item[row].arg == OPENMMO_HUD_SCREEN_START)
+        return g_offline;           /* Save: offline is the only side with one */
+    if (!g_offline)
+        return 1;
+    return d->item[row].act == VIEW_UI_ACT_SCREEN
+        || d->item[row].act == VIEW_UI_ACT_QUIT;
+}
+
+/* Whether the bar is up at all. */
+int view_ui_bar_live(const struct openmmo_hud_snap *s)
+{
+    if (s == NULL)
+        return 0;
+    if (g_offline)
+        return s->lower == OPENMMO_HUD_LOWER_POKETCH;
+    return s->net.state == OPENMMO_ST_IN_GAME;
+}
 
 const struct view_ui_item *view_ui_bar_item(int i)
 {
@@ -182,6 +290,7 @@ void view_ui_bar_place(const struct openmmo_rect *canvas,
     struct openmmo_rect c;
     int w[VIEW_UI_BAR_N];
     int i, min_w, icon, margin, total, avail, x;
+    int shown = 0;
 
     if (out == NULL)
         return;
@@ -203,11 +312,10 @@ void view_ui_bar_place(const struct openmmo_rect *canvas,
     icon = view_ui_scale(35, out->text_px);
     margin = view_ui_scale(10, out->text_px);
 
-    /* What is left of the floor once the chat box has had its share. The official client
-     * sizes both by hand, a fixed 630 bar beside a fixed chat frame, and
-     * both of ours scale, so the bar asks the chat box where it ends rather
-     * than growing across it on every window narrower than about 1600. */
-    {
+    /* What is left of the floor once the chat box has had its share. */
+    if (g_offline) {
+        avail = c.w - 2 * margin;
+    } else {
         struct view_ui_chat_layout chat;
 
         view_ui_chat_place(&c, &chat);
@@ -218,14 +326,24 @@ void view_ui_bar_place(const struct openmmo_rect *canvas,
     if (avail < 1)
         avail = c.w;
 
+    /* A hidden button is width 0 and takes no gap either, so the strip is as
+     * wide as the buttons that are on it rather than carrying the holes where
+     * the others were. */
     total = 0;
     for (i = 0; i < VIEW_UI_BAR_N; i++) {
+        if (!view_ui_bar_shown(i)) {
+            w[i] = 0;
+            continue;
+        }
+        shown++;
         w[i] = label_w(measure, ctx, bar_items[i].label, out->text_px) + icon;
         if (w[i] < min_w)
             w[i] = min_w;
         total += w[i];
     }
-    total += (VIEW_UI_BAR_N - 1) * out->gap + 2 * out->pad;
+    if (shown < 1)
+        return;
+    total += (shown - 1) * out->gap + 2 * out->pad;
 
     /* Full labels first; the short forms next, floored at what one of them
      * needs rather than at the official client's icon-sized 66. */
@@ -235,27 +353,31 @@ void view_ui_bar_place(const struct openmmo_rect *canvas,
         out->shortened = 1;
         total = 0;
         for (i = 0; i < VIEW_UI_BAR_N; i++) {
+            if (w[i] == 0)
+                continue;
             w[i] = label_w(measure, ctx, view_ui_bar_label(i, 1),
                            out->text_px) + 2 * out->text_px;
             if (w[i] < floor_w)
                 w[i] = floor_w;
             total += w[i];
         }
-        total += (VIEW_UI_BAR_N - 1) * out->gap + 2 * out->pad;
+        total += (shown - 1) * out->gap + 2 * out->pad;
     }
 
     /* A window too narrow even for those keeps every button rather than
      * dropping the last three off the edge: the row shrinks evenly and the
      * labels clip inside their own rects. */
     if (total > avail) {
-        int room = avail - (VIEW_UI_BAR_N - 1) * out->gap - 2 * out->pad;
+        int room = avail - (shown - 1) * out->gap - 2 * out->pad;
         int sum = 0;
 
-        if (room < VIEW_UI_BAR_N)
-            room = VIEW_UI_BAR_N;
+        if (room < shown)
+            room = shown;
         for (i = 0; i < VIEW_UI_BAR_N; i++)
             sum += w[i];
         for (i = 0; i < VIEW_UI_BAR_N; i++) {
+            if (w[i] == 0)
+                continue;
             w[i] = w[i] * room / (sum > 0 ? sum : 1);
             if (w[i] < 1)
                 w[i] = 1;
@@ -263,7 +385,7 @@ void view_ui_bar_place(const struct openmmo_rect *canvas,
         total = 0;
         for (i = 0; i < VIEW_UI_BAR_N; i++)
             total += w[i];
-        total += (VIEW_UI_BAR_N - 1) * out->gap + 2 * out->pad;
+        total += (shown - 1) * out->gap + 2 * out->pad;
     }
 
     out->bar = view_ui_place(&c, VIEW_UI_BOTTOM_RIGHT, margin, total,
@@ -272,6 +394,19 @@ void view_ui_bar_place(const struct openmmo_rect *canvas,
     for (i = 0; i < VIEW_UI_BAR_N; i++) {
         int right = out->bar.x + out->bar.w - out->pad;
 
+        /*
+         * A hidden button is placed with no width rather than left at the origin: view_ui_hit
+         * refuses a rect narrower than a pixel, so it is not drawn, not hit and not tabbed to,
+         * and every property the strip has, inside the bar, left to right, never overlapping,
+         * still holds over the row as a whole.
+         */
+        if (w[i] == 0) {
+            out->btn[i].x = x;
+            out->btn[i].y = out->bar.y + out->pad;
+            out->btn[i].w = 0;
+            out->btn[i].h = 0;
+            continue;
+        }
         out->btn[i].x = x;
         out->btn[i].y = out->bar.y + out->pad;
         out->btn[i].w = w[i];
@@ -316,7 +451,7 @@ void view_ui_menu_place(const struct openmmo_rect *canvas,
 {
     const struct view_ui_menu_def *d = view_ui_menu_def(id);
     struct openmmo_rect c;
-    int i, w = 0, h, y;
+    int i, w = 0, h, y, shown = 0;
 
     if (out == NULL)
         return;
@@ -332,16 +467,25 @@ void view_ui_menu_place(const struct openmmo_rect *canvas,
     out->text_px = view_ui_text_px(c.y + c.h);
     out->pad = view_ui_scale(6, out->text_px);
     out->row_h = view_ui_scale(22, out->text_px);
+    /* `n` stays the whole table so a row id still names the same item, hidden
+     * or not; `shown` is what the popup is actually as tall as. A hidden row
+     * measures nothing either, a label nobody can read must not be what
+     * decides the width. */
     out->n = d->n;
-
     for (i = 0; i < d->n; i++) {
-        int lw = label_w(measure, ctx, d->item[i].label, out->text_px);
+        int lw;
 
+        if (!view_ui_menu_row_shown(id, i))
+            continue;
+        shown++;
+        lw = label_w(measure, ctx, d->item[i].label, out->text_px);
         if (d->item[i].key != 0)
             lw += view_ui_scale(28, out->text_px);
         if (lw > w)
             w = lw;
     }
+    if (shown < 1)
+        shown = 1;
     w += 2 * out->pad + view_ui_scale(16, out->text_px);
     /* The official client's own floor (init.xml menupopup: button minWidth 80). */
     if (w < view_ui_scale(80, out->text_px))
@@ -357,16 +501,16 @@ void view_ui_menu_place(const struct openmmo_rect *canvas,
     {
         int avail = c.h - 2 * out->pad;
 
-        if (avail < d->n) {
+        if (avail < shown) {
             out->pad = 0;
             avail = c.h;
         }
-        if (d->n * out->row_h > avail)
-            out->row_h = avail / d->n;
+        if (shown * out->row_h > avail)
+            out->row_h = avail / shown;
         if (out->row_h < 1)
             out->row_h = 1;
     }
-    h = d->n * out->row_h + 2 * out->pad;
+    h = shown * out->row_h + 2 * out->pad;
     if (h > c.h) h = c.h;
 
     /*
@@ -402,6 +546,12 @@ void view_ui_menu_place(const struct openmmo_rect *canvas,
 
     y = out->box.y + out->pad;
     for (i = 0; i < d->n; i++) {
+        if (!view_ui_menu_row_shown(id, i)) {
+            /* An empty rectangle, which nothing can hit and nothing draws:
+             * the row keeps its index and takes no floor. */
+            memset(&out->row[i], 0, sizeof out->row[i]);
+            continue;
+        }
         out->row[i].x = out->box.x + out->pad;
         out->row[i].y = y;
         out->row[i].w = out->box.w - 2 * out->pad;

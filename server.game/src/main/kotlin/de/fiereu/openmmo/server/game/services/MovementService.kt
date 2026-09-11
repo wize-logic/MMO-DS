@@ -15,39 +15,13 @@ import de.fiereu.openmmo.net.game.packets.MapData
 import de.fiereu.openmmo.net.game.packets.MovementPacket
 import de.fiereu.openmmo.server.game.session.PLAYER_STATE
 import de.fiereu.openmmo.server.game.session.PlayerState
+import de.fiereu.openmmo.server.game.session.setMapAddress
 import de.fiereu.openmmo.server.game.storage.CharacterStore
 import io.github.oshai.kotlinlogging.KotlinLogging
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private val log = KotlinLogging.logger {}
-
-/** Resolve a cardinal Gen-3 ledge hop to its tile two spaces away. */
-internal fun ledgeLanding(
-    map: MapDef,
-    fromX: Int,
-    fromY: Int,
-    direction: Direction,
-): Pair<Int, Int>? {
-  val expectedBehavior =
-      when (direction) {
-        Direction.DOWN -> TileBehavior.JUMP_SOUTH
-        Direction.UP -> TileBehavior.JUMP_NORTH
-        Direction.LEFT -> TileBehavior.JUMP_WEST
-        Direction.RIGHT -> TileBehavior.JUMP_EAST
-        Direction.DIVE,
-        Direction.EMERGE -> return null
-      }
-  val ledgeX = fromX + direction.dx
-  val ledgeY = fromY + direction.dy
-  if (map.tileAt(ledgeX, ledgeY)?.behavior != expectedBehavior) return null
-
-  val landingX = fromX + direction.dx * 2
-  val landingY = fromY + direction.dy * 2
-  if (landingX !in 0 until map.width || landingY !in 0 until map.height) return null
-  if (map.tileAt(landingX, landingY)?.blocksMovement() == true) return null
-  return landingX to landingY
-}
 
 @Singleton
 class MovementService
@@ -63,19 +37,12 @@ constructor(
     private val mapScriptService: MapScriptService,
     private val trainerSightService: TrainerSightService,
     private val fieldMoveService: FieldMoveService,
+    private val safariService: SafariService,
     private val violations: ViolationLog,
 ) {
 
-  /**
-   * How fast a player may take tiles.
-   *
-   * Collision was checked on every step and the position was always the server's, so this was never
-   * a way through a wall. It was a way to cross Sinnoh in the time it takes to cross a room:
-   * nothing asked how often a step arrived, and the pipeline's flood limiter sits thirty times
-   * above the pace the client's own animation walks at. Twelve a second is half again the fastest
-   * the game moves anyone, and the burst is three seconds of them.
-   */
-  private val pace = PaceLimit(burst = 40.0, perSecond = 12.0)
+  /** How fast a player may take tiles. */
+  private val pace = PaceLimit(burst = 40.0, perSecond = 32.0)
 
   /** One step. The client sends the tile it left and the direction, the server derives the rest. */
   fun onMovement(event: PacketEvent<MovementPacket>) {
@@ -96,7 +63,8 @@ constructor(
     val fromY = stored.info.positionY.toInt()
 
     // A step the game could not have taken this soon. Refused rather than delayed, and counted:
-    // one is a connection catching up, a stream of them is a speed no animation runs at.
+    // one is a connection catching up, a stream of them is a client walking at a speed no
+    // animation runs at.
     if (!pace.allow(charId)) {
       violations.record(
           charId,
@@ -129,14 +97,9 @@ constructor(
     // Only once the step is accepted, so a locked player keeps the facing its script left.
     state.facingDirection = msg.direction
 
-    var toX = fromX + msg.direction.dx
-    var toY = fromY + msg.direction.dy
-
-    // Ledge hops land two tiles away.
-    ledgeLanding(currentMap, fromX, fromY, msg.direction)?.let { landing ->
-      toX = landing.first
-      toY = landing.second
-    }
+    // How far the step went. A walk is one tile, a ledge two, a Distortion World gap three, and a
+    // ramp throws a rider one or three depending on a gear only the client has.
+    val (toX, toY) = MapEventLayout.stepLanding(currentMap, fromX, fromY, msg.direction, msg.tiles)
 
     // Stairs and arrow warps fire from the tile the player stands on.
     val standingBehavior = currentMap.tileAt(fromX, fromY)?.behavior
@@ -148,9 +111,13 @@ constructor(
       }
     }
 
-    // Walking off the edge of a map hands the player to the neighbouring map, if there is one.
+    // Walking off the edge of a map hands the player to the neighbouring map, if there is one. A
+    // jump does not: a connection places the player by the crossing axis, which says nothing about
+    // where a three-tile hop over the edge would land, and Sinnoh puts no jump tile on a map edge.
     if (toX !in 0 until currentMap.width || toY !in 0 until currentMap.height) {
-      val connection = currentMap.connections.find { it.direction == msg.direction }
+      val connection =
+          if (msg.tiles != 1) null
+          else currentMap.connections.find { it.direction == msg.direction }
       // Connections stay inside one region.
       val targetMap =
           connection?.let {
@@ -205,7 +172,14 @@ constructor(
       return
     }
 
-    if (!isWalkable(currentMap, toX, toY, state, msg.direction)) {
+    // Collision, except where the surface this would check is not the one the player is on:
+    // the Distortion World's is a stack of floating platforms and the plane behind its header
+    // is a flattening of them that agrees with neither direction
+    // (MapEventLayout.surfaceIsClientOwned).
+    val clientOwned = MapEventLayout.surfaceIsClientOwned(currentMap)
+    if (clientOwned) {
+      log.debug { "UNMODELLED SURFACE: char=$charId stepping to ($toX, $toY) on its own word" }
+    } else if (!isWalkable(currentMap, toX, toY, state, msg.direction)) {
       log.debug { "WALL: char=$charId blocked at ($toX, $toY)" }
       sendPositionReset(ctx, charId, currentMap, fromX, fromY, msg.direction)
       return
@@ -231,10 +205,15 @@ constructor(
         movePacket(charId, map, toX, toY, msg.direction),
     )
 
+    // The Great Marsh's allowance is paid by the step itself, whatever else the step goes on to
+    // trigger, the way `Field_UpdateSafari` pays it out of `Field_ProcessStep`. A step that spends
+    // the last of it meets nothing on its way out.
+    val safariOver = safariService.onStep(ctx, state, map)
+
     // A trainer noticing the player comes first, then a story coordinate event, then a random
     // encounter, the order `Field_CheckStandardInput` runs them in.
     if (trainerSightService.onStep(ctx, state, map, toX, toY)) return
-    if (!mapScriptService.onStep(ctx, state, map, toX, toY)) {
+    if (!mapScriptService.onStep(ctx, state, map, toX, toY) && !safariOver) {
       encounterService.onStep(ctx, charId, map, toX, toY)
     }
   }
@@ -261,10 +240,9 @@ constructor(
     val target = mapManager.getMap(from.regionId, bank, mapId) ?: return null
 
     val state = ctx.attributes[PLAYER_STATE]
-    if (state != null) {
-      state.bankId = bank.toInt()
-      state.mapId = mapId.toInt()
-    }
+    // A ported header is a byte above 127, so the address goes through the masking setter: the
+    // signed value would never equal the map's own id again, and every step after it is refused.
+    state?.setMapAddress(from.regionId.toInt(), bank.toInt(), mapId.toInt())
     characterStore.updatePosition(charId, x.toShort(), y.toShort(), bank, mapId)
     characterStore.flushCharacterAsync(charId)
     presenceService.refresh(ctx)
@@ -356,7 +334,14 @@ constructor(
   ): Boolean {
     if (x !in 0 until map.width || y !in 0 until map.height) return false
     if (fieldMoveService.boulderAt(state, map, x, y) != null) return false
-    val tile = map.tileAt(x, y) ?: return true
+    // A bike ramp is an impassable tile a rider gets onto anyway: `PlayerAvatar_WillHitBikeRamp`
+    // answers before any set-movement function reads the collision bit, and the ramp's own forced
+    // movement throws the rider off again. On foot nothing reads it and the bit stands.
+    if (map.tileAt(x, y)?.behavior?.rampRidesToward == into) return true
+    // A cell a matrix leaves empty carries no land data, so there is nothing there to stand on,
+    // and on a shared plane a whole region's worth of them sit at the edges where the world
+    // stops.
+    val tile = map.tileAt(x, y) ?: return map.terrain == null
     if (tile.blocksMovement()) return false
     return when (tile.behavior) {
       // Only something riding on the water gets onto the water.
@@ -382,8 +367,7 @@ constructor(
 
     val state = ctx.attributes[PLAYER_STATE]
     if (state != null) {
-      state.bankId = targetBank.toInt()
-      state.mapId = targetMap.toInt()
+      state.setMapAddress(regionId.toInt(), targetBank.toInt(), targetMap.toInt())
       state.x = targetX.toShort()
       state.y = targetY.toShort()
     }

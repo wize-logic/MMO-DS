@@ -4,6 +4,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Both halves of the transcoding are borrowed rather than written again: they
+ * are the client's one pair, with the standard's own boundary values behind
+ * them (asserted in tests/text_channel_test.c). */
+#include "text_channel.h"
+
 /* --- write side -------------------------------------------------------- */
 
 void mmo_wbuf_init(mmo_wbuf *w)
@@ -110,12 +115,52 @@ void mmo_put_bytes_u8(mmo_wbuf *w, const void *src, size_t n)
 
 void mmo_put_utf16_nt(mmo_wbuf *w, const char *s)
 {
-    for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
-        mmo_put_u8(w, (u8)*p);
-        mmo_put_u8(w, 0);
+    const unsigned char *p = (const unsigned char *)s;
+    size_t left = strlen(s);
+
+    while (left > 0) {
+        uint16_t u[2];
+        unsigned used = 1;
+        unsigned n = openmmo_text_utf8_to_utf16(p, (unsigned)left, u, &used);
+
+        /* Malformed input becomes one replacement character, which is what the
+         * far end would have made of it anyway: a Java String built from these
+         * bytes substitutes U+FFFD for exactly the same sequences (measured
+         * against the JDK's own decoder). */
+        if (n == 0) {
+            u[0] = 0xFFFDu;
+            n = 1;
+        }
+        for (unsigned i = 0; i < n; i++) {
+            mmo_put_u8(w, (u8)(u[i] & 0xFFu));
+            mmo_put_u8(w, (u8)(u[i] >> 8));
+        }
+        p += used;
+        left -= used;
     }
     mmo_put_u8(w, 0);
     mmo_put_u8(w, 0);
+}
+
+size_t mmo_utf16_units(const char *s)
+{
+    const unsigned char *p = (const unsigned char *)s;
+    size_t left = s != NULL ? strlen(s) : 0;
+    size_t units = 0;
+
+    /* The same walk as the writer above, counting instead of emitting, so the
+     * two can never disagree about how long a string is on the wire: malformed
+     * input is the one replacement character the writer substitutes for it. */
+    while (left > 0) {
+        uint16_t u[2];
+        unsigned used = 1;
+        unsigned n = openmmo_text_utf8_to_utf16(p, (unsigned)left, u, &used);
+
+        units += n == 0 ? 1u : n;
+        p += used;
+        left -= used;
+    }
+    return units;
 }
 
 /* --- read side --------------------------------------------------------- */
@@ -220,27 +265,72 @@ size_t mmo_get_bytes_u8(mmo_rbuf *r, void *dst, size_t cap)
     return n;
 }
 
+/*
+ * Append one code point as UTF-8, counting what the whole string wants even after the buffer
+ * is full.
+ */
+static void utf8_append(u32 cp, char *dst, size_t cap, size_t *off,
+                        size_t *need, int *full)
+{
+    size_t n = cp < 0x80u ? 1 : cp < 0x800u ? 2 : cp < 0x10000u ? 3 : 4;
+
+    *need += n;
+    if (*full || dst == NULL || *off + n + 1 > cap) {
+        *full = 1;
+        return;
+    }
+    *off += openmmo_text_cp_to_utf8(cp, dst + *off);
+}
+
 size_t mmo_get_utf16_nt(mmo_rbuf *r, char *dst, size_t cap)
 {
-    size_t out = 0;
-    for (;;) {
-        if (rbuf_underflow(r, 2)) {
-            if (cap > 0)
-                dst[out < cap ? out : cap - 1] = '\0';
-            return out;
+    size_t need = 0; /* UTF-8 bytes the whole string wants, terminator apart */
+    size_t off = 0;  /* how many of them fitted */
+    int    full = 0;
+    u32    high = 0; /* a high surrogate waiting for the other half */
+    int    end = 0;
+
+    while (!end) {
+        u16 unit = 0;
+        int have = 0;
+
+        if (!rbuf_underflow(r, 2)) {
+            unit = (u16)((u16)r->data[r->pos] |
+                         ((u16)r->data[r->pos + 1] << 8));
+            r->pos += 2;
+            have = unit != 0;
         }
-        u8 lo = r->data[r->pos];
-        u8 hi = r->data[r->pos + 1];
-        r->pos += 2;
-        if (lo == 0 && hi == 0)
-            break;
-        if (out + 1 < cap)
-            dst[out] = (char)lo; /* Latin-1: low byte of the code unit */
-        out++;
+        if (!have)
+            end = 1; /* the NUL-NUL, or a span that ran out (err is set) */
+
+        if (high != 0) {
+            u32 cp;
+
+            if (have && unit >= 0xDC00u && unit <= 0xDFFFu) {
+                cp = 0x10000u + ((high - 0xD800u) << 10) + (unit - 0xDC00u);
+                have = 0; /* this unit is spent on the pair */
+            } else {
+                /* Half a surrogate pair is not a code point. It becomes the
+                 * replacement character rather than disappearing, which is
+                 * also what the far end's decoder makes of one. */
+                cp = 0xFFFDu;
+            }
+            high = 0;
+            utf8_append(cp, dst, cap, &off, &need, &full);
+        }
+        if (!have)
+            continue;
+
+        if (unit >= 0xD800u && unit <= 0xDBFFu) {
+            high = unit;
+            continue;
+        }
+        utf8_append(unit >= 0xDC00u && unit <= 0xDFFFu ? 0xFFFDu : unit, dst,
+                    cap, &off, &need, &full);
     }
-    if (cap > 0)
-        dst[out < cap ? out : cap - 1] = '\0';
-    return out;
+    if (dst != NULL && cap > 0)
+        dst[off] = '\0';
+    return need;
 }
 
 /* --- framing ----------------------------------------------------------- */

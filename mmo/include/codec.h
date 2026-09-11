@@ -1,4 +1,4 @@
-/* Wire buffer primitives and framing for the MonMMO protocol. */
+/* Wire buffer primitives and framing for the OpenMMO protocol. */
 #ifndef MMO_CODEC_H
 #define MMO_CODEC_H
 
@@ -32,11 +32,17 @@ void mmo_put_s64le(mmo_wbuf *w, s64 v);
 void mmo_put_bytes(mmo_wbuf *w, const void *src, size_t n);
 /* A U8 length prefix (0..255) followed by the raw bytes; sets err if n > 255. */
 void mmo_put_bytes_u8(mmo_wbuf *w, const void *src, size_t n);
-/* A UTF-16LE string terminated by a NUL-NUL code unit. The input is treated as
- * Latin-1, one code unit per byte, low byte = the char, so ASCII inputs
- * (usernames, hex digests, language codes: everything the login packets carry)
- * encode exactly. UTF-8 multibyte input is out of scope and not attempted. */
+/* A UTF-16LE string terminated by a NUL-NUL code unit. The input is UTF-8, the
+ * client's own encoding everywhere else, and it is transcoded: a code point
+ * above the BMP goes out as a surrogate pair, and a malformed byte becomes one
+ * U+FFFD, the same substitution the far end's decoder would have made. */
 void mmo_put_utf16_nt(mmo_wbuf *w, const char *s);
+
+/*
+ * How many UTF-16 code units mmo_put_utf16_nt would write for this string, the NUL-NUL
+ * terminator apart.
+ */
+size_t mmo_utf16_units(const char *s);
 
 /* --- read side --------------------------------------------------------- */
 
@@ -67,9 +73,10 @@ void mmo_get_bytes(mmo_rbuf *r, void *dst, size_t n);
  * and advance past the whole blob. Returns the on-wire length; sets err if the
  * blob runs past the span or does not fit in cap (dst then holds the prefix). */
 size_t mmo_get_bytes_u8(mmo_rbuf *r, void *dst, size_t cap);
-/* A UTF-16LE NUL-NUL string decoded as Latin-1 (low byte per code unit) into a
- * NUL-terminated C string of at most cap-1 chars. Returns the decoded length;
- * sets err if the terminator is not found within the span. */
+/*
+ * A UTF-16LE NUL-NUL string transcoded to NUL-terminated UTF-8 in dst, joining surrogate pairs
+ * and turning a lone half into U+FFFD.
+ */
 size_t mmo_get_utf16_nt(mmo_rbuf *r, char *dst, size_t cap);
 
 /* --- framing ----------------------------------------------------------- */

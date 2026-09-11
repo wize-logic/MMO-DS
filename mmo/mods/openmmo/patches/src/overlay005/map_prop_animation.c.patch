@@ -1,0 +1,188 @@
+--- a/src/overlay005/map_prop_animation.c
++++ b/src/overlay005/map_prop_animation.c
+@@ -98,6 +98,8 @@
+         manager->animations[i].pastoriaGymButtonGroup = PASTORIA_NO_BUTTON_GROUP;
+     }
+ 
++    openmmo_prop_anim_bind(manager);
++
+     for (i = 0; i < MAP_PROP_ANIMATION_MANAGER_MAX_BICYCLE_SLOPE_ANIMATIONS; i++) {
+         manager->bicycleSlopeAnimations[i].loaded = FALSE;
+         manager->bicycleSlopeAnimations[i].renderObj = NULL;
+@@ -217,6 +219,7 @@
+                 manager->animations[j].animationFile = MapPropAnimation_LoadAnimationObj(manager->animeNARC, animeArchiveID, mapPropModel, &manager->animations[j].animationObj, mapPropTexture, &manager->allocator);
+                 manager->animations[j].loopCount = -1;
+                 manager->animations[j].looping = TRUE;
++                openmmo_prop_anim_slot_bound(&manager->animations[j], mapPropTexture);
+ 
+                 MapPropAnimation_GoToFirstFrame(&manager->animations[j]);
+ 
+@@ -229,7 +232,15 @@
+             }
+         }
+ 
+-        GF_ASSERT(j != MAP_PROP_ANIMATION_MANAGER_MAX_ANIMATIONS);
++        /* openmmo: a ported area's list can still outrun the slots; a row past
++         * them stands still rather than halting the game
++         * (mods/openmmo/src/openmmo_healanim.c says so once). */
++        if (j == MAP_PROP_ANIMATION_MANAGER_MAX_ANIMATIONS) {
++            extern void openmmo_prop_anim_overflow(int model);
++
++            openmmo_prop_anim_overflow(mapPropModelID);
++            return;
++        }
+     }
+ }
+ 
+@@ -314,8 +325,15 @@
+                 }
+ 
+                 if (addAnimationObj) {
+-                    NNS_G3dRenderObjAddAnmObj(mapPropRenderObj, manager->animations[j].animationObj);
+-                    res = TRUE;
++                    /* openmmo: the slot's own object is not attached here,
++                     * every placement gets a clone of it, or nothing
++                     * (mods/openmmo/src/openmmo_propanim.c). */
++                    NNSG3dAnmObj *obj = openmmo_prop_anim_object(&manager->animations[j], mapPropRenderObj, &manager->allocator, animeListFile.isBicycleSlope);
++
++                    if (obj != NULL) {
++                        NNS_G3dRenderObjAddAnmObj(mapPropRenderObj, obj);
++                        res = TRUE;
++                    }
+                 }
+ 
+                 break;
+@@ -335,6 +353,7 @@
+     for (int i = 0; i < MAP_PROP_ANIMATION_MANAGER_MAX_ANIMATIONS; i++) {
+         if (manager->animations[i].loaded) {
+             if (manager->animations[i].loaded == TRUE) {
++                openmmo_prop_anim_free_clones(&manager->animations[i], &manager->allocator);
+                 NNS_G3dFreeAnmObj(&manager->allocator, manager->animations[i].animationObj);
+                 manager->animations[i].animationObj = NULL;
+                 Heap_Free(manager->animations[i].animationFile);
+@@ -385,6 +404,8 @@
+ 
+ void MapPropAnimationManager_Free(MapPropAnimationManager *manager)
+ {
++    openmmo_prop_anim_unbind(manager);
++
+     if (manager == NULL) {
+         return;
+     }
+@@ -473,6 +494,8 @@
+     } else {
+         animation->animationObj->frame = NNS_G3dAnmObjGetNumFrame(animation->animationObj) - (FX32_ONE);
+     }
++
++    openmmo_prop_anim_sync(animation);
+ }
+ 
+ void MapPropAnimation_GoToLastFrame(MapPropAnimation *animation)
+@@ -482,6 +505,8 @@
+     } else {
+         animation->animationObj->frame = 0;
+     }
++
++    openmmo_prop_anim_sync(animation);
+ }
+ 
+ void MapPropAnimation_AdvanceFrame(MapPropAnimation *animation)
+@@ -499,6 +524,8 @@
+             animation->animationObj->frame -= (FX32_ONE);
+         }
+     }
++
++    openmmo_prop_anim_sync(animation);
+ }
+ 
+ void MapPropAnimation_SetReversed(MapPropAnimation *animation, const BOOL reversed)
+@@ -738,6 +765,14 @@
+     GF_ASSERT(renderObjIndex < MAP_PROP_ONE_SHOT_ANIMATION_MAX_RENDER_OBJS);
+     MapPropOneShotAnimation *oneShotAnimation = MapPropOneShotAnimationManager_GetAnimation(oneShotAnimMan, tag);
+ 
++    /* openmmo: a room built from another game's props has none of the models
++     * the loader searches for, so the load asserted and registered nothing. A
++     * tag nobody loaded plays as nothing, and its loop reports finished below,
++     * so the script that asked keeps going. */
++    if (oneShotAnimation == NULL) {
++        return;
++    }
++
+     GF_ASSERT(oneShotAnimation->mapPropRenderObjs[renderObjIndex] == NULL);
+     oneShotAnimation->mapPropRenderObjs[renderObjIndex] = renderObj;
+ }
+@@ -747,6 +782,12 @@
+     GF_ASSERT(tag != 0);
+ 
+     MapPropOneShotAnimation *oneShotAnimation = MapPropOneShotAnimationManager_GetAnimation(oneShotAnimMan, tag);
++
++    /* openmmo: likewise. */
++    if (oneShotAnimation == NULL) {
++        return;
++    }
++
+     MapPropAnimation *animation = MapPropOneShotAnimation_SwitchAnimation(oneShotAnimation, mapPropAnimIndex);
+ 
+     MapPropAnimation_SetAnimationPaused(animation, FALSE);
+@@ -757,6 +798,12 @@
+     GF_ASSERT(tag != 0);
+ 
+     MapPropOneShotAnimation *oneShotAnimation = MapPropOneShotAnimationManager_GetAnimation(oneShotAnimMan, tag);
++
++    /* openmmo: likewise. */
++    if (oneShotAnimation == NULL) {
++        return;
++    }
++
+     MapPropAnimation *animation = MapPropOneShotAnimation_SwitchAnimation(oneShotAnimation, mapPropAnimIndex);
+ 
+     if (soundEffectID != 0) {
+@@ -771,6 +818,11 @@
+     GF_ASSERT(tag != 0);
+     MapPropOneShotAnimation *oneShotAnimation = MapPropOneShotAnimationManager_GetAnimation(oneShotAnimMan, tag);
+ 
++    /* openmmo: likewise. */
++    if (oneShotAnimation == NULL) {
++        return;
++    }
++
+     MapPropAnimationManager_UnloadOneShotAnimation(animMan, oneShotAnimation);
+     MapPropOneShotAnimation_Reset(oneShotAnimation);
+ }
+@@ -780,13 +832,23 @@
+     GF_ASSERT(tag != 0);
+ 
+     MapPropOneShotAnimation *oneShotAnimation = MapPropOneShotAnimationManager_GetAnimation(oneShotAnimMan, tag);
++
++    /* openmmo: likewise. */
++    if (oneShotAnimation == NULL) {
++        return NULL;
++    }
++
+     return oneShotAnimation->currentAnimation;
+ }
+ 
+ const BOOL MapPropOneShotAnimationManager_IsAnimationLoopFinished(MapPropOneShotAnimationManager *const oneShotAnimMan, const int tag)
+ {
+     MapPropAnimation *animation = MapPropOneShotAnimationManager_GetCurrentAnimation(oneShotAnimMan, tag);
+-    GF_ASSERT(animation != NULL);
++
++    /* openmmo: likewise, and an animation nobody loaded is finished. */
++    if (animation == NULL) {
++        return TRUE;
++    }
+ 
+     return MapPropAnimation_IsLoopFinished(animation) != FALSE;
+ }
+@@ -794,5 +856,11 @@
+ const int MapPropOneShotAnimationManager_GetAnimationMapPropModelID(MapPropOneShotAnimationManager *const oneShotAnimMan, const int tag)
+ {
+     MapPropOneShotAnimation *oneShotAnimation = MapPropOneShotAnimationManager_GetAnimation(oneShotAnimMan, tag);
++
++    /* openmmo: likewise. */
++    if (oneShotAnimation == NULL) {
++        return 0;
++    }
++
+     return oneShotAnimation->mapPropModelID;
+ }

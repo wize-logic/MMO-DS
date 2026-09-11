@@ -33,6 +33,7 @@ enum {
     MMO_LAUNCH_R_BUTTONS,
     MMO_LAUNCH_R_DISCORD,
     MMO_LAUNCH_R_PLAY,
+    MMO_LAUNCH_R_PLAY_OFFLINE,
     MMO_LAUNCH_R_QUIT,
     MMO_LAUNCH_R_COUNT
 };
@@ -50,6 +51,7 @@ enum {
 enum {
     MMO_LAUNCH_MENU_NONE = 0,
     MMO_LAUNCH_MENU_PLAY,
+    MMO_LAUNCH_MENU_PLAY_OFFLINE,
     MMO_LAUNCH_MENU_QUIT,
     MMO_LAUNCH_MENU_PICK_ROM
 };
@@ -72,8 +74,9 @@ const char *mmo_launch_menu_label(int row);
 const char *mmo_launch_menu_value(const mmo_launch_menu *m, int row,
                                   char *scratch, size_t cap);
 
-/* One key, the same ones the window's usage string names. PLAY and QUIT are
- * returned so the caller can fork or exit; everything else is applied here. */
+/* One key, the same ones the window's usage string names. The two PLAY rows
+ * and QUIT are returned so the caller can fork or exit; everything else is
+ * applied here. */
 int mmo_launch_menu_key(mmo_launch_menu *m, int key);
 
 /* UTF-8 typed into an open field. Ignored when the menu is not editing. */

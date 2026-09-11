@@ -116,9 +116,12 @@ else
     bad "the engine drew $drawn glyphs and none needed a substitute ($subs substituted)"
 fi
 
-# The font's own ceiling, so a ROM whose font is smaller than the character map
-# is reported here rather than as mysterious question marks. The half-width band
-# runs to charcode 0x01EA = 490, so anything below that cannot draw the table.
+# The font's own ceiling, so a ROM whose font is smaller than the character
+# map is reported here rather than as mysterious question marks.
+fonts=$(grep -c 'openmmo: font glyphs' "$tmp/short.log" || true)
+if [ "${fonts:-0}" -lt 1 ]; then
+    bad "the boot reported the size of a font at all (no 'font glyphs' line)"
+fi
 for n in $(grep 'openmmo: font glyphs' "$tmp/short.log" | sed 's/.*glyphs //'); do
     if [ "$n" -lt 490 ]; then
         bad "every font can draw the whole half-width band (one has $n glyphs, needs 490)"

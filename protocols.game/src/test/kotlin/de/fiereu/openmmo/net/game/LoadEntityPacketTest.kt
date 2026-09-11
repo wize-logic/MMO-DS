@@ -101,5 +101,66 @@ class LoadEntityPacketTest :
         packet.facing shouldBe Direction.RIGHT
         packet.hasFollower shouldBe true
         packet.followerDexId shouldBe 151
+        // The official client sets every one of its own bits and not ours, so the three fields
+        // behind 0x20 read as the picture the official client draws: the ordinary form, the male
+        // coat, not shiny.
+        packet.followerForm shouldBe 0
+        packet.followerFemale shouldBe false
+        packet.followerShiny shouldBe false
+      }
+
+      // 0x20 is this server's own bit and it rides after every one of the official client's, so a
+      // packet
+      // that sets it is a packet the official client would have decoded correctly up to the three
+      // bytes it
+      // does not know about.
+      test("the follower's own picture rides a bit of ours, behind the official client's") {
+        val bytes =
+            byteArrayOf(
+                9,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0, // entityId
+                0, // gender
+                0, // skin region
+                0x00,
+                0x00, // slot mask: nothing kept
+                0x42,
+                0x00,
+                0x00,
+                0x00, // name "B"
+                2,
+                4,
+                6, // region, bank, map
+                0x07,
+                0x00, // x = 7
+                0x08,
+                0x00, // y = 8
+                0, // z
+                0x00, // heading: DOWN
+                0x00, // status bits
+                0x00, // entity state
+                0x24, // flags: 0x04 (a follower) and 0x20 (what it looks like)
+                0x9B.toByte(),
+                0x01, // 0x04: follower 411, Giratina
+                0x01, // 0x20: form 1, the Origin Forme
+                0x01, // female
+                0x01, // shiny
+            )
+
+        val packet = LoadEntityPacketCodec.decodeBytes(bytes)
+
+        packet.x shouldBe 7
+        packet.y shouldBe 8
+        packet.hasFollower shouldBe true
+        packet.followerDexId shouldBe 411
+        packet.followerForm shouldBe 1
+        packet.followerFemale shouldBe true
+        packet.followerShiny shouldBe true
+        LoadEntityPacketCodec.assertBytesRoundtrip(bytes)
       }
     })

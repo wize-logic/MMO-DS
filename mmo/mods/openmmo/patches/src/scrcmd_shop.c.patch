@@ -1,0 +1,58 @@
+--- a/src/scrcmd_shop.c	2026-09-01 11:01:38.437914423 -0400
++++ b/src/scrcmd_shop.c	2026-09-01 11:01:38.463581086 -0400
+@@ -24,6 +24,27 @@
+     u8 requiredBadges, badgeNum, i, j;
+     u16 unused = ScriptContext_GetVar(ctx);
+ 
++    /* THE SHELF IS THE SERVER'S ON A MAP THIS CLIENT DID NOT SHIP. A ported
++     * region's clerk reaches this command because the port pairs the source's
++     * own mart command with it, and the two are one routine, but the list
++     * below is THIS cartridge's, and the bag and the money it would be bought
++     * with belong to the server. So the press goes across instead, and the
++     * server opens the shelf it knows that clerk sells. Nothing happens here
++     * on a map of our own, where the mart is still the engine's.
++     *
++     * FALSE, not the TRUE this returns below: TRUE yields the frame, and it
++     * yields it because a shop screen has been started and there is something
++     * to wait for. Nothing is started here, the screen comes up a moment
++     * later, once the script has released the field, so the script carries
++     * straight on to its release and its end. */
++    {
++        extern int openmmo_mart_ask(void);
++
++        if (openmmo_mart_ask()) {
++            return FALSE;
++        }
++    }
++
+     i = 0;
+     badgeNum = 0;
+     requiredBadges = 0;
+@@ -79,6 +100,27 @@
+     u16 martID = ScriptContext_GetVar(ctx);
+     BOOL incBuyCount;
+ 
++    /* THE SHELF IS THE SERVER'S ON A MAP THIS CLIENT DID NOT SHIP. A ported
++     * region's clerk reaches this command because the port pairs the source's
++     * own mart command with it, and the two are one routine, but the list
++     * below is THIS cartridge's, and the bag and the money it would be bought
++     * with belong to the server. So the press goes across instead, and the
++     * server opens the shelf it knows that clerk sells. Nothing happens here
++     * on a map of our own, where the mart is still the engine's.
++     *
++     * FALSE, not the TRUE this returns below: TRUE yields the frame, and it
++     * yields it because a shop screen has been started and there is something
++     * to wait for. Nothing is started here, the screen comes up a moment
++     * later, once the script has released the field, so the script carries
++     * straight on to its release and its end. */
++    {
++        extern int openmmo_mart_ask(void);
++
++        if (openmmo_mart_ask()) {
++            return FALSE;
++        }
++    }
++
+     if ((martID == MART_SPECIALTIES_ID_VEILSTONE_1F_RIGHT) || (martID == MART_SPECIALTIES_ID_VEILSTONE_1F_LEFT)
+         || (martID == MART_SPECIALTIES_ID_VEILSTONE_2F_UP) || (martID == MART_SPECIALTIES_ID_VEILSTONE_2F_MID)
+         || (martID == MART_SPECIALTIES_ID_VEILSTONE_3F_UP) || (martID == MART_SPECIALTIES_ID_VEILSTONE_3F_DOWN)

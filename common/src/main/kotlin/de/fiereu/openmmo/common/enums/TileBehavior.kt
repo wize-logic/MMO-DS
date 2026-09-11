@@ -12,6 +12,22 @@ enum class TileBehavior {
   JUMP_WEST,
   JUMP_NORTH,
   JUMP_SOUTH,
+  /**
+   * The wide gaps in the Distortion World, which are jumped over two tiles rather than one: the
+   * cartridge marks the two tiles between the ledges impassable and puts this behaviour on the near
+   * one, and `PlayerAvatar_WillJumpTwice` reads exactly that.
+   */
+  JUMP_NORTH_TWICE,
+  JUMP_SOUTH_TWICE,
+  JUMP_WEST_TWICE,
+  JUMP_EAST_TWICE,
+  /**
+   * A bike ramp, named after the direction it is ridden. The tile itself is impassable, on foot it
+   * is a wall on both halves, and a bike takes it anyway, then is thrown off it by the ramp's own
+   * forced movement.
+   */
+  BIKE_RAMP_EAST,
+  BIKE_RAMP_WEST,
   DOOR,
   /** Cave and water doors. They look like doors but warp like a ladders. */
   NON_ANIMATED_DOOR,
@@ -31,7 +47,40 @@ enum class TileBehavior {
   SURFABLE_WATER,
   WATERFALL,
   ROCK_CLIMB_NORTH_SOUTH,
-  ROCK_CLIMB_EAST_WEST;
+  ROCK_CLIMB_EAST_WEST,
+  /** A shop counter or a desk: the tile between the player and the person behind it. */
+  COUNTER;
+
+  /** The direction a ledge is hopped in, or null on anything else. */
+  val jumpsWhenWalking: Direction?
+    get() =
+        when (this) {
+          JUMP_NORTH -> Direction.UP
+          JUMP_SOUTH -> Direction.DOWN
+          JUMP_WEST -> Direction.LEFT
+          JUMP_EAST -> Direction.RIGHT
+          else -> null
+        }
+
+  /** The direction a jump-twice tile is crossed in, or null on anything else. */
+  val jumpsTwiceWhenWalking: Direction?
+    get() =
+        when (this) {
+          JUMP_NORTH_TWICE -> Direction.UP
+          JUMP_SOUTH_TWICE -> Direction.DOWN
+          JUMP_WEST_TWICE -> Direction.LEFT
+          JUMP_EAST_TWICE -> Direction.RIGHT
+          else -> null
+        }
+
+  /** The direction a bike ramp is ridden in, or null on anything else. */
+  val rampRidesToward: Direction?
+    get() =
+        when (this) {
+          BIKE_RAMP_EAST -> Direction.RIGHT
+          BIKE_RAMP_WEST -> Direction.LEFT
+          else -> null
+        }
 
   /** The direction the player must walk while standing here to be warped. */
   val warpsWhenWalking: Direction?

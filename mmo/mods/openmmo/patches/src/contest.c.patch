@@ -1,0 +1,32 @@
+--- a/src/contest.c
++++ b/src/contest.c
+@@ -406,6 +406,15 @@
+ 
+ Contest *Contest_Init(const PlayerMonContestDTO *playerMonContestDTO)
+ {
++    /* openmmo: the stage draws the cartridge's own sprites, so the fill's
++     * claims on them are masked from here to Contest_Free.
++     * mmo/mods/openmmo/src/openmmo_contest.c. */
++    {
++        extern void openmmo_contest_scene(int up);
++
++        openmmo_contest_scene(1);
++    }
++
+     Heap_Create(HEAP_ID_FIELD2, HEAP_ID_20, 0x3000 + 0x1000);
+ 
+     Contest *contest = Contest_New();
+@@ -540,6 +549,13 @@
+     LCRNG_SetSeed(contest->rngSeed);
+     Contest_InternalFree(contest);
+     Heap_Destroy(HEAP_ID_20);
++
++    /* openmmo: and the fill has its sprites back. */
++    {
++        extern void openmmo_contest_scene(int up);
++
++        openmmo_contest_scene(0);
++    }
+ }
+ 
+ static int CalcMonContestFame(Pokemon *mon, enum PokemonContestType contestType)

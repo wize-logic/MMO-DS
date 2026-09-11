@@ -38,12 +38,18 @@ int idmap_tests_run(void)
 {
     failures = 0;
 
-    printf("species are the National Dex number, identity within what the engine draws:\n");
+    /*
+     * The bound here used to be Arceus, because until a Gen 5 species could exist at all one
+     * number answered both "do both halves name this" and "can this be drawn".
+     */
+    printf("species are the National Dex number, identity across what both halves name:\n");
     CK_MAP(mmo_id_species_from_server(1, &why_), 1, "Bulbasaur (#1) maps to itself");
     CK_MAP(mmo_id_species_from_server(151, &why_), 151, "Mew (#151) maps to itself");
     CK_MAP(mmo_id_species_from_server(493, &why_), 493, "Arceus (#493) maps to itself");
+    CK_MAP(mmo_id_species_from_server(494, &why_), 494, "Victini (#494) maps, as the server has it");
+    CK_MAP(mmo_id_species_from_server(649, &why_), 649, "Genesect (#649, the last) maps");
     CK_TRAP(mmo_id_species_from_server(0, &why_), "species 0 traps");
-    CK_TRAP(mmo_id_species_from_server(494, &why_), "a dex number past Arceus traps");
+    CK_TRAP(mmo_id_species_from_server(650, &why_), "a dex number past Genesect traps");
     CK_MAP(mmo_id_species_to_server(386, &why_), 386, "engine->server species is identity too");
     CK_TRAP(mmo_id_species_to_server(0, &why_), "engine species 0 traps back");
 
@@ -51,12 +57,15 @@ int idmap_tests_run(void)
     CK_MAP(mmo_id_move_from_server(1, &why_), 1, "Pound (#1) maps to itself");
     CK_MAP(mmo_id_move_from_server(354, &why_), 354, "Psycho Boost (#354, last Gen-3) maps");
     CK_MAP(mmo_id_move_from_server(458, &why_), 458, "Double Hit (#458) maps, as the server has it");
-    CK_MAP(mmo_id_move_from_server(467, &why_), 467, "Shadow Force (#467, the last) maps");
+    CK_MAP(mmo_id_move_from_server(467, &why_), 467, "Shadow Force (#467, the last this game ships) maps");
+    CK_MAP(mmo_id_move_from_server(468, &why_), 468, "Hone Claws (#468) maps, as the server has it since 2026-08-30");
+    CK_MAP(mmo_id_move_from_server(559, &why_), 559, "Fusion Bolt (#559, the last) maps");
     CK_TRAP(mmo_id_move_from_server(0, &why_), "move 0 traps");
-    CK_TRAP(mmo_id_move_from_server(468, &why_), "a server move past the last one traps");
+    CK_TRAP(mmo_id_move_from_server(560, &why_), "a server move past the last one traps");
     CK_MAP(mmo_id_move_to_server(354, &why_), 354, "engine move sends as itself");
     CK_MAP(mmo_id_move_to_server(459, &why_), 459, "Roar of Time sends too, now the server has it");
-    CK_TRAP(mmo_id_move_to_server(468, &why_), "a move past the last platinum move traps");
+    CK_MAP(mmo_id_move_to_server(559, &why_), 559, "Fusion Bolt sends too");
+    CK_TRAP(mmo_id_move_to_server(560, &why_), "a move past the last one either side names traps");
 
     printf("items share the Gen-5 numbering; the wire id is region*1000 + that index:\n");
     CK_MAP(mmo_id_item_from_server(5001, &why_), 1, "Master Ball (5001) -> engine 1");
@@ -66,10 +75,13 @@ int idmap_tests_run(void)
     CK_MAP(mmo_id_item_from_server(5018, &why_), 18, "Antidote (5018) -> engine 18");
     CK_MAP(mmo_id_item_from_server(5137, &why_), 137,
         "a mail slot maps though the two worlds fill it with different mail");
-    CK_MAP(mmo_id_item_from_server(5467, &why_), 467, "the last item the engine draws maps");
+    CK_MAP(mmo_id_item_from_server(5467, &why_), 467, "the last item this game ships maps");
+    CK_MAP(mmo_id_item_from_server(5468, &why_), 468,
+           "and the first carried one, HeartGold's, filled past this game's table, maps too");
+    CK_MAP(mmo_id_item_from_server(5536, &why_), 536, "up to the last carried item");
     CK_TRAP(mmo_id_item_from_server(5426, &why_), "an HM slot the server's table blanked traps");
     CK_TRAP(mmo_id_item_from_server(5113, &why_), "an engine id with no item behind it traps");
-    CK_TRAP(mmo_id_item_from_server(5468, &why_), "an item past what the engine draws traps");
+    CK_TRAP(mmo_id_item_from_server(5537, &why_), "an item past the last carried one traps");
     CK_TRAP(mmo_id_item_from_server(5000, &why_), "index 0 (no item) traps");
     CK_TRAP(mmo_id_item_from_server(13, &why_), "an item id with no region block traps");
     CK_TRAP(mmo_id_item_from_server(6013, &why_), "an item outside region 5 traps");
@@ -144,6 +156,16 @@ int idmap_tests_run(void)
             "a header past the image's own last one is carried, not refused");
         CHECK(mmo_id_map_header_from_server(3, 2, 82, &why_) == 594 && why_ == 0,
             "and an appended map's header (594) addresses as bank 2 map 82");
+        /* The band ends where HeartGold's own table does: 594 + 540 - 1. Past
+         * that no package this build cooks has a header, so it traps, and
+         * the ceiling used to be 0xFFFF, which a bank byte and a map byte
+         * cannot exceed, so this check could not fire at all. */
+        CHECK(mmo_id_map_header_from_server(3, 4, 109, &why_) == 1133 && why_ == 0,
+            "the last ported header (1133) is bank 4 map 109");
+        CHECK(mmo_id_map_header_from_server(3, 4, 110, &why_) == -1 && why_ != 0,
+            "one past the last ported header traps");
+        CHECK(mmo_id_map_header_from_server(3, 255, 255, &why_) == -1 && why_ != 0,
+            "and so does every header a byte pair can still name");
         CHECK(mmo_id_map_header_from_server(3, 256, 0, &why_) == -1 && why_ != 0,
             "what a byte cannot hold is still refused");
         CHECK(mmo_id_map_header_from_server(0, 4, 1, &why_) == -1 && why_ != 0,

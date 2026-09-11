@@ -1,13 +1,14 @@
 package de.fiereu.openmmo.server.game.session
 
 import de.fiereu.network.SessionContext
+import de.fiereu.openmmo.server.game.storage.CharacterPresence
 import io.netty.channel.Channel
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class SessionRegistry @Inject constructor() {
+class SessionRegistry @Inject constructor() : CharacterPresence {
   private val sessionsByChannel = ConcurrentHashMap<Channel, SessionContext>()
   private val sessionsByCharacter = ConcurrentHashMap<Long, SessionContext>()
   private val sessionsByUser = ConcurrentHashMap<Int, SessionContext>()
@@ -47,12 +48,17 @@ class SessionRegistry @Inject constructor() {
     sessionsByCharacter[characterId] = ctx
   }
 
-  /** Value-checked for the same reason as [releaseUser]. */
-  fun unbindCharacter(characterId: Long, ctx: SessionContext) {
-    sessionsByCharacter.remove(characterId, ctx)
-  }
+  /** Drops [ctx]'s hold on [characterId] and answers whether it had one. */
+  fun unbindCharacter(characterId: Long, ctx: SessionContext): Boolean =
+      sessionsByCharacter.remove(characterId, ctx)
 
   fun getByCharacterId(id: Long): SessionContext? = sessionsByCharacter[id]
+
+  /**
+   * Whether a session is holding [characterId], which is what the store asks before letting a
+   * character it loaded on somebody else's behalf go again.
+   */
+  override fun isOnline(characterId: Long): Boolean = sessionsByCharacter.containsKey(characterId)
 
   fun onlineCharacterIds(): Set<Long> = sessionsByCharacter.keys
 

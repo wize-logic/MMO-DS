@@ -9,6 +9,7 @@ import de.fiereu.openmmo.maps.WarpTile
 import de.fiereu.openmmo.net.game.packets.EntityLeavePacket
 import de.fiereu.openmmo.net.game.packets.LoadMapPacket
 import de.fiereu.openmmo.net.game.packets.RenderScreenPacket
+import de.fiereu.openmmo.pokemon.SpeciesRegistry
 import de.fiereu.openmmo.server.game.session.PENDING_MAP_LOAD
 import de.fiereu.openmmo.server.game.session.SCRIPT_SCOPE
 import de.fiereu.openmmo.server.game.storage.CharacterStore
@@ -77,7 +78,7 @@ class WarpArrivalTest :
       /** Every service a warp touches, sharing one interest manager. */
       class Fixture(store: CharacterStore) {
         val mapManager = MapManager()
-        val mapLoad = MapLoadService(mapManager)
+        val mapLoad = MapLoadService(mapManager, SpeciesRegistry())
         val presence =
             PresenceService(InterestManager(), PassThroughInterestPolicy(), mapLoad, store)
         val warps = WarpService(mapLoad, mapManager, store, presence)
@@ -263,6 +264,35 @@ class WarpArrivalTest :
           runCurrent()
 
           session.sent shouldBe emptyList()
+        }
+      }
+
+      test("a warp onto a map numbered above 127 leaves the session on that map's address") {
+        runTest {
+          val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+          val charId = store.player()
+          val session =
+              FakeSession(characterId = charId, bankId = 51, mapId = 3).useScope(backgroundScope)
+          val f = Fixture(store)
+          // Half of Sinnoh's headers, and every ported one, have a map byte the JVM reads as
+          // negative. The session's address is ints, and a negative one answers to no map.
+          val high = f.mapManager.all().first { it.regionId.toInt() == 3 && it.mapId < 0 }
+
+          f.warps.executeWarp(
+              session,
+              charId,
+              warpTo(high.bankId, high.mapId).copy(targetRegionId = high.regionId),
+          )
+          runCurrent()
+
+          session.state().regionId shouldBe 3
+          session.state().bankId shouldBe (high.bankId.toInt() and 0xFF)
+          session.state().mapId shouldBe (high.mapId.toInt() and 0xFF)
+          f.mapManager.getMap(
+              session.state().regionId,
+              session.state().bankId,
+              session.state().mapId,
+          ) shouldBe high
         }
       }
 

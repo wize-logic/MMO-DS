@@ -8,7 +8,9 @@ enum class Region(val wireValue: Byte, val creatable: Boolean) {
   // plus the custom region 10, names them from string 250000+id (250010 is "the official client"),
   // and orders
   // them 0,4,1,3,2, generation order, which puts Kanto 0, Johto 4, Hoenn 1, Sinnoh 3, Unova 2.
-  SINNOH(3, creatable = true);
+  SINNOH(3, creatable = true),
+  // Johto is 4 by that same ordering.
+  JOHTO(4, creatable = false);
 
   val displayName: String = name.lowercase().replaceFirstChar { it.uppercase() }
 

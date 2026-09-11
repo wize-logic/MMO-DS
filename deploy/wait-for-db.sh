@@ -1,9 +1,5 @@
 #!/bin/sh
 # Wait until both database containers are accepting connections.
-#
-# `docker start` returns when the container is running, a good while before postgres
-# is listening, and a server that finds no database on boot just exits and retries.
-# This turns that race into an ordered start.
 set -eu
 
 LOGIN_PORT="${LOGIN_DB_PORT:-20011}"

@@ -1,0 +1,619 @@
+--- a/pc/src/pc_view.c
++++ b/pc/src/pc_view.c
+@@ -109,6 +109,7 @@
+ static int view_wide_debug;         /* PC_WIDE_DEBUG: report the gate     */
+ static int view_wide_w;             /* the width in force: 0 = native    */
+ static int view_hd_s = 1;           /* internal resolution: 1..HD_MAX    */
++static int view_hd_want = 1;        /* ...and the one the run asked for   */
+ 
+ static void view_apply_width(int w)
+ {
+@@ -127,11 +128,14 @@
+ }
+ 
+ /*
+- * Internal resolution. Set once, before any guest code runs: the rasterizer's
+- * buffers are sized from it and the published frame's shape follows, so this
+- * is not something a run changes halfway through.
++ * Internal resolution, applied. NOT once and not only at startup: the
++ * rasterizer lays its buffers out for RENDER_W_MAX x RENDER_H_MAX whatever
++ * the scale and says so at pc_gpu3d_soft_set_scale, so all three of these
++ * are integer assignments and a mask rebuild. Nothing here allocates, so a
++ * paced run can change it between two frames, which is what view_hd_adapt
++ * below does.
+  */
+-void pc_view_set_hd(int scale)
++static void view_hd_apply(int scale)
+ {
+     view_hd_s = (scale >= 2 && scale <= (int)PC_VIEW_HD_MAX) ? scale : 1;
+     pc_gpu3d_set_hd(view_hd_s);
+@@ -142,6 +146,261 @@
+     pc_gpu2d_set_hd(view_hd_s);
+ }
+ 
++void pc_view_set_hd(int scale)
++{
++    view_hd_apply(scale);
++    view_hd_want = view_hd_s;           /* what the run asked for, kept */
++}
++
++static int view_hd_dynamic(void)
++{
++    static int on = -1;
++
++    if (on < 0) {
++        const char *e = getenv("PC_HD3D_DYNAMIC");
++
++        on = (e == NULL) ? 1 : (e[0] != '0');
++    }
++    return on;
++}
++
++/*
++ * WHEN THE PICTURE IS ALWAYS THE REASON, MAKE A SMALLER PICTURE.
++ *
++ * The skip below is the answer to ONE frame the rasterizer made expensive:
++ * show the last picture again and the game keeps its sixty. It is the wrong
++ * answer to a whole SCENE the rasterizer cannot afford, because then it
++ * fires over and over, and a picture repeated every few frames for thirty
++ * seconds is the judder a player calls stutter. Measured on an RG556 at
++ * --hd3d 3: the field holds sixty with half the frame spare, and the title
++ * demo, one fill-heavy 3D scene, skips 14.6% of its pictures.
++ *
++ * The port already knows the right trade there and prints it as advice:
++ * step down a scale, because the 2D art is the same picture at every
++ * setting and only the 3D layer's sharpness changes. This takes the advice
++ * automatically, for as long as the scene needs it, instead of asking the
++ * player to take it for the whole session.
++ *
++ * A RATE, NOT A RUN, and counting consecutive frames was the first version
++ * and did not fire once. A frame the picture made late is followed by a
++ * frame with room, every time, because the pacer's own rule for a late
++ * frame is to start the next one immediately, so it gets a whole interval
++ * to do one frame's work in and lands early. Consecutive misses therefore
++ * never reach two even in a scene missing half its frames. What is wanted
++ * is how OFTEN the picture is the reason, so this leaks: four for a miss,
++ * one back for a frame with room, and a drop when the balance says the
++ * picture is behind more than about a fifth of them. In the scene that
++ * needs it that is a quarter of a second; at a twentieth of that rate it
++ * never arrives.
++ *
++ * Asymmetric on purpose. Down in a quarter of a second, so a scene that
++ * turns heavy costs a few pictures and not a hundred; up only after four
++ * clean seconds, so a scene sitting near the line does not oscillate
++ * between two sharpnesses, which would be more visible than either. Never
++ * above what the run asked for, and never in a run that asked for native,
++ * at scale 1 this is not compiled out, it simply never does anything, which
++ * keeps every byte-exact gate looking at the same code it always did.
++ *
++ * It lives inside the pacer, so an unpaced run, a benchmark, a replay
++ * being diffed, the selftests, never reaches it and renders at the fixed
++ * scale it was given.
++ */
++/*
++ * EVERY MISS WEIGHS THE SAME, and weighting it by the overrun was tried and
++ * is worse. It is the more obvious design, a frame twenty milliseconds
++ * over is worse than one two over, and it does what it promises, dropping
++ * in three frames instead of six. But arriving sooner also means recovering
++ * sooner, into a scene that has not finished being heavy: on the RG556's
++ * title demo it turned three scale changes in seventy-five seconds into
++ * eight, and a picture whose sharpness pumps up and down four times a scene
++ * is more noticeable than one that is softer throughout.
++ *
++ * The repeated-present counts came out slightly worse too, but not by
++ * enough to say so: two runs of THIS policy on the same scene read 1.31%
++ * and 1.68%, so anything inside half a point of that is the device, not the
++ * design. The change count is the part that is not noise, and it is the
++ * part a player sees. A flat weight keeps the controller slow enough to be
++ * boring, which is the whole job.
++ */
++#define VIEW_HD_MISS_W   4u             /* a picture-caused miss weighs this */
++#define VIEW_HD_DROP_AT  24u            /* ...and this much of it drops a scale */
++#define VIEW_HD_CLEAR_N  240u           /* four clean seconds put one back */
++
++/*
++ * DID THIS FRAME COST A PICTURE? One question, asked in one place, because
++ * the two things that act on the answer have to agree about it: the skip
++ * below, which drops the next picture, and the scale loop above, which
++ * decides the scene needs a smaller one. When they disagreed, one of them
++ * was always wrong about the same frame.
++ *
++ * A frame costs a picture when it is past its deadline AND both of these
++ * hold:
++ *
++ *   the picture is a real part of why, a quarter of the overrun or more.
++ *   Below that the frame was made expensive by the GAME, not the rasterizer:
++ *   a map load runs 100 ms with 1 ms of rasterize behind it, and dropping
++ *   three pictures there saves four milliseconds of a hundred while the
++ *   player, whose game has just stopped dead, watches it stay stopped three
++ *   frames longer.
++ *
++ *   the overrun is worth half a picture. THIS IS THE HALF THAT WAS MISSING,
++ *   and it cost the owner most of their pictures for days. The first test
++ *   asks whether the picture is big enough to have caused the overrun; it
++ *   never asked whether the overrun is big enough to be worth a picture, and
++ *   those come apart exactly where it matters, a frame a tenth of a
++ *   millisecond late with fifteen milliseconds of rasterize behind it passes
++ *   the first test easily, and a whole picture is spent to recover a tenth
++ *   of a millisecond.
++ *
++ * It does not stop at one, because a skipped frame is cheap: the next frame
++ * finds room, draws in full, goes a tenth of a millisecond over again, and
++ * skips again. The run settles into drawing every other picture and stays
++ * there. Measured in the owner's own Windows log (r1169 at --hd3d 3,
++ * 2026-09-07): thirteen consecutive five-second windows reading `150 of 300
++ * frames late, 150 pictures skipped`, the late frames averaging 16.78 ms of
++ * work against a 16.67 ms budget. A machine seven parts in a thousand short
++ * of the frame was giving up half of every picture it drew, and the advice
++ * line concluded that it `cannot draw every frame at --hd3d 3`. Reproduced
++ * here headless on the Jubilife station at --hd3d 2, 684 columns, one render
++ * thread: five straight windows of exactly 150 of 300, and 225 of 300 at
++ * --hd3d 3, which is the three-in-a-row cap drawing one picture in four.
++ *
++ * WHY HALF A PICTURE AND NOT A WHOLE ONE. A skip saves exactly picture_ns,
++ * the rasterize and the publish it stands in front of, which is what that
++ * variable is measured as, so a whole one is the level at which a skip
++ * pays the debt off and no more. But the threshold does NOT set how often a
++ * skip happens: that is fixed by how far behind the machine actually falls
++ * per frame, one skip per (picture_ns / that), which is the fewest that can
++ * hold sixty and is the same at any threshold. What the threshold sets is
++ * how much debt is CARRIED between skips, and carried debt is input latency
++ * and reads as `slip` in a trace, where a large one has already been
++ * misdiagnosed once as the Windows timer. Half a picture halves both and
++ * costs nothing.
++ */
++static int view_picture_is_the_bill(long long ahead,
++                                    unsigned long long picture_ns)
++{
++    unsigned long long debt;
++
++    if (ahead >= 0) {
++        return 0;
++    }
++    debt = (unsigned long long)(-ahead);
++    return picture_ns * 4ull >= debt && debt * 2ull >= picture_ns;
++}
++
++/*
++ * WOULD THE SCALE ABOVE STILL FIT? ASK BEFORE GOING BACK UP TO IT.
++ *
++ * "Four clean seconds put one back" is a rule about the scale being drawn
++ * NOW, and that is not the question being asked. A scene has room at 1x
++ * precisely BECAUSE it is at 1x, and the scene likeliest to have room at 1x
++ * is the one just dropped out of 2x for missing its frames. So the counter
++ * fills, the scale goes up, the misses start again, six of them put it back
++ * down, and the loop's two halves spend the session undoing each other.
++ *
++ * Measured here on the Jubilife station at --hd3d 4, 684 columns, one render
++ * thread, over two minutes: twenty drops against seventeen recoveries,
++ * settling on nothing. A player watching that sees the 3D layer's sharpness
++ * pump up and down all the way through a scene, which is what the counters'
++ * asymmetry (down in a quarter of a second, up after four clean ones) was
++ * chosen to prevent. It cannot: the asymmetry sets that oscillation's PERIOD
++ * and nothing in the loop tests the thing that decides whether it happens.
++ *
++ * WHAT THE SCALE ABOVE WOULD COST, since the scale is a multiplier on each
++ * axis: at s+1 the rasterizer covers ((s+1)/s)^2 of the pixels it covers at
++ * s, so the picture costs that much more, ((2s+1)/s^2) MORE, in the form
++ * this needs. Cost does not follow pixel count exactly, because setup, the
++ * edge walk and the per-polygon work go as the first power or as none;
++ * measured on this station with the pacer OFF, so that no skipped frame
++ * dilutes the mean, the 3D span went 11.42 ms a frame at 2x to 22.02 at 3x,
++ * which is 1.93x where the pixels alone say 2.25x. The estimate is therefore
++ * about a sixth high, and high is the safe direction here: it is a margin,
++ * in a loop that has just been shown to move too readily.
++ *
++ * Estimating from the CURRENT picture rather than remembering what the scale
++ * above cost last time is deliberate. A remembered cost is the cost of the
++ * scene that failed, and by the time the loop wants to go back up the player
++ * has usually walked somewhere else, so one heavy town would hold the
++ * picture soft for the whole of the light cave after it.
++ *
++ * Both of this scale's terms are taken over the WHOLE clean stretch and not
++ * off its last frame, the worst picture in it and the least slack, so one
++ * quiet moment in a heavy scene cannot let the loop out. They may come from
++ * different frames, which pairs a worst with a least and errs toward staying
++ * put; on the frame that decides it they are the same frame. And the room
++ * left over has to be the same third of a frame that the branch below calls
++ * comfortable, so the scale that lands is one the scene has room in rather
++ * than one it can only just make.
++ */
++static int view_hd_step_up_fits(long long least_ahead,
++                                unsigned long long worst_picture)
++{
++    unsigned long long s = (unsigned long long)view_hd_s;
++    unsigned long long extra;
++
++    if (s < 1ull || least_ahead <= 0) {
++        return 0;
++    }
++    extra = worst_picture * (2ull * s + 1ull) / (s * s);
++    return (unsigned long long)least_ahead >= extra + 5000000ull;
++}
++
++static void view_hd_adapt(long long ahead, unsigned long long picture_ns)
++{
++    static unsigned over, under;
++    /* The clean stretch's own worst case, which is what the step up is
++     * tested against; both go whenever the stretch does. */
++    static unsigned long long worst_picture;
++    static long long least_ahead;
++
++    if (view_hd_want <= 1 || !view_hd_dynamic()) {
++        return;
++    }
++    if (view_picture_is_the_bill(ahead, picture_ns)) {
++        /* Late, the picture is a real part of why, and it cost one. A frame
++         * that went over by less than that is the pacer carrying a little
++         * debt, not a scene the machine cannot draw, and lowering the
++         * scale for it would trade sharpness away for nothing. */
++        under = 0;
++        worst_picture = 0ull;
++        least_ahead = 0;
++        over += VIEW_HD_MISS_W;
++        if (over >= VIEW_HD_DROP_AT && view_hd_s > 1) {
++            view_hd_apply(view_hd_s - 1);
++            over = 0;
++            fprintf(stderr, "pc-pace: the 3D layer cannot hold this scene --"
++                            " internal resolution now %dx (asked %dx)\n",
++                    view_hd_s, view_hd_want);
++            fflush(stderr);
++        }
++    } else if (ahead > 5000000LL) {
++        /* A third of the frame to spare. */
++        if (over > 0u) over--;
++        if (picture_ns > worst_picture) worst_picture = picture_ns;
++        if (least_ahead == 0 || ahead < least_ahead) least_ahead = ahead;
++        if (++under >= VIEW_HD_CLEAR_N && view_hd_s < view_hd_want
++            && view_hd_step_up_fits(least_ahead, worst_picture)) {
++            view_hd_apply(view_hd_s + 1);
++            under = 0;
++            /* Measured at the scale just left behind, so worth nothing at
++             * the one just arrived at. */
++            worst_picture = 0ull;
++            least_ahead = 0;
++            fprintf(stderr, "pc-pace: room again, internal resolution back"
++                            " to %dx (asked %dx)\n",
++                    view_hd_s, view_hd_want);
++            fflush(stderr);
++        }
++    } else {
++        /* Neither late nor comfortable: it counts for the recovery, which
++         * wants a clean stretch, and against nothing. */
++        under = 0;
++        worst_picture = 0ull;
++        least_ahead = 0;
++    }
++}
++
+ void pc_view_set_aspect(int width)
+ {
+     view_aspect_mode = width;
+@@ -1098,6 +1357,17 @@
+         /* What dropping a picture would save, from the last frame that drew
+          * one, see where the skip is decided. */
+         static unsigned long long picture_ns, render_mark;
++        /* Refreshes the display went past with no frame of the game behind
++         * them, and the frames made back, CATCHING UP, below. */
++        static long long debt;
++        static unsigned caught;
++        static int catching;
++        /* The display's grid, counted: the refresh the lock began on and
++         * the frames run since, so the debt is exact and not a rounding of
++         * each frame's own overrun, see CATCHING UP. */
++        static long long slot0;
++        static long long slots_run;
++        static int was_on_display;
+ 
+         if (pace < 0) {
+             const char *env = getenv("PC_PACE");
+@@ -1123,19 +1393,202 @@
+         }
+ 
+         if (pace && !turbo_held) {
++            /*
++             * WHERE THIS PROCESS CAN SEE A DISPLAY, THE DISPLAY IS THE CLOCK.
++             *
++             * A game paced against CLOCK_MONOTONIC and a window presenting on
++             * a panel's vsync keep two clocks that never agree: different
++             * crystals, so different rates, and a phase between them that
++             * walks. Every time it walks past the moment the window samples
++             * the page, the player is shown one frame twice and the next one
++             * not at all. And because the publish instant is the END of the
++             * frame's work, 3 ms on a quiet frame, 15 on a busy one, the
++             * crossing is not one rare event at the beat rate but a burst of
++             * them whenever the two clocks are near. Measured on the RG556
++             * with the window counting what actually reached the panel: about
++             * two such pairs a SECOND, against the one every 5.75 s that the
++             * difference in rate by itself accounts for.
++             *
++             * So where the window is in this process, an app is, it marks
++             * every refresh (mmo/src/platform.c) and the deadline below
++             * becomes the next one. The guest then wakes ON a refresh, spends
++             * the interval making its frame, and publishes before the refresh
++             * the window samples at: exactly one new frame per present, with
++             * no phase left to walk.
++             *
++             * Nothing marks on the desktop, where the window is a separate
++             * process, nor in a headless run, nor while an app has no
++             * surface. Every one of those keeps the DS's own frame.
++             */
++            extern int mmo_plat_vsync_next(long long *when_ns,
++                                           long long *period_ns);
+             struct timespec now;
+-
+-            next.tv_nsec += 16666667L;      /* 1/60 s */
++            long long refresh = 0, refresh_period = 0, missed = 0;
++            long long prev = (long long)next.tv_sec * 1000000000LL
++                             + (long long)next.tv_nsec;
++            int on_display = mmo_plat_vsync_next(&refresh, &refresh_period);
++            /* Whether the frame that just ended was one of the made-up ones,
++             * so the scale loop below does not read its empty budget as a
++             * scene with room. */
++            int made_up = catching;
++
++            catching = 0;
++
++            /*
++             * THE DS's OWN FRAME, NOT A ROUND SIXTIETH. A frame is 560,190
++             * system cycles (pc_os_lite.c hands exactly that to
++             * pc_audio_advance) at 33,513,982 Hz, which is 59.8261 frames a
++             * second and 16,715,113 ns each, not 60 and not 16,666,667.
++             * Pacing to the round number ran the guest 0.291 per cent fast,
++             * and the place that showed was the SOUND: the mixer makes its
++             * samples per guest cycle, so it produced 48,139.5 of them for
++             * every 48,000 an audio device took, and the reader's governor
++             * ground the surplus away at about 140 frames a second forever.
++             * Measured on the handheld: `trimmed` climbing 140 a second for
++             * the whole of a 92-second run, which is 120 splices a second in
++             * the waveform, a 60 Hz graininess over every held note.
++             */
++            next.tv_nsec += 16715113L;      /* 560190 / 33513982 s */
+             if (next.tv_nsec >= 1000000000L) {
+                 next.tv_nsec -= 1000000000L;
+                 next.tv_sec += 1;
+             }
++            /* ...unless a display said when its next refresh is due, in which
++             * case THAT is the deadline and the sixtieth above was only what
++             * to fall back on. */
++            if (on_display) {
++                /* How many refreshes the deadline moved by. One is a frame
++                 * that fitted in its interval; two or more is a frame the
++                 * display went past while it was still being made, which is
++                 * the miss `ahead` below has to go on reporting. */
++                if (refresh > prev && refresh_period > 0) {
++                    missed = (refresh - prev + refresh_period / 2)
++                             / refresh_period - 1;
++                    /* Further behind than any frame could be is the clock
++                     * changing hands, not a miss: the deadline moves to the
++                     * display and this frame is charged nothing for it. */
++                    if (missed < 0 || missed > 8) missed = 0;
++                }
++                next.tv_sec = (time_t)(refresh / 1000000000LL);
++                next.tv_nsec = (long)(refresh % 1000000000LL);
++            }
+             /* Fell more than ~6 frames behind (a slow scene, a paused
+              * debugger): re-anchor instead of sprinting to catch up. */
+             clock_gettime(CLOCK_MONOTONIC, &now);
+             {
+-                long long ahead = (next.tv_sec - now.tv_sec) * 1000000000LL
++                long long until = (next.tv_sec - now.tv_sec) * 1000000000LL
+                                   + (next.tv_nsec - now.tv_nsec);
++                /* HOW LONG TO WAIT AND HOW MUCH BUDGET WAS LEFT, and they are
++                 * one number only while frames fit. A frame the display went
++                 * past still waits for the next refresh; `ahead` is the half
++                 * that says it was late, so the counters below and the
++                 * picture-skip keep the meaning they had. Off a display
++                 * `missed` is zero and the two are equal, as before. */
++                long long ahead = until - missed * refresh_period;
++
++                /*
++                 * LATE MEANS RUN, NOT WAIT. Aiming at the next refresh when
++                 * this frame has already gone past one would spend the rest
++                 * of that interval doing nothing: a whole frame of simulation
++                 * not run, and, because the mixer makes one frame's audio
++                 * per frame, a whole frame of sound the ring never gets.
++                 * Measured on the handheld: ten late frames in five seconds
++                 * emptied a 200 ms cushion and the sound dropped out, on a
++                 * machine that was otherwise holding 60 with milliseconds to
++                 * spare. So a frame that is already late starts NOW, and the
++                 * display's grid is picked up again by the first frame that
++                 * fits in one. `ahead` above has already charged it.
++                 */
++                if (missed > 0) {
++                    until = 0;
++                    next = now;
++                }
++
++                /*
++                 * CATCHING UP. A refresh the display went past is a frame of
++                 * game time not made, and until now nothing ever made it:
++                 * starting the next frame at once stops the loss growing,
++                 * and then the next refresh is the deadline again, so the
++                 * game runs on a frame behind the display for every refresh
++                 * it missed, for good, because the display's grid has no
++                 * memory of it. The sound is where that shows. The mixer
++                 * makes one frame of audio per frame, so every missed
++                 * refresh is sixteen milliseconds taken out of the window's
++                 * cushion and never put back. Measured on the RG556's title
++                 * demo (2026-09-10): ten missed refreshes in five seconds
++                 * took a 198 ms cushion to 22, and the window's reader then
++                 * spent eighteen seconds at its full half a per cent flat
++                 * putting it back. A heavier scene, or a second one before
++                 * the refill, empties the ring and the sound stops until it
++                 * is primed again, which a player reports as cutting out.
++                 *
++                 * So the missed refreshes are a debt, and the debt is paid
++                 * in frames without pictures: while any is owed the next
++                 * frame starts now and draws nothing, a few milliseconds
++                 * against the sixteen a drawn one takes, and the game is
++                 * back on the display's grid within a refresh or two. The
++                 * pictures it skips are pictures the panel was already
++                 * repeating; the audio those frames make is exactly the
++                 * audio the ring was short of. Every emulator does this and
++                 * calls it frame skip.
++                 *
++                 * Capped. A debt past half a second is a stall the player
++                 * has already sat through, an app coming back from the
++                 * home screen, a debugger, and sprinting thirty frames of
++                 * game past them is not the answer to that; it is dropped
++                 * and the grid is picked up from here, which is what the
++                 * clamp on `missed` above already does for a single frame
++                 * that long. Nothing is owed off a display: the guest keeps
++                 * the console's own frame there and re-anchors as it always
++                 * did.
++                 */
++                /*
++                 * THE DEBT IS COUNTED ON THE GRID, NOT SUMMED FROM `missed`.
++                 * `missed` rounds each frame's own overrun to whole refreshes
++                 * against a deadline that "late means run" has just moved off
++                 * the grid, and the fractions it drops add up: measured on
++                 * the RG556 (2026-09-11), a heavy five seconds with 55 late
++                 * frames made 42 up and left about two owed, the cushion sat
++                 * 30 ms low for ten seconds and the governor answered with a
++                 * pitch glide. So the debt is the number of refreshes the
++                 * display has shown since the lock began minus the number of
++                 * frames the game has run since, two integers that cannot
++                 * drift, and a lock that comes or goes starts the count
++                 * over.
++                 */
++                if (on_display && refresh_period > 0) {
++                    if (!was_on_display) {
++                        slot0 = refresh;
++                        slots_run = 0;
++                    } else {
++                        slots_run++;
++                    }
++                    debt = (refresh - slot0 + refresh_period / 2)
++                           / refresh_period - slots_run;
++                    if (debt < 0) {
++                        /* Ahead of the grid (a frame ran before its refresh
++                         * moved): nothing owed, and the count keeps up. */
++                        debt = 0;
++                        slot0 = refresh;
++                        slots_run = 0;
++                    }
++                    if (debt > 30) {
++                        debt = 0;
++                        slot0 = refresh;
++                        slots_run = 0;
++                    }
++                } else {
++                    debt = 0;
++                }
++                was_on_display = on_display;
++                if (debt > 0) {
++                    caught++;
++                    catching = 1;
++                    until = 0;
++                    next = now;
++                    view_skip_next = 1;
++                    pc_gpu3d_soft_skip_next();
++                }
+ 
+                 /* The period that just ended, split. Taken here because
+                  * everything but the sleep has happened by now, and the
+@@ -1204,9 +1657,30 @@
+                     }
+                 }
+ 
+-                if (ahead < -100000000LL) {
+-                    next = now;         /* fell behind: re-anchor, no sprint */
+-                } else if (ahead > 0) {
++                /*
++                 * OFF A DISPLAY THE SAME DEBT IS IMPLICIT: `next` walks one
++                 * console frame per frame whatever the clock says, so a
++                 * frame that fell behind is followed by frames that do not
++                 * sleep until the clock is caught, the sprint the note
++                 * below refused beyond a hundred milliseconds. That was the
++                 * wrong place to give up. Measured on the RG556 (2026-09-11)
++                 * at a session's start, before the display had been
++                 * measured well enough to pace on: a join blocked the guest
++                 * for 175 ms, the re-anchor threw those frames away, and the
++                 * map load that followed found 25 ms of cushion instead of
++                 * 200 and cut the sound twice in its first second. So the
++                 * limit is the same half second as the display's, and past
++                 * two frames behind the sprint draws no pictures either,
++                 * the panel was showing the last one anyway.
++                 */
++                if (!on_display && ahead < -500000000LL) {
++                    next = now;         /* half a second behind: re-anchor */
++                } else if (!on_display && ahead < -2LL * 16715113LL) {
++                    caught++;
++                    catching = 1;
++                    view_skip_next = 1;
++                    pc_gpu3d_soft_skip_next();
++                } else if (until > 0) {
+                     /* Relative sleep rather than TIMER_ABSTIME: mingw's
+                      * winpthreads has nanosleep but not clock_nanosleep.
+                      *
+@@ -1220,8 +1694,8 @@
+                      * and the waitable timer that answers it. The `slip`
+                      * column below is what that measurement looks like from
+                      * in here, so it cannot go unnoticed a third time. */
+-                    struct timespec rem = { (time_t)(ahead / 1000000000LL),
+-                                            (long)(ahead % 1000000000LL) };
++                    struct timespec rem = { (time_t)(until / 1000000000LL),
++                                            (long)(until % 1000000000LL) };
+                     view_sleep(&rem);
+                 }
+ 
+@@ -1300,7 +1774,10 @@
+                  * fault of their own, and those were being skipped too.
+                  *
+                  * So the picture has to be a real part of why the frame went
+-                 * over -- a quarter of it or more. A machine that genuinely
++                 * over -- a quarter of it or more -- and the overrun has to
++                 * be worth half a picture. Both halves of that, and why the
++                 * second one was the whole of the owner's stutter, are at
++                 * view_picture_is_the_bill above. A machine that genuinely
+                  * cannot afford --hd3d 4 is over by a few milliseconds with
+                  * fifteen of rasterize behind it and still skips, which is
+                  * the case this was built for.
+@@ -1308,8 +1785,8 @@
+                 if (view_hd_s > 1) {
+                     static unsigned run;
+ 
+-                    if (ahead <= 0 && run < 3u
+-                        && picture_ns * 4ull >= (unsigned long long)(-ahead)) {
++                    if (run < 3u
++                        && view_picture_is_the_bill(ahead, picture_ns)) {
+                         run++;
+                         skipped++;
+                         view_skip_next = 1;
+@@ -1319,6 +1796,14 @@
+                     }
+                 }
+ 
++                /* The same verdict, asked about the scene rather than about
++                 * this frame: a picture that keeps being the reason wants a
++                 * smaller picture, not another repeat of the last one. A
++                 * made-up frame drew nothing and says nothing about either. */
++                if (!made_up) {
++                    view_hd_adapt(ahead, picture_ns);
++                }
++
+                 /*
+                  * A HIGHER INTERNAL RESOLUTION THAN THE MACHINE CAN HOLD IS
+                  * THE ONE WAY THIS SETTING FAILS SILENTLY, so it says so.
+@@ -1361,6 +1846,11 @@
+                                             " %u pictures skipped)\n",
+                                     dt > 0.0 ? since / dt : 0.0, dt,
+                                     late, paced ? paced : since, skipped);
++                            if (caught != 0) {
++                                fprintf(stderr, "pc-pace:   %u missed"
++                                                " refreshes made up without"
++                                                " a picture\n", caught);
++                            }
+                             fprintf(stderr, "pc-pace:   every frame  work"
+                                             " %.2f (max %.2f)  publish %.2f"
+                                             " (max %.2f)  slip %.2f (max"
+@@ -1432,7 +1922,7 @@
+                                 view_hd_s, paced, late, skipped,
+                                 view_hd_s - 1);
+                     }
+-                    paced = late = skipped = 0;
++                    paced = late = skipped = caught = 0;
+                 }
+             }
+         }

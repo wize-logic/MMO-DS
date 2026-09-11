@@ -36,6 +36,7 @@ import de.fiereu.openmmo.server.game.session.PENDING_MAP_LOAD
 import de.fiereu.openmmo.server.game.session.PLAYER_STATE
 import de.fiereu.openmmo.server.game.session.PlayerState
 import de.fiereu.openmmo.server.game.session.SessionRegistry
+import de.fiereu.openmmo.server.game.session.setMapAddress
 import de.fiereu.openmmo.server.game.storage.CharacterNameTakenException
 import de.fiereu.openmmo.server.game.storage.CharacterStore
 import de.fiereu.openmmo.server.game.storage.SaveBlockRepository
@@ -73,15 +74,18 @@ constructor(
     private val violations: ViolationLog,
 ) {
 
-  /**
-   * How often a session may ask for its player again. The answer is the whole rejoin burst: the
-   * map, the npc spawns, the friend, guild and mail sends and the entry script. It is the most
-   * expensive thing an authenticated session can ask for in one packet.
-   */
+  /** How often a session may ask for its player again. */
   private val requestPlayerPace = PaceLimit(burst = 8.0, perSecond = 1.0)
 
   fun onJoinGame(event: PacketEvent<JoinPacket>) {
     val ctx = event.session
+    // One join per connection, which is what a client sends: every captured session carries
+    // exactly one, and the way back to the character list is a Logout that disconnects.
+    val joined = ctx.attributes[PLAYER_STATE]
+    if (joined != null) {
+      log.warn { "Session already joined as user ${joined.userId} asked to join again, refused" }
+      return
+    }
     val authData = event.packet.authData
 
     if (authData !is NewAuthData) {
@@ -358,9 +362,8 @@ constructor(
       }
     }
 
-    state.regionId = info.positionRegionId.toInt()
-    state.bankId = info.positionBankId.toInt()
-    state.mapId = info.positionMapId.toInt()
+    state.setMapAddress(
+        info.positionRegionId.toInt(), info.positionBankId.toInt(), info.positionMapId.toInt())
     state.x = info.positionX
     state.y = info.positionY
     state.facingDirection = info.positionFacing
@@ -434,9 +437,7 @@ constructor(
     val bankId = info.positionBankId.toInt()
     val mapId = info.positionMapId.toInt()
     val regionId = info.positionRegionId.toInt()
-    state.regionId = regionId
-    state.bankId = bankId
-    state.mapId = mapId
+    state.setMapAddress(regionId, bankId, mapId)
     state.x = info.positionX
     state.y = info.positionY
 

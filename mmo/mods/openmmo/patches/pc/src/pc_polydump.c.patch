@@ -1,0 +1,28 @@
+--- a/pc/src/pc_polydump.c	2026-09-03 01:21:01.734127086 -0400
++++ b/pc/src/pc_polydump.c	2026-09-03 01:21:01.753669233 -0400
+@@ -145,6 +145,25 @@
+                     (int)p->Vertices[v]->FinalPosition[0],
+                     (int)p->Vertices[v]->FinalPosition[1]);
+         }
++        /* openmmo: PC_DUMP_POLYS_CLIP adds each vertex's clip-space position
++         * and whether the clipper made it, which is what a screen coordinate
++         * that landed in the wrong place has to be traced back through. */
++        {
++            static int clip_on = -1;
++
++            if (clip_on < 0) clip_on = getenv("PC_DUMP_POLYS_CLIP") != NULL;
++            if (clip_on) {
++                fprintf(poly_out, "  clip");
++                for (v = 0; v < p->NumVertices && v < 10; v++) {
++                    fprintf(poly_out, " %d,%d,%d,%d%s",
++                            (int)p->Vertices[v]->Position[0],
++                            (int)p->Vertices[v]->Position[1],
++                            (int)p->Vertices[v]->Position[2],
++                            (int)p->Vertices[v]->Position[3],
++                            p->Vertices[v]->Clipped ? "c" : "");
++                }
++            }
++        }
+         fputc('\n', poly_out);
+     }
+     fflush(poly_out);

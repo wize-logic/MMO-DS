@@ -9,27 +9,7 @@ import javax.inject.Singleton
 internal fun localMapKey(bankId: Int, mapId: Int): Int =
     ((bankId and 0xFF) shl 8) or (mapId and 0xFF)
 
-/**
- * Which maps a scene could honestly have walked somebody to from the one they were on.
- *
- * A client that runs its own field scenes reports where it ended up. That report was checked three
- * ways: the map exists, the tile is inside it, the tile is not collision. All three are about the
- * destination being a real place, none about it being a reachable one, so any map in the region and
- * any standable tile was accepted, and the region is the whole game.
- *
- * The map data already says what a warp can do. A scene moves a player through a door, a staircase,
- * a map edge, or back the way they came, and every one of those is an edge of the warp graph the
- * maps describe, so the destination has to be one hop away or the map they are already on.
- *
- * Both directions on purpose. A door is a warp tile naming a tile on another map and the return
- * trip is usually the matching tile, but not always, and taking both costs nothing a cheat can use:
- * a one hop neighbour is somewhere the player could have walked in a few seconds.
- *
- * Heal locations are in the set as well, for the region rather than the map, because a blackout is
- * the one legitimate move that crosses the world.
- *
- * Computed once per map and kept: the graph is fixed once the maps are registered.
- */
+/** Which maps a scene could honestly have walked somebody to from the one they were on. */
 @Singleton
 class WarpNeighbours @Inject constructor(private val mapManager: MapManager) {
 
@@ -50,8 +30,8 @@ class WarpNeighbours @Inject constructor(private val mapManager: MapManager) {
     for (map in mapManager.all()) {
       if (map.regionId.toInt() and 0xFF != regionId and 0xFF) continue
       val key = localMapKey(map.bankId.toInt(), map.mapId.toInt())
-      // Forward: what this map's exits name. Reverse: the maps whose exits name this one. A
-      // dynamic warp names nothing until it is set, so its placeholder is not an edge.
+      // Forward: what this map's own exits name. Reverse: the maps whose exits name this one.
+      // A dynamic warp names nothing until it is set, so its placeholder target is not an edge.
       val exits =
           map.warps
               .filterNot { it.dynamic }

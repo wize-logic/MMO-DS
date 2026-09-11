@@ -13,6 +13,9 @@ import de.fiereu.openmmo.story.generated.hoenn.HoennVars
 import de.fiereu.openmmo.story.generated.sinnoh.SinnohFlags
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 
@@ -38,6 +41,35 @@ class NpcStoryFlagSyncTest :
           npcs.spawnNpcsForMap(session, bankId = 50, mapId = 9, regionId = 1)
 
           (npcs.getNpcEntityId(1, 50, 9, 3) != null) shouldBe true
+        }
+      }
+
+      test("two players arriving at once are told the same id for the same npc") {
+        runTest {
+          val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
+          val npcs = NpcService(MapManager(), store)
+          val threads = 8
+          val npcsPerMap = 64
+          val start = CountDownLatch(1)
+          val seen = ConcurrentHashMap<Int, MutableSet<Long>>()
+          val pool =
+              (0 until threads).map { _ ->
+                Thread {
+                  start.await()
+                  for (i in 0 until npcsPerMap) {
+                    val id = npcs.entityIdFor(1, 50, 9, i)
+                    seen.computeIfAbsent(i) { Collections.synchronizedSet(mutableSetOf()) }.add(id)
+                  }
+                }
+              }
+          pool.forEach { it.start() }
+          start.countDown()
+          pool.forEach { it.join() }
+
+          // One id per npc, whoever asked first, and never one npc's id handed to another.
+          seen.keys.size shouldBe npcsPerMap
+          seen.values.count { it.size != 1 } shouldBe 0
+          seen.values.flatten().toSet().size shouldBe npcsPerMap
         }
       }
 

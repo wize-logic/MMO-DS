@@ -19,6 +19,7 @@
 #include "endpoint.h"
 #include "game.h"
 #include "entity.h"
+#include "follower.h"
 #include "idmap.h"
 #include "region.h"
 #include "appearance.h"
@@ -49,6 +50,9 @@ typedef enum {
 } phase;
 
 #define EVQ_CAP 32
+/* The inflate scratch: one whole decoded game frame. Matches the server's
+ * inflate ceiling (network/.../CompressionDecoder.kt DEFAULT_MAX_INFLATED). */
+#define OPENMMO_GBUF_CAP ((size_t)0xFFFF * 16)
 
 /*
  * A preloaded/loaded map's server-side scene and grid, keyed by (bank,map) inside the current
@@ -80,11 +84,15 @@ struct openmmo_client {
      * refusal means the token is spent and not that anyone typed anything
      * wrong. */
     int          used_token;
+    /* The state byte of the last LoginResponse that refused this session, or -1
+     * before one has. A caller retrying a broken link needs to tell a server
+     * that is down from one that answered and said no. */
+    int          login_refusal;
     openmmo_mode mode;
     int          local_scripts;  /* this client runs the field scripts itself */
     int          timeout_s;
     int          allow_undrawable_region;
-    char         create_name[MMO_CHAR_NAME_MAX + 1];
+    char         create_name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
     int          create_gender;
     int          create_region;
     int          create_skin_region;
@@ -92,7 +100,7 @@ struct openmmo_client {
     u16          create_skin_word[MMO_SKIN_SLOTS];
     int          create_name_overflow;
     int          char_count_before;
-    char         select_name[MMO_CHAR_NAME_MAX + 1];
+    char         select_name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
     int          select_index;
     int          select_region;
     int          select_how;
@@ -105,6 +113,9 @@ struct openmmo_client {
     openmmo_status     status;
     mmo_net            net;
     mmo_session        sess;
+    /* Nonzero pins every ClientHello's timestamp instead of reading the clock,
+     * so an offline fixture can be signed for one (openmmo_client_pin_hello_time). */
+    s64                pinned_hello_time;
     mmo_game_stream    gstream;
     mmo_gs_nodes       nodes;
     mmo_buf            acc;        /* frame accumulator across pumps */
@@ -163,6 +174,9 @@ struct openmmo_client {
      * Seated by the server's 0xCB on join; the deltas after that run the other
      * way, because the VM writing them is this client's. */
     openmmo_script_state script_state;
+    /* What the server said about the last save this client offered (0xCE).
+     * `import_answer.status` is MMO_IMPORT_STATUS_NONE until one arrives. */
+    openmmo_import_answer import_answer;
     /* The server-owned party (see openmmo_party), seated from every party
      * container the server sends and never written back. */
     openmmo_party party;
@@ -171,6 +185,10 @@ struct openmmo_client {
      * the client; `ct_scratch` holds one packet's worth of decoded records, which
      * is too large to stand on the stack. */
     openmmo_storage storage;
+    /* Who the server says is boarding at the day care (see openmmo_storage),
+     * seated from every day care container. Two slots, so `mon` is allocated at
+     * OPENMMO_DAYCARE_MAX rather than the PC's 660. */
+    openmmo_storage daycare;
     /* The server-owned bag (see openmmo_bag), seated from every 0x40 snapshot
      * and every 0x42 stack update, and never written back. */
     openmmo_bag bag;
@@ -278,10 +296,13 @@ struct openmmo_client {
     mmo_map_grid maps[MMO_MAP_REG_MAX];
     int nmaps;
     int map_region;
-    /* Scratch for decoding one game frame. The S->C inflater is stateful, so
-     * every compressed frame in the join-to-world burst must be inflated in full
-     * even when its body is ignored; this holds the largest such frame. */
-    u8 gbuf[65536];
+    /*
+     * Scratch for decoding one game frame. The S->C inflater is stateful, so every compressed
+     * frame in the join-to-world burst must be inflated in full even when its body is ignored;
+     * this holds the largest such frame.
+     */
+    u8 *gbuf;
+    size_t gbuf_cap;
 
     openmmo_event evq[EVQ_CAP];
     int           evq_head, evq_tail;
@@ -418,7 +439,7 @@ static void begin_handshake(openmmo_client *c, phase next, openmmo_status st)
 
     mmo_wbuf out;
     mmo_wbuf_init(&out);
-    if (mmo_session_start(&c->sess, &out) != 0) {
+    if (mmo_session_start_at(&c->sess, &out, c->pinned_hello_time) != 0) {
         mmo_wbuf_free(&out);
         fail(c, c->sess.errmsg[0] ? c->sess.errmsg : "handshake: no entropy");
         return;
@@ -638,6 +659,19 @@ static void connect_game_server(openmmo_client *c)
     picked = mmo_handoff_pick_host(&c->nodes, login_host, game_host,
                                    sizeof game_host, why, sizeof why);
     openmmo_endpoint_forget(login_host, sizeof login_host);
+    /*
+     * The development seam beside OPENMMO_GAMEPORT: a build from this tree dials the game
+     * server named here instead of the advertised one, and a release reads it as unset
+     * (endpoint.h's rule: it changes where the program goes).
+     */
+    {
+        const char *gh = openmmo_dev_env("OPENMMO_GAMEHOST");
+
+        if (gh != NULL && gh[0] != '\0' && strlen(gh) < sizeof game_host) {
+            snprintf(game_host, sizeof game_host, "%s", gh);
+            picked = 0;
+        }
+    }
     if (picked != 0) {
         fail(c, why[0] ? why : "handoff: no game-server address");
         return;
@@ -682,6 +716,8 @@ static void handle_login_response(openmmo_client *c, const u8 *body, size_t blen
     int state = mmo_login_read_response_state(plain + 1, n - 1);
     if (state != MMO_LOGIN_AUTHED) {
         char why[128];
+
+        c->login_refusal = state;
 
         /*
          * A token the server will not take is spent: drop it so the next start asks for a
@@ -750,7 +786,7 @@ static void handle_gs_nodes(openmmo_client *c, const u8 *body, size_t blen)
 static size_t recv_game_frame(openmmo_client *c, const u8 *body, size_t blen, u8 *opcode)
 {
     return mmo_game_recv(&c->sess.crypto, &c->gstream, body, blen,
-                         opcode, c->gbuf, sizeof c->gbuf);
+                         opcode, c->gbuf, c->gbuf_cap);
 }
 
 /* JoinResponse accepted: the account is in, but the client is not yet standing in
@@ -1075,6 +1111,33 @@ static void handle_characters_list(openmmo_client *c, const u8 *body, size_t ble
  * on join is absolute, every flag and var it holds, so it replaces the store rather than
  * merging into it.
  */
+/* The server's one answer to a save this client offered. Recorded, never acted
+ * on here: what happens next is the caller's, the CLI prints it, and the
+ * window's front door shows it beside the row the player pressed. */
+static void seat_import_answer(openmmo_client *c, size_t n)
+{
+    openmmo_import_answer *a = &c->import_answer;
+
+    if (mmo_game_read_offline_result(c->gbuf, n, &a->status,
+                                     a->message, sizeof a->message,
+                                     &a->notes[0][0], sizeof a->notes[0],
+                                     MMO_IMPORT_NOTE_MAX,
+                                     &a->nnotes, &a->nnotes_sent,
+                                     &a->wants_chain) != 0) {
+        a->status = MMO_IMPORT_STATUS_NONE;
+        a->nnotes = 0;
+        a->nnotes_sent = 0;
+        a->wants_chain = 0;
+        return;
+    }
+    /*
+     * A status this build has no word for reads as no answer at all, which is what a caller
+     * waiting on one already handles.
+     */
+    if (a->status < 0 || a->status >= MMO_IMPORT_STATUS_COUNT)
+        a->status = MMO_IMPORT_STATUS_NONE;
+}
+
 static void seat_script_state(openmmo_client *c, size_t n)
 {
     /* Static, not automatic: a whole seat is 9.9 KB of scratch and this runs on
@@ -1131,6 +1194,12 @@ static void seat_script_state(openmmo_client *c, size_t n)
             c->script_state.running_shoes = flags[i].on ? 1 : 0;
             continue;
         }
+        if (id >= MMO_SCRIPT_FLAG_BADGE_BASE
+            && id < MMO_SCRIPT_FLAG_BADGE_BASE + MMO_SCRIPT_BADGE_COUNT) {
+            if (flags[i].on)
+                c->script_state.badges |= 1u << (id - MMO_SCRIPT_FLAG_BADGE_BASE);
+            continue;
+        }
         if (id < 0 || id >= MMO_SCRIPT_FLAG_MAX) {
             c->script_state.out_of_range++;
             continue;
@@ -1142,6 +1211,11 @@ static void seat_script_state(openmmo_client *c, size_t n)
     }
     for (int i = 0; i < vstored; i++) {
         int id = (int)vars[i].id - MMO_SCRIPT_VAR_BASE;
+        if ((int)vars[i].id == MMO_SCRIPT_VAR_RESPAWN) {
+            /* Synthetic, like the shoes: the engine's black-out warp id. */
+            c->script_state.respawn = vars[i].value;
+            continue;
+        }
         if (id < 0 || id >= MMO_SCRIPT_VAR_MAX) {
             c->script_state.out_of_range++;
             continue;
@@ -1214,8 +1288,21 @@ static void seat_mon(openmmo_party_mon *d, const mmo_monster *m)
         d->cond[i] = m->cond[i];
     d->sheen = m->sheen;
     d->ribbons_super = m->ribbons_super;
+    /* Straight across as an unsigned word: the record's field is signed on the
+     * wire, but it is a personality, and the nature both sides read out of it
+     * is `(u32)seed % 25` rather than a signed remainder. */
+    d->seed = (u32)m->seed;
     d->nature = m->nature;
     d->friendship = m->friendship;
+    /* The item it is carrying, crossed here with every other id. */
+    d->held_item = m->held_item;
+    d->held_item_engine = 0;
+    if (m->held_item) {
+        why = NULL;
+        /* MMO_ID_NONE is 0, which is exactly "carrying nothing" to the engine,
+         * so a refused crossing needs no second branch. */
+        d->held_item_engine = mmo_id_item_from_server((u16)m->held_item, &why);
+    }
     d->form = m->form;
     d->shiny = (m->rarity & (MMO_RARITY_SHINY | MMO_RARITY_SECRET_SHINY)) != 0;
     d->ability_slot = m->ability_slot;
@@ -1230,7 +1317,14 @@ static void seat_mon(openmmo_party_mon *d, const mmo_monster *m)
         d->caught_map_header = mmo_id_map_header_from_server(
             m->caught_region, m->caught_bank, m->caught_map, &why);
     }
+    /* Straight across, with no id map: a label is an index into the engine's own
+     * location names and the save it was read from is a save this engine wrote,
+     * so the number already means what it says. */
+    d->caught_location_label = m->caught_location_label;
     d->caught_at = m->caught_at;
+    /* The engine's own condition word, straight across for the same reason: it
+     * is the engine's number to begin with and the server keeps it as one. */
+    d->status = m->status;
 }
 
 /* Recount what the engine cannot draw, over the party as it now stands. Counted
@@ -2831,14 +2925,14 @@ static int seat_shop(openmmo_client *c, size_t n)
 #define STORAGE_RECORDS_PER_PACKET 255
 
 /*
- * Apply a PC container to the storage the client holds, on the same terms the party is applied
+ * Apply one flat container to a store the client holds, on the same terms the party is applied
  * on: a delete empties it, `hasChange` replaces it before the records land, and without that
  * flag each record is merged in, keyed by the monster's own id.
  */
-static int seat_storage(openmmo_client *c, size_t n)
+static int seat_container(openmmo_client *c, size_t n, int want,
+                          openmmo_storage *s, int cap)
 {
     mmo_pokemon_container ct;
-    openmmo_storage *s = &c->storage;
 
     if (!c->ct_scratch) {
         c->ct_scratch = calloc(STORAGE_RECORDS_PER_PACKET, sizeof *c->ct_scratch);
@@ -2847,12 +2941,17 @@ static int seat_storage(openmmo_client *c, size_t n)
     }
     if (mmo_game_read_pokemon_container(c->gbuf, n, &ct, c->ct_scratch,
                                         STORAGE_RECORDS_PER_PACKET) != 0) {
-        s->malformed++;
-        s->valid = 1;
+        /* A body this reader cannot walk names no container, so it is counted
+         * against the store the caller asked about and nowhere else, counting
+         * it in every store would report one malformed packet three times. */
+        if (want == MMO_CONTAINER_PC) {
+            s->malformed++;
+            s->valid = 1;
+        }
         return 0;
     }
-    if (ct.container != MMO_CONTAINER_PC)
-        return 0;                         /* the party or a box: not the PC */
+    if (ct.container != want)
+        return 0;                         /* somebody else's container */
 
     s->valid = 1;
     s->trailing = ct.trailing;
@@ -2862,7 +2961,7 @@ static int seat_storage(openmmo_client *c, size_t n)
         return 1;
     }
     if (!s->mon) {
-        s->mon = calloc(OPENMMO_STORAGE_MAX, sizeof *s->mon);
+        s->mon = calloc((size_t)cap, sizeof *s->mon);
         if (!s->mon) {
             s->malformed++;
             return 0;
@@ -2882,7 +2981,7 @@ static int seat_storage(openmmo_client *c, size_t n)
             }
         }
         if (at < 0) {
-            if (s->count >= OPENMMO_STORAGE_MAX) {
+            if (s->count >= cap) {
                 s->dropped++;
                 continue;
             }
@@ -2902,6 +3001,18 @@ static int seat_storage(openmmo_client *c, size_t n)
         s->mon[j + 1] = held;
     }
     return 1;
+}
+
+static int seat_storage(openmmo_client *c, size_t n)
+{
+    return seat_container(c, n, MMO_CONTAINER_PC, &c->storage,
+                          OPENMMO_STORAGE_MAX);
+}
+
+static int seat_daycare(openmmo_client *c, size_t n)
+{
+    return seat_container(c, n, MMO_CONTAINER_DAYCARE, &c->daycare,
+                          OPENMMO_DAYCARE_MAX);
 }
 
 /* Apply the incubator slots the server sent. Wear is the server's count, not a
@@ -3000,6 +3111,7 @@ static void seat_world_state(openmmo_client *c, u8 opcode, size_t n)
     case MMO_GAME_OP_POKEMON_CONTAINER:
         seat_party(c, n);
         seat_storage(c, n);
+        seat_daycare(c, n);
         break;
     case MMO_GAME_OP_EGG_INCUBATORS:
         seat_incubators(c, n);
@@ -3016,6 +3128,8 @@ static void seat_world_state(openmmo_client *c, u8 opcode, size_t n)
         c->ws.money = ps.money;
         c->ws.gender = ps.gender;
         c->ws.var_count = ps.var_count;
+        c->ws.badge_count = ps.badge_count;
+        memcpy(c->ws.badges, ps.badges, sizeof c->ws.badges);
         /* The species list here is a summary of a party the client does not have
          * yet. The party container carries the party itself and arrives later in
          * the same block, so this only fills the summary until it does, once the
@@ -3498,12 +3612,16 @@ static void handle_enter_window(openmmo_client *c, const u8 *body, size_t blen)
         || opcode == MMO_GAME_OP_IMAGE_CHUNK)
         seat_world_state(c, opcode, n);
 
-    /* The player's own LoadEntity arrives first in this burst; remember its id and
-     * spawn tile so the in-game stream never spawns a second avatar for ourselves,
-     * and so the local player has an authoritative from-tile to move off of. */
-    if (opcode == MMO_GAME_OP_LOAD_ENTITY && !c->have_self) {
+    /*
+     * The player's own LoadEntity arrives first in this burst; remember its id and spawn tile
+     * so the in-game stream never spawns a second avatar for ourselves, and so the local
+     * player has an authoritative from-tile to move off of.
+     */
+    if (opcode == MMO_GAME_OP_LOAD_ENTITY && !c->have_self
+        && c->ws.character_id != 0) {
         mmo_load_entity le;
-        if (mmo_game_read_load_entity(c->gbuf, n, &le) == 0) {
+        if (mmo_game_read_load_entity(c->gbuf, n, &le) == 0
+            && le.entity_id == (u32)c->ws.character_id) {
             c->self_entity_id = le.entity_id;
             c->have_self = 1;
             /* Server (x,y) -> field (x,z), the axis convention entity.c and the
@@ -3703,6 +3821,21 @@ static void apply_presence(openmmo_client *c, u8 opcode, size_t n)
         memset(&ap, 0, sizeof ap);
         ap.gender = (uint8_t)(le.gender & 1);
         ap.skins = le.appearance;
+        /* Which picture walks behind them. The dex id is the official client's own field and
+         * the three beside it are ours (flags & 0x20); a packet without them
+         * asks for the ordinary male coat, which is the picture the official client draws. */
+        if (le.has_follower) {
+            int fg = mmo_follower_gfx(le.follower_dex, le.follower_form,
+                                      le.follower_gender, le.follower_shiny);
+
+            /* A species with no follower art, or one no package carries, is a
+             * peer with nobody behind them rather than a peer with the wrong
+             * Pokemon behind them. */
+            if (fg >= 0) {
+                ap.has_follower = 1;
+                ap.follower_gfx = fg;
+            }
+        }
         body_gfx = mmo_appearance_resolve(ap.gender, &le.appearance);
         if (body_gfx != mmo_appearance_gender_gfx(ap.gender)) {
             ap.has_body = 1;
@@ -3770,13 +3903,12 @@ static void apply_presence(openmmo_client *c, u8 opcode, size_t n)
             self_correct(c, sn.bank_id, sn.map_id, sn.x, sn.y, sn.direction);
             break;
         }
-        /* The game client drops the entity's queued walk and places it. The
-         * model has no teleport, so a remote pose is seated as a target and
-         * walked to, right for the one-tile hops a cutscene uses, visibly
-         * wrong for a long reposition. */
-        openmmo_entity_set_target(&c->ent, sn.entity_id, sn.x, sn.y,
-                                  mmo_game_dir_to_ds((u8)sn.direction),
-                                  sn.movement_mode);
+        /* A whole pose, not a step: the game client drops the entity's queued
+         * walk and places it, so this is a set-down rather than a target to
+         * walk to. Walking one was right for the one-tile hops a cutscene
+         * uses and a slide through the scenery for anything longer. */
+        openmmo_entity_place(&c->ent, sn.entity_id, sn.x, sn.y,
+                             mmo_game_dir_to_ds((u8)sn.direction));
         break;
     }
     case MMO_GAME_OP_ENTITY_TURN: {
@@ -4191,8 +4323,12 @@ static void handle_in_game(openmmo_client *c, const u8 *body, size_t blen)
      * nothing here draws yet. */
     if (opcode == MMO_GAME_OP_ENTITY_PRESENCE) {
         mmo_entity_presence pr;
+        /*
+         * entity_is_self, not have_self: the flag says the spawn tile has been re-seated, and
+         * a warp clears it while keeping the id.
+         */
         if (mmo_game_read_entity_presence(c->gbuf, n, &pr) == 0 &&
-            c->have_self && pr.entity_id == c->self_entity_id)
+            entity_is_self(c, pr.entity_id))
             apply_self_presence(c, pr.status);
         return;
     }
@@ -4268,6 +4404,11 @@ static void handle_in_game(openmmo_client *c, const u8 *body, size_t blen)
             if (e) { e->storage.count = c->storage.count;
                      e->storage.total = c->storage.total; }
         }
+        /* The day care raises no event of its own: nothing draws it, and the
+         * one reader it has (the box sync, which binds a boarder's server id to
+         * the slot the game is holding it in) reads the store on its own tick
+         * the way it already reads the PC. */
+        seat_daycare(c, n);
         return;
     }
 
@@ -4396,7 +4537,7 @@ static void handle_in_game(openmmo_client *c, const u8 *body, size_t blen)
     }
     if (opcode == MMO_GAME_OP_FRIEND_DELETE) {
         s64 player = 0;
-        char name[MMO_CHAR_NAME_MAX + 1];
+        char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
 
         name[0] = '\0';
         if (seat_friend_delete(c, n, &player, name, sizeof name)) {
@@ -4416,7 +4557,7 @@ static void handle_in_game(openmmo_client *c, const u8 *body, size_t blen)
     if (opcode == MMO_GAME_OP_FRIEND_ONLINE) {
         s64 player = 0;
         u8 bit = 0;
-        char name[MMO_CHAR_NAME_MAX + 1];
+        char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
 
         name[0] = '\0';
         if (seat_friend_online(c, n, &player, &bit, name, sizeof name)) {
@@ -4475,7 +4616,7 @@ static void handle_in_game(openmmo_client *c, const u8 *body, size_t blen)
         return;
     }
     if (opcode == MMO_GAME_OP_GUILD_RANK_CHANGE) {
-        char name[MMO_CHAR_NAME_MAX + 1];
+        char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
 
         name[0] = '\0';
         if (seat_guild_rank_change(c, n, NULL, NULL, name, sizeof name)) {
@@ -4488,7 +4629,7 @@ static void handle_in_game(openmmo_client *c, const u8 *body, size_t blen)
         return;
     }
     if (opcode == MMO_GAME_OP_GUILD_MEMBER_DROP) {
-        char name[MMO_CHAR_NAME_MAX + 1];
+        char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
 
         name[0] = '\0';
         if (seat_guild_member_drop(c, n, NULL, name, sizeof name)) {
@@ -4502,7 +4643,7 @@ static void handle_in_game(openmmo_client *c, const u8 *body, size_t blen)
         return;
     }
     if (opcode == MMO_GAME_OP_GUILD_PRESENCE) {
-        char name[MMO_CHAR_NAME_MAX + 1];
+        char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
 
         name[0] = '\0';
         if (seat_guild_presence(c, n, NULL, NULL, name, sizeof name)) {
@@ -4578,7 +4719,7 @@ static void handle_in_game(openmmo_client *c, const u8 *body, size_t blen)
         return;
     }
     if (opcode == MMO_GAME_OP_LINK_REMOVE) {
-        char name[MMO_CHAR_NAME_MAX + 1];
+        char name[MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
 
         name[0] = '\0';
         if (seat_link_remove(c, n, NULL, name, sizeof name)) {
@@ -4974,6 +5115,9 @@ static void handle_in_game(openmmo_client *c, const u8 *body, size_t blen)
             snprintf(c->link_battle.peer_name, sizeof c->link_battle.peer_name,
                      "%s", open.peer_name);
             c->link_battle.peer_gender = open.peer_gender ? 1 : 0;
+            c->link_battle.peer_body_gfx =
+                mmo_appearance_resolve(c->link_battle.peer_gender,
+                                       open.has_appearance ? &open.appearance : NULL);
             c->link_battle.party.valid = 1;
             c->link_battle.party.total = open.total;
             for (int i = 0; i < open.count; i++)
@@ -5217,6 +5361,14 @@ static void handle_in_game(openmmo_client *c, const u8 *body, size_t blen)
         return;
     }
 
+    /* The one answer to a save this client offered (0xCE). Recorded and not
+     * acted on: what happens next belongs to whoever asked, the CLI prints
+     * it, the game prints it beside the row the player pressed. */
+    if (opcode == MMO_GAME_OP_OFFLINE_RESULT) {
+        seat_import_answer(c, n);
+        return;
+    }
+
     /* A story flag the server set or cleared under the player (a script advancing
      * progression). Progression is server-owned: update the store to match, then
      * surface the change so a host can re-evaluate story-conditional content. */
@@ -5285,6 +5437,7 @@ static void tick_entities(openmmo_client *c)
         case OPENMMO_ENTITY_EV_STEP:    k = OPENMMO_EV_ENTITY_STEP;    break;
         case OPENMMO_ENTITY_EV_TURN:    k = OPENMMO_EV_ENTITY_TURN;    break;
         case OPENMMO_ENTITY_EV_DESPAWN: k = OPENMMO_EV_ENTITY_DESPAWN; break;
+        case OPENMMO_ENTITY_EV_PLACE:   k = OPENMMO_EV_ENTITY_PLACE;   break;
         default: continue;
         }
         openmmo_event *e = evq_push(c, k);
@@ -5295,9 +5448,12 @@ static void tick_entities(openmmo_client *c)
         e->entity.x = me->x;
         e->entity.z = me->z;
         e->entity.dir = me->dir;
+        e->entity.speed = me->speed;
         e->entity.gender = me->appearance.gender;
         e->entity.version = me->appearance.version;
         e->entity.has_body = me->appearance.has_body;
+        e->entity.has_follower = me->appearance.has_follower;
+        e->entity.follower_gfx = me->appearance.follower_gfx;
         e->entity.gfx = me->appearance.gfx;
         memcpy(e->entity.name, me->appearance.name, sizeof e->entity.name);
     }
@@ -5338,9 +5494,19 @@ openmmo_client *openmmo_client_new(void)
     openmmo_client *c = calloc(1, sizeof *c);
     if (!c)
         return NULL;
+    c->gbuf_cap = OPENMMO_GBUF_CAP;
+    c->gbuf = malloc(c->gbuf_cap);
+    if (!c->gbuf) {
+        free(c);
+        return NULL;
+    }
     mmo_net_init(&c->net);
     c->ph = P_IDLE;
+    c->login_refusal = -1;
     c->status = OPENMMO_DISCONNECTED;
+    /* Zero is a real status (landed), so the "no answer yet" one is set here
+     * rather than left to the calloc. */
+    c->import_answer.status = MMO_IMPORT_STATUS_NONE;
     return c;
 }
 
@@ -5351,8 +5517,10 @@ void openmmo_client_free(openmmo_client *c)
     mmo_net_close(&c->net);
     mmo_net_read_reset(&c->acc);
     free(c->storage.mon);
+    free(c->daycare.mon);
     free(c->ct_scratch);
     free(c->sync_xfer);
+    free(c->gbuf);
     free(c);
 }
 
@@ -5371,7 +5539,8 @@ static void adopt_config(openmmo_client *c, const openmmo_config *cfg)
     snprintf(c->create_name, sizeof c->create_name,
              "%s", cfg->create_name ? cfg->create_name : "");
     c->create_name_overflow =
-        cfg->create_name && strlen(cfg->create_name) > MMO_CHAR_NAME_MAX;
+        cfg->create_name &&
+        mmo_utf16_units(cfg->create_name) > MMO_CHAR_NAME_MAX;
     c->create_gender = cfg->create_gender;
     c->create_region = cfg->create_region;
     c->create_skin_region = cfg->create_skin_region;
@@ -5391,6 +5560,7 @@ static void adopt_config(openmmo_client *c, const openmmo_config *cfg)
     c->have_chars = 0;
     c->create_error[0] = '\0';
     c->delete_error[0] = '\0';
+    c->login_refusal = -1;
     c->self_mount = MMO_TRANSPORT_NONE;
     c->evq_head = c->evq_tail = 0;
     c->chat_head = c->chat_count = 0;
@@ -5454,12 +5624,19 @@ static void adopt_config(openmmo_client *c, const openmmo_config *cfg)
     openmmo_party_mon *held = c->storage.mon;
     memset(&c->storage, 0, sizeof c->storage);
     c->storage.mon = held;
+    openmmo_party_mon *boarders = c->daycare.mon;
+    memset(&c->daycare, 0, sizeof c->daycare);
+    c->daycare.mon = boarders;
 }
 
 int openmmo_client_start(openmmo_client *c, const openmmo_config *cfg)
 {
     if (!c || !cfg)
         return -1;
+    /*
+     * A start is also a restart: the same client object is dialled again after a link breaks.
+     */
+    mmo_net_close(&c->net);
     adopt_config(c, cfg);
     mmo_net_read_reset(&c->acc);
 
@@ -5492,6 +5669,31 @@ int openmmo_client_attach_fd(openmmo_client *c, int fd, const openmmo_config *cf
     return 0;
 }
 
+int openmmo_client_login_refusal(const openmmo_client *c)
+{
+    return c ? c->login_refusal : -1;
+}
+
+void openmmo_client_pin_hello_time(openmmo_client *c, s64 timestamp)
+{
+    if (c)
+        c->pinned_hello_time = timestamp;
+}
+
+int openmmo_client_flush(openmmo_client *c, int ms)
+{
+    size_t left;
+
+    if (!c)
+        return 0;
+    left = mmo_net_drain(&c->net, ms);
+    if (left == 0)
+        return 0;
+    fprintf(stderr, "openmmo: %u byte(s) never left for the server before the"
+                    " disconnect\n", (unsigned)left);
+    return -1;
+}
+
 void openmmo_client_disconnect(openmmo_client *c)
 {
     if (!c)
@@ -5505,15 +5707,25 @@ void openmmo_client_disconnect(openmmo_client *c)
 int openmmo_client_send_move(openmmo_client *c, int from_x, int from_z,
                              int dir, int running)
 {
+    return openmmo_client_send_move_tiles(c, from_x, from_z, dir, running, 1);
+}
+
+int openmmo_client_send_move_tiles(openmmo_client *c, int from_x, int from_z,
+                                   int dir, int running, int tiles)
+{
     if (!c || c->ph != P_IN_GAME)
         return -1;
     if (openmmo_client_in_dialog(c))
         return -1;
+    if (tiles < 1)
+        tiles = 1;
+    else if (tiles > 3)
+        tiles = 3;
 
     mmo_wbuf body;
     mmo_wbuf_init(&body);
     mmo_game_write_movement(&body, (s16)from_x, (s16)from_z,
-                            mmo_game_dir_from_ds(dir), running);
+                            mmo_game_dir_from_ds(dir), running, tiles);
     int rc = body.err
                  ? (fail(c, "move: could not frame MovementPacket"), -1)
                  : send_game_packet(c, MMO_GAME_OP_MOVEMENT, body.data, body.len,
@@ -5521,17 +5733,17 @@ int openmmo_client_send_move(openmmo_client *c, int from_x, int from_z,
     mmo_wbuf_free(&body);
 
     /* The server never echoes an accepted step, so the from-tile has to move
-     * here or the next send is a desync. One tile in `dir`; a ledge hop that
-     * lands two tiles away heals on the snap-back. An off-edge step then
-     * predicts the crossing the server will run (it sends no LoadMap). */
+     * here or the next send is a desync. `tiles` tiles in `dir`, the caller
+     * moved that far, so this has to. An off-edge step then predicts the
+     * crossing the server will run (it sends no LoadMap). */
     if (rc == 0) {
         int nx = from_x, nz = from_z;
 
         switch (dir) {
-        case 0: nz--; break; /* NORTH */
-        case 1: nz++; break; /* SOUTH */
-        case 2: nx--; break; /* WEST */
-        case 3: nx++; break; /* EAST */
+        case 0: nz -= tiles; break; /* NORTH */
+        case 1: nz += tiles; break; /* SOUTH */
+        case 2: nx -= tiles; break; /* WEST */
+        case 3: nx += tiles; break; /* EAST */
         default: break;
         }
         c->self_x = nx;
@@ -5585,6 +5797,76 @@ int openmmo_client_send_script_state(openmmo_client *c,
                               "script: could not send ScriptState");
     mmo_wbuf_free(&body);
     return rc;
+}
+
+/* Offer a whole save file, in pieces. */
+#define OFFLINE_REPORT_CHUNK 4096
+
+/* One blob up this channel, in numbered pieces. Which blob it is is the blob's
+ * own business: both formats open with a length-prefixed four-byte magic, so
+ * the far end knows what it has joined before it reads a field of either, and
+ * neither end needs a second opcode to say so. */
+static int send_offline_blob(openmmo_client *c, const u8 *blob, size_t len)
+{
+    size_t sent = 0;
+    int sequence = 0;
+
+    if (!c || c->ph != P_IN_GAME)
+        return -1;
+    if (blob == NULL || len == 0)
+        return -1;
+
+    c->import_answer.status = MMO_IMPORT_STATUS_NONE;
+    c->import_answer.message[0] = '\0';
+    c->import_answer.nnotes = 0;
+    c->import_answer.nnotes_sent = 0;
+    c->import_answer.wants_chain = 0;
+
+    while (sent < len) {
+        size_t take = len - sent;
+        mmo_wbuf body;
+        int rc;
+
+        if (take > OFFLINE_REPORT_CHUNK)
+            take = OFFLINE_REPORT_CHUNK;
+        mmo_wbuf_init(&body);
+        if (mmo_game_write_offline_report(&body, sequence, sent + take >= len,
+                                          blob + sent, take) != 0)
+            rc = (fail(c, "import: could not frame OfflineSaveReport"), -1);
+        else
+            rc = send_game_packet(c, MMO_GAME_OP_OFFLINE_REPORT, body.data,
+                                  body.len,
+                                  "import: could not send OfflineSaveReport");
+        mmo_wbuf_free(&body);
+        if (rc != 0)
+            return rc;
+        sent += take;
+        sequence++;
+    }
+    return 0;
+}
+
+int openmmo_client_send_offline_report(openmmo_client *c,
+                                       const u8 *report, size_t len)
+{
+    return send_offline_blob(c, report, len);
+}
+
+int openmmo_client_send_offline_chain(openmmo_client *c,
+                                      const u8 *chain, size_t len)
+{
+    return send_offline_blob(c, chain, len);
+}
+
+int openmmo_client_send_offline_export(openmmo_client *c,
+                                       const u8 *blob, size_t len)
+{
+    return send_offline_blob(c, blob, len);
+}
+
+const openmmo_import_answer *openmmo_client_import_answer(const openmmo_client *c)
+{
+    return c ? &c->import_answer : NULL;
 }
 
 int openmmo_client_send_script_warp(openmmo_client *c, int header, int x, int z,
@@ -5939,6 +6221,8 @@ int openmmo_client_entity_by_id(const openmmo_client *c, u32 id,
         out->entity.gender = s->appearance.gender;
         out->entity.version = s->appearance.version;
         out->entity.has_body = s->appearance.has_body;
+        out->entity.has_follower = s->appearance.has_follower;
+        out->entity.follower_gfx = s->appearance.follower_gfx;
         out->entity.gfx = s->appearance.gfx;
         memcpy(out->entity.name, s->appearance.name, sizeof out->entity.name);
         return 1;
@@ -6042,14 +6326,17 @@ int openmmo_client_send_battle_chat(openmmo_client *c, const char *text)
     return rc;
 }
 
-/* The slot range a container addresses. Both come from the game client: it sizes
- * container 0 at 660 and container 1 at the party's six. */
+/* The slot range a container addresses. All three come from the game client: it
+ * sizes container 0 at 660 and container 1 at the party's six, and the day care
+ * building has two. */
 static int container_slots(int container)
 {
     if (container == OPENMMO_CONTAINER_PC)
         return OPENMMO_STORAGE_MAX;
     if (container == OPENMMO_CONTAINER_PARTY)
         return OPENMMO_PARTY_MAX;
+    if (container == OPENMMO_CONTAINER_DAYCARE)
+        return OPENMMO_DAYCARE_MAX;
     return 0;
 }
 
@@ -6293,6 +6580,11 @@ const openmmo_party *openmmo_client_party(const openmmo_client *c)
 const openmmo_storage *openmmo_client_storage(const openmmo_client *c)
 {
     return c ? &c->storage : NULL;
+}
+
+const openmmo_storage *openmmo_client_daycare(const openmmo_client *c)
+{
+    return c ? &c->daycare : NULL;
 }
 
 const openmmo_bag *openmmo_client_bag(const openmmo_client *c)
@@ -7433,9 +7725,12 @@ int openmmo_client_live_entities(const openmmo_client *c, openmmo_event *out, in
         out[i].entity.x = evs[i].x;
         out[i].entity.z = evs[i].z;
         out[i].entity.dir = evs[i].dir;
+        out[i].entity.speed = evs[i].speed;
         out[i].entity.gender = evs[i].appearance.gender;
         out[i].entity.version = evs[i].appearance.version;
         out[i].entity.has_body = evs[i].appearance.has_body;
+        out[i].entity.has_follower = evs[i].appearance.has_follower;
+        out[i].entity.follower_gfx = evs[i].appearance.follower_gfx;
         out[i].entity.gfx = evs[i].appearance.gfx;
         memcpy(out[i].entity.name, evs[i].appearance.name,
                sizeof out[i].entity.name);
@@ -7493,7 +7788,8 @@ int openmmo_client_create_character(openmmo_client *c,
 
     if (!c || c->ph != P_GAME_PICK || !in || !in->name)
         return -1;
-    if (in->name[0] == '\0' || strlen(in->name) > MMO_CHAR_NAME_MAX)
+    if (in->name[0] == '\0' ||
+        mmo_utf16_units(in->name) > MMO_CHAR_NAME_MAX)
         return -1;
     snprintf(c->create_name, sizeof c->create_name, "%s", in->name);
     c->create_name_overflow = 0;

@@ -70,6 +70,13 @@ struct view_ui_th_pair {
 int view_ui_theme_cells(int id, const struct openmmo_rect *dst, int text_px,
                         struct view_ui_th_pair out[VIEW_UI_TH_CELLS]);
 
+/* The same grid read the other way: `out[i].src` is where the cell sits on
+ * the sheet and `out[i].dst` its place in the surface's own footprint, which
+ * comes back in `w`/`h`. What a painter filling a sheet of its own needs
+ * (view_ui_skin.c). Returns the cell count. */
+int view_ui_theme_source(int id, struct view_ui_th_pair out[VIEW_UI_TH_CELLS],
+                         int *w, int *h);
+
 /* ------------------------------------------------------------------ */
 /* The sheets' pixels                                                  */
 /* ------------------------------------------------------------------ */

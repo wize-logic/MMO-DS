@@ -201,6 +201,79 @@ static void test_utf8(void)
     }
 }
 
+/* The way back. Everything downstream of the page is UTF-8, so the pair has to
+ * close: the standard's boundary values again, then the same string the test
+ * above pushed onto the ring, read out of it and rebuilt byte for byte. */
+static void test_utf16_out(void)
+{
+    static const struct {
+        const char *name;
+        uint16_t    in[2];
+        unsigned    len;
+        unsigned    bytes;
+        const char *out;
+    } V[] = {
+        { "NUL",                { 0x0000 },         1, 1, "\x00" },
+        { "the last one byte",  { 0x007F },         1, 1, "\x7F" },
+        { "the first two",      { 0x0080 },         1, 2, "\xC2\x80" },
+        { "the last two",       { 0x07FF },         1, 2, "\xDF\xBF" },
+        { "the first three",    { 0x0800 },         1, 3, "\xE0\xA0\x80" },
+        { "the last BMP",       { 0xFFFF },         1, 3, "\xEF\xBF\xBF" },
+        { "the first pair",     { 0xD800, 0xDC00 }, 2, 4, "\xF0\x90\x80\x80" },
+        { "the last pair",      { 0xDBFF, 0xDFFF }, 2, 4, "\xF4\x8F\xBF\xBF" },
+        { "a high half alone",  { 0xD800 },         1, 3, "\xEF\xBF\xBD" },
+        { "a low half alone",   { 0xDC00 },         1, 3, "\xEF\xBF\xBD" },
+        { "a high, then a letter", { 0xD800, 0x0041 }, 2, 3, "\xEF\xBF\xBD" },
+    };
+    unsigned i, bad = 0, badadv = 0;
+
+    for (i = 0; i < sizeof V / sizeof V[0]; i++) {
+        char out[4];
+        unsigned used = 0, n;
+
+        n = openmmo_text_utf16_to_utf8(V[i].in, V[i].len, out, &used);
+        if (n != V[i].bytes || memcmp(out, V[i].out, n) != 0) {
+            printf("  FAIL %s: %u byte(s)\n", V[i].name, n);
+            bad++;
+        }
+        /* Half a pair must cost exactly the one unit it is, or the letter
+         * after it disappears with it. */
+        if (used < 1 || used > V[i].len) badadv++;
+    }
+    CHECK(bad == 0, "the standard's boundary values encode as the standard says");
+    CHECK(badadv == 0, "every sequence, whole or broken, advances the caller");
+
+    {
+        /* Round trip: the same bytes the window handed over come back out. */
+        static const char s[] = "h\xC3\xA9\xF0\x9F\x98\x80!";
+        uint16_t u[16];
+        char back[32];
+        unsigned nu = 0, i2 = 0, nb = 0;
+
+        while (s[i2] != '\0') {
+            uint16_t one[2];
+            unsigned used = 1, k, got;
+
+            got = openmmo_text_utf8_to_utf16((const unsigned char *)s + i2,
+                                             (unsigned)(sizeof s - 1 - i2), one,
+                                             &used);
+            for (k = 0; k < got; k++)
+                u[nu++] = one[k];
+            i2 += used;
+        }
+        i2 = 0;
+        while (i2 < nu) {
+            unsigned used = 1;
+
+            nb += openmmo_text_utf16_to_utf8(u + i2, nu - i2, back + nb, &used);
+            i2 += used;
+        }
+        back[nb] = '\0';
+        CHECK(nu == 5 && nb == sizeof s - 1 && strcmp(back, s) == 0,
+              "utf-8 out, code units, and the same utf-8 back");
+    }
+}
+
 int text_channel_tests_run(void)
 {
     failures = 0;
@@ -209,6 +282,7 @@ int text_channel_tests_run(void)
     test_ring();
     test_guards();
     test_utf8();
+    test_utf16_out();
     if (failures == 0) printf("text channel: all checks passed\n");
     else printf("text channel: %d check(s) FAILED\n", failures);
     return failures;

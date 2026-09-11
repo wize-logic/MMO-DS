@@ -9,6 +9,7 @@ import de.fiereu.openmmo.story.generated.hoenn.HoennVars
 import de.fiereu.openmmo.story.generated.kanto.KantoFlags
 import de.fiereu.openmmo.story.generated.sinnoh.SinnohFlags
 import de.fiereu.openmmo.story.generated.sinnoh.SinnohVars
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
@@ -86,20 +87,29 @@ class CharacterIntroTest :
 
       test("unsupported region wire values remain locked") { Region.byWireValue(2) shouldBe null }
 
+      test("Johto is a trainer namespace, not a world anybody starts in") {
+        // It exists so the ported cartridge's 737 trainers have one region to be keyed under. A
+        // ported map itself travels as Sinnoh, because it is a Platinum header.
+        Region.JOHTO.creatable shouldBe false
+        shouldThrow<IllegalStateException> { NewGameStarts.forRegion(Region.JOHTO, female = false) }
+      }
+
       test("every region starts with money, no party and no bag") {
         runTest {
           val store = CharacterStore(FakeCharacterRepository(), EntityIdService(), backgroundScope)
 
-          Region.entries.forEach { region ->
-            val character = store.createCharacter(1, region.name, CharacterGender.MALE, region)
-            val start = NewGameStarts.forRegion(region, female = false)
+          Region.entries
+              .filter { it != Region.JOHTO }
+              .forEach { region ->
+                val character = store.createCharacter(1, region.name, CharacterGender.MALE, region)
+                val start = NewGameStarts.forRegion(region, female = false)
 
-            character.info.money shouldBe start.money
-            character.info.permissions shouldBe start.permissions
-            character.pokemon.shouldBeEmpty()
-            character.pcStorage.shouldBeEmpty()
-            character.items.shouldBeEmpty()
-          }
+                character.info.money shouldBe start.money
+                character.info.permissions shouldBe start.permissions
+                character.pokemon.shouldBeEmpty()
+                character.pcStorage.shouldBeEmpty()
+                character.items.shouldBeEmpty()
+              }
         }
       }
 

@@ -13,7 +13,7 @@ class LearnsetRenderer(
     private val registryChunkSize: Int = 50,
 ) {
 
-  fun render(learnsets: List<ParsedLearnset>) {
+  fun render(learnsets: List<ParsedLearnset>, moveSources: List<ParsedMoveSources>) {
     classCacheDir.mkdirs()
     val engine =
         TemplateEngine.create(
@@ -25,12 +25,27 @@ class LearnsetRenderer(
     val packageRoot = File(outputDir, BASE_PACKAGE.replace('.', '/'))
     if (packageRoot.exists()) packageRoot.deleteRecursively()
 
-    val chunks = learnsets.sortedBy { it.dexId }.chunked(registryChunkSize)
-    val registry = File(outputDir, "${BASE_PACKAGE.replace('.', '/')}/GeneratedLearnsets.kt")
-    registry.parentFile.mkdirs()
-    FileOutput(registry.toPath()).use { out ->
-      engine.render("LearnsetRegistry.jte", mapOf("chunks" to chunks), out)
-    }
+    write(
+        engine,
+        "LearnsetRegistry.jte",
+        "GeneratedLearnsets.kt",
+        learnsets.chunked(registryChunkSize))
+    write(
+        engine,
+        "MoveSources.jte",
+        "GeneratedMoveSources.kt",
+        moveSources.chunked(registryChunkSize))
+  }
+
+  private fun write(
+      engine: TemplateEngine,
+      template: String,
+      fileName: String,
+      chunks: List<List<Any>>,
+  ) {
+    val file = File(outputDir, "${BASE_PACKAGE.replace('.', '/')}/$fileName")
+    file.parentFile.mkdirs()
+    FileOutput(file.toPath()).use { out -> engine.render(template, mapOf("chunks" to chunks), out) }
   }
 
   companion object {

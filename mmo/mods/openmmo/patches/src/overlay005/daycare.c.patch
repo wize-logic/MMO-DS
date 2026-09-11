@@ -1,0 +1,31 @@
+--- a/src/overlay005/daycare.c
++++ b/src/overlay005/daycare.c
+@@ -935,12 +935,23 @@
+ 
+     if ((Daycare_HasEgg(daycare) == FALSE) && (monCount == NUM_DAYCARE_MONS)) {
+         if ((DaycareMon_GetSteps(Daycare_GetDaycareMon(daycare, 1)) & 0xff) == 0xff) {
+-            compatibilityScore = Daycare_GetCompatibilityScore(daycare);
+-            rand = LCRNG_Next();
+-            rand = (rand * 100) / 0xffff;
++            /* openmmo: an egg is a monster made out of nothing, and only the
++             * server may make one, it holds the party the egg would join and
++             * it is what decides when the egg stops being one. Nothing on the
++             * wire says either yet, so the pair board and grow and the bill
++             * runs, and the day care simply never finds an egg. Refused out
++             * loud rather than conceived and then lost.
++             * mods/openmmo/src/openmmo_save_blocks.c. */
++            extern int openmmo_daycare_may_conceive(void);
+ 
+-            if (compatibilityScore > rand) {
+-                Daycare_SetInheritedNature(daycare);
++            if (openmmo_daycare_may_conceive()) {
++                compatibilityScore = Daycare_GetCompatibilityScore(daycare);
++                rand = LCRNG_Next();
++                rand = (rand * 100) / 0xffff;
++
++                if (compatibilityScore > rand) {
++                    Daycare_SetInheritedNature(daycare);
++                }
+             }
+         }
+     }

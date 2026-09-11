@@ -8,6 +8,16 @@ wordmark.png
     Drawn here. The letters are DejaVu Sans Bold (Bitstream Vera
     license, no extra credit required for use).
 
+../fonts/NotoSans-Medium.ttf
+    Noto Sans Medium 2.001. Copyright 2019 Google Inc. Unmodified.
+    SIL Open Font License 1.1; the notice travels with it as
+    mmo/res/fonts/OFL.txt.
+    Compiled into openmmo-view and into the handheld library rather
+    than installed beside them, so the game's window has a face on
+    every platform with nothing to put there. It is the family official
+    draws its own in-game UI with; a player who points the window at
+    an extracted client gets that client's CJK cut of it instead.
+
 openmmo-launch (interactive window)
     raylib and raygui, zlib License. raygui: Ramon Santamaria
     (@raysan5), 2014-2026. The notice is mmo/third_party/raygui.LICENSE.

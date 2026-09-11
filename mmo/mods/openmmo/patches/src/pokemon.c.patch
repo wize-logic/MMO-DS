@@ -1,0 +1,185 @@
+--- a/src/pokemon.c
++++ b/src/pokemon.c
+@@ -56,6 +56,18 @@
+ #include "res/pokemon/regional_pokedex_size.h"
+ #include "res/trainers/classes/trbgra.naix"
+ 
++/* openmmo: a species this cartridge never shipped with. Every archive below is
++ * indexed by species id, stops at 494, and none of the reads has a ceiling of
++ * its own, so a monster the server named reads past the end of one. What to
++ * read instead is mods/openmmo/src/openmmo_species.c and openmmo_sprite.c; each
++ * of these answers the engine's own value for a species this game does have, so
++ * a build with no fill reads exactly what it always read. */
++extern int openmmo_species_member_index(int species);
++extern void openmmo_species_sprite_read(NARC *narc, u16 species, void *out);
++extern int openmmo_species_no_sinnoh_dex(unsigned species);
++extern int openmmo_sprite_undrawable(unsigned species);
++extern u16 openmmo_sprite_drawable_species(u16 species);
++
+ #define FATEFUL_ENCOUNTER_LOCATION 3002
+ 
+ static const s8 sNatureFlavorAffinities[][5] = {
+@@ -2834,6 +2846,9 @@
+ 
+ void BuildPokemonSpriteTemplate(PokemonSpriteTemplate *spriteTemplate, u16 species, u8 gender, u8 face, u8 shiny, u8 form, u32 personality)
+ {
++    /* openmmo: a species with no sheet draws the placeholder. */
++    species = openmmo_sprite_drawable_species(species);
++
+     spriteTemplate->spindaSpots = 0;
+     spriteTemplate->dummy = 0;
+     spriteTemplate->personality = 0;
+@@ -3030,6 +3045,9 @@
+  */
+ static void BuildPokemonSpriteTemplateDP(PokemonSpriteTemplate *spriteTemplate, u16 species, u8 gender, u8 face, u8 shiny, u8 form, u32 personality)
+ {
++    /* openmmo: a species with no sheet draws the placeholder. */
++    species = openmmo_sprite_drawable_species(species);
++
+     spriteTemplate->spindaSpots = 0;
+     spriteTemplate->dummy = 0;
+     spriteTemplate->personality = 0;
+@@ -3190,6 +3208,12 @@
+ 
+ u8 LoadPokemonSpriteYOffset(u16 species, u8 gender, u8 face, u8 form, u32 personality)
+ {
++    /* openmmo: one byte per (species, face, gender) with no ceiling. A species
++     * with no sheet draws the placeholder, which is seated at zero. */
++    if (openmmo_sprite_undrawable(species)) {
++        return 0;
++    }
++
+     form = Pokemon_SanitizeFormId(species, form);
+ 
+     enum NarcID narcID;
+@@ -3278,6 +3302,11 @@
+ 
+ static u8 LoadPokemonDPSpriteHeight(u16 species, u8 gender, u8 face, u8 form, u32 personality)
+ {
++    /* openmmo: likewise, in the Diamond and Pearl sprite path. */
++    if (openmmo_sprite_undrawable(species)) {
++        return 0;
++    }
++
+     // TODO enum values?
+     form = Pokemon_SanitizeFormId(species, form);
+ 
+@@ -4079,6 +4108,14 @@
+ {
+     u16 result;
+ 
++    /* openmmo: ONE member covering species 0..493, indexed by byte offset, so a
++     * ported species reads past the end of the member rather than of the
++     * archive. Zero is what every caller reads as "not in this dex", which is
++     * the true answer for those species as well as the bounded one. */
++    if (openmmo_species_no_sinnoh_dex(species)) {
++        return 0;
++    }
++
+     NARC_ReadFromMemberByIndexPair(&result, NARC_INDEX_POKETOOL__PL_POKEZUKAN, 0, species * 2, 2);
+ 
+     return result;
+@@ -4585,7 +4622,7 @@
+ void Pokemon_LoadLevelUpMovesOf(int monSpecies, int monForm, u16 *monLevelUpMoves)
+ {
+     monSpecies = Pokemon_GetFormNarcIndex(monSpecies, monForm);
+-    NARC_ReadWholeMemberByIndexPair(monLevelUpMoves, NARC_INDEX_POKETOOL__PERSONAL__WOTBL, monSpecies);
++    NARC_ReadWholeMemberByIndexPair(monLevelUpMoves, NARC_INDEX_POKETOOL__PERSONAL__WOTBL, openmmo_species_member_index(monSpecies));
+ }
+ 
+ void PlayCryWithParams(ChatotCry *chatotCry, enum PokemonCryMod cryMod, u16 species, int form, int pan, int volume, int forceDefaultChatot, enum HeapID heapID)
+@@ -4800,18 +4837,18 @@
+ 
+ static void SpeciesData_LoadSpecies(int monSpecies, SpeciesData *speciesData)
+ {
+-    NARC_ReadWholeMemberByIndexPair(speciesData, NARC_INDEX_POKETOOL__PERSONAL__PL_PERSONAL, monSpecies);
++    NARC_ReadWholeMemberByIndexPair(speciesData, NARC_INDEX_POKETOOL__PERSONAL__PL_PERSONAL, openmmo_species_member_index(monSpecies));
+ }
+ 
+ static void SpeciesData_LoadForm(int monSpecies, int monForm, SpeciesData *speciesData)
+ {
+     monSpecies = Pokemon_GetFormNarcIndex(monSpecies, monForm);
+-    NARC_ReadWholeMemberByIndexPair(speciesData, NARC_INDEX_POKETOOL__PERSONAL__PL_PERSONAL, monSpecies);
++    NARC_ReadWholeMemberByIndexPair(speciesData, NARC_INDEX_POKETOOL__PERSONAL__PL_PERSONAL, openmmo_species_member_index(monSpecies));
+ }
+ 
+ static void LoadSpeciesEvolutions(int monSpecies, SpeciesEvolution speciesEvolutions[MAX_EVOLUTIONS])
+ {
+-    NARC_ReadWholeMemberByIndexPair(speciesEvolutions, NARC_INDEX_POKETOOL__PERSONAL__EVO, monSpecies);
++    NARC_ReadWholeMemberByIndexPair(speciesEvolutions, NARC_INDEX_POKETOOL__PERSONAL__EVO, openmmo_species_member_index(monSpecies));
+ }
+ 
+ static void Pokemon_EncryptData(void *data, u32 bytes, u32 seed)
+@@ -5065,6 +5102,18 @@
+ // Mapping to Back Sprites order. Returns player if not otherwise defined
+ int SpriteSystem_TrainerClassBackSpriteIndex(enum TrainerClass trainerClass)
+ {
++    /* openmmo: a class the packages appended with a back of its own, a
++     * composed player look, names its picture past the engine's eleven
++     * (mods/openmmo/src/openmmo_look.c). */
++    {
++        extern int openmmo_trainer_back_index(int trainerClass);
++        int appended = openmmo_trainer_back_index((int)trainerClass);
++
++        if (appended >= 0) {
++            return appended;
++        }
++    }
++
+     switch (trainerClass) {
+     case TRAINER_CLASS_PLAYER_MALE:
+     case TRAINER_CLASS_PLAYER_FEMALE:
+@@ -5131,7 +5180,7 @@
+     int face = Pokemon_Face(clientType);
+ 
+     SpeciesSpriteData data;
+-    NARC_ReadFromMember(narc, 0, species * sizeof(SpeciesSpriteData), sizeof(SpeciesSpriteData), &data);
++    openmmo_species_sprite_read(narc, species, &data);
+     MI_CpuCopy8(data.faceAnims[face].frames, frames, sizeof(SpriteAnimFrame) * MAX_ANIMATION_FRAMES);
+ }
+ 
+@@ -5140,7 +5189,7 @@
+     int faceType = (face == FACE_FRONT) ? 0 : 1;
+ 
+     SpeciesSpriteData spriteData;
+-    NARC_ReadFromMember(narc, 0, species * sizeof(SpeciesSpriteData), sizeof(SpeciesSpriteData), &spriteData);
++    openmmo_species_sprite_read(narc, species, &spriteData);
+ 
+     PokemonAnimTemplate animTemplate;
+     animTemplate.animation = spriteData.faceAnims[faceType].animation;
+@@ -5155,7 +5204,7 @@
+     int face = Pokemon_Face(clientType);
+ 
+     SpeciesSpriteData data;
+-    NARC_ReadFromMember(narc, 0, species * sizeof(SpeciesSpriteData), sizeof(SpeciesSpriteData), &data);
++    openmmo_species_sprite_read(narc, species, &data);
+ 
+     *cryDelay = data.faceAnims[face].cryDelay;
+ }
+@@ -5164,7 +5213,7 @@
+ {
+     SpeciesSpriteData data;
+ 
+-    NARC_ReadFromMember(narc, 0, species * sizeof(SpeciesSpriteData), sizeof(SpeciesSpriteData), &data);
++    openmmo_species_sprite_read(narc, species, &data);
+     *yOffset = data.yOffset;
+ }
+ 
+@@ -5172,7 +5221,7 @@
+ {
+     SpeciesSpriteData data;
+ 
+-    NARC_ReadFromMember(narc, 0, species * sizeof(SpeciesSpriteData), sizeof(SpeciesSpriteData), &data);
++    openmmo_species_sprite_read(narc, species, &data);
+     *xOffsetShadow = data.xOffsetShadow;
+ }
+ 
+@@ -5180,7 +5229,7 @@
+ {
+     SpeciesSpriteData data;
+ 
+-    NARC_ReadFromMember(narc, 0, species * sizeof(SpeciesSpriteData), sizeof(SpeciesSpriteData), &data);
++    openmmo_species_sprite_read(narc, species, &data);
+     *shadowSize = data.shadowSize;
+ }
+ 

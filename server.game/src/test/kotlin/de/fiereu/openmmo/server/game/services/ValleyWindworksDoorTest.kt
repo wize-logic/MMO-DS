@@ -5,6 +5,7 @@ import de.fiereu.openmmo.common.enums.CharacterGender
 import de.fiereu.openmmo.common.enums.Direction
 import de.fiereu.openmmo.common.enums.Region
 import de.fiereu.openmmo.common.enums.TileBehavior
+import de.fiereu.openmmo.items.ItemRegistry
 import de.fiereu.openmmo.maps.MapManager
 import de.fiereu.openmmo.net.game.packets.MapTransitionPacket
 import de.fiereu.openmmo.net.game.packets.MovementPacket
@@ -14,10 +15,12 @@ import de.fiereu.openmmo.server.game.script.ScriptRegistry
 import de.fiereu.openmmo.server.game.session.SCRIPT_SCOPE
 import de.fiereu.openmmo.server.game.storage.CharacterStore
 import de.fiereu.openmmo.server.game.storage.EntityIdService
+import de.fiereu.openmmo.server.game.storage.InMemoryOfflineItemRepository
 import de.fiereu.openmmo.server.game.testsupport.FakeCharacterRepository
 import de.fiereu.openmmo.server.game.testsupport.FakeSession
 import de.fiereu.openmmo.server.game.testsupport.movementService
 import de.fiereu.openmmo.server.game.testsupport.scriptRunner
+import de.fiereu.openmmo.server.game.testsupport.staticEncounterService
 import de.fiereu.openmmo.server.game.testsupport.trainerSightService
 import de.fiereu.openmmo.story.generated.sinnoh.SinnohFlags
 import io.kotest.core.spec.style.FunSpec
@@ -149,6 +152,9 @@ private fun interactions(store: CharacterStore): InteractionService {
       scriptRunner(store, maps, scripts = scripts),
       trainerSightService(store, maps, scripts = scripts),
       ViolationLog(),
+      ShopService(store, ItemRegistry(), InMemoryOfflineItemRepository()),
+      ItemRegistry(),
+      staticEncounterService(store, maps),
   )
 }
 

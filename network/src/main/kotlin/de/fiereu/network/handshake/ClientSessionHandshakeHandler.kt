@@ -8,6 +8,7 @@ import de.fiereu.network.ProtocolHandler
 import de.fiereu.network.SessionPhase
 import de.fiereu.network.Side
 import de.fiereu.network.TypedProtocolHandler
+import de.fiereu.network.WeakChecksumSizeException
 import de.fiereu.network.addBeforeProtocolLogger
 import de.fiereu.network.cipher.AesCtrSessionCipher
 import de.fiereu.network.handlers.ChecksumFrameDecoder
@@ -30,15 +31,29 @@ internal class ClientSessionHandshakeHandler(
 
   private val ephemeralKeyPair = EcKeys.generateEphemeralKeyPair()
 
+  /** The timestamp this session put in its ClientHello; the server signs its answer over it. */
+  private var helloTimestamp = 0L
+
   override fun onActive() {
-    session.send(ClientHelloPacket(timestamp = System.currentTimeMillis()))
+    helloTimestamp = System.currentTimeMillis()
+    session.send(ClientHelloPacket(timestamp = helloTimestamp))
   }
 
   init {
     on<ServerHelloPacket> { event ->
       val publicBytes = EcKeys.toUncompressedPoint(event.packet.ephemeralPublic)
-      if (!EcKeys.verify(rootPublic, publicBytes, event.packet.signature)) {
+      val signed =
+          HandshakeSignature.payload(publicBytes, event.packet.checksumSize, helloTimestamp)
+      if (!EcKeys.verify(rootPublic, signed, event.packet.signature)) {
         throw InvalidServerSignatureException()
+      }
+      // Only now is the size a signed fact rather than a byte off the wire, so this is where a
+      // profile too weak to authenticate a frame gets refused rather than installed.
+      if (event.packet.checksumSize < HandshakeSignature.MIN_CHECKSUM_SIZE) {
+        throw WeakChecksumSizeException(
+            event.packet.checksumSize,
+            HandshakeSignature.MIN_CHECKSUM_SIZE,
+        )
       }
       val crypto =
           SessionCryptoState.derive(

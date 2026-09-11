@@ -1,0 +1,25 @@
+--- a/src/field_bgm.c	2026-09-01 13:19:07.124808158 -0400
++++ b/src/field_bgm.c	2026-09-01 13:19:07.150474821 -0400
+@@ -281,6 +281,22 @@
+     u8 class = (u8)Trainer_LoadParam(trainerID, TRDATA_CLASS);
+     u16 i, bgmID = SEQ_EYE_KID_sseq;
+ 
++    /* A CARRIED TRAINER IS HEARD AS THEIR OWN CLASS, not as the one they are
++     * drawn as. The class byte below is what mmo/TRAINER_CLASS put them in so
++     * this game would have a picture for them, and for a third of them that
++     * is a stand-in, so choosing the track off it announced a Johto trainer
++     * with a Sinnoh class's theme. The porter writes the source's own answer
++     * per trainer (openmmo_encounterbgm.c) and 0 means it has nothing to say,
++     * which is every trainer of this game's own. */
++    {
++        extern unsigned int openmmo_encounter_bgm(int trainerID);
++        unsigned int ported = openmmo_encounter_bgm((int)trainerID);
++
++        if (ported != 0) {
++            return (u16)ported;
++        }
++    }
++
+     for (i = 0; i < NELEMS(sTrainerEncounterBGMs); i++) {
+         if (sTrainerEncounterBGMs[i][0] == class) {
+             bgmID = sTrainerEncounterBGMs[i][1];

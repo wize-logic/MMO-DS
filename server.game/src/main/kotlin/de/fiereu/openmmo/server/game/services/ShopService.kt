@@ -13,6 +13,8 @@ import de.fiereu.openmmo.server.game.session.OPEN_SHOP
 import de.fiereu.openmmo.server.game.session.OpenShop
 import de.fiereu.openmmo.server.game.session.PLAYER_STATE
 import de.fiereu.openmmo.server.game.storage.CharacterStore
+import de.fiereu.openmmo.server.game.storage.OfflineItemRepository
+import de.fiereu.openmmo.server.game.storage.sellableQuantity
 import io.github.oshai.kotlinlogging.KotlinLogging
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -30,6 +32,7 @@ class ShopService
 constructor(
     private val characterStore: CharacterStore,
     private val items: ItemRegistry,
+    private val offlineItems: OfflineItemRepository,
 ) {
 
   fun open(session: SessionContext, npcEntityId: Long, shelf: List<ItemDef>) {
@@ -118,6 +121,21 @@ constructor(
     // Anything halving to nothing, a key item above all, would be deleted and paid nothing for.
     if (item == null || item.price < 2) {
       log.warn { "char=$charId offered stack $itemId, which a mart does not buy" }
+      return
+    }
+
+    /* What of that stack came out of a save file, which a mart will not turn into money. */
+    val marked = offlineItems.load(charId)[itemId] ?: 0
+    val sellable = sellableQuantity(held, marked)
+    if (quantity > sellable) {
+      log.info {
+        "char=$charId offered $quantity of ${item.name} with only $sellable sellable" +
+            " ($marked of $held came from a save file)"
+      }
+      session.send(
+          notice(
+              "$sellable of your ${item.name} can be sold here. The rest came in from an offline" +
+                  " save, and a mart will not turn those into money."))
       return
     }
 

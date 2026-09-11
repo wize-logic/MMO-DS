@@ -11,6 +11,10 @@ import de.fiereu.openmmo.common.enums.Weather
 import de.fiereu.openmmo.net.game.packets.MapData
 import java.util.Base64
 
+/** The wire region a ported map travels as, and the first header id one may have. */
+const val PORTED_REGION = 3
+const val PORTED_HEADER_BASE = 594
+
 class MapDef(
     /**
      * What the decomp calls this map, lowercased: `jubilife_city_pokecenter_1f`. It is the only
@@ -58,10 +62,29 @@ class MapDef(
      * The matrix this map is placed on, for the DS regions, whose geometry belongs to the matrix
      * rather than to the map. Null for the GBA regions, which carry their own [blockData].
      */
+    /** Whether anything grows on this map, which only a cave has to be asked. */
+    val hasGrass: Boolean = false,
     val terrain: TerrainPlane? = null,
+    /**
+     * A `static:<species>:<level>` fight this map's own scripts stage that no person and no sign on
+     * the map carries, or "" for every other map.
+     */
+    val staticSite: String = "",
+    /** The tiles of this map's headbutt trees, on a ported map that has any; see [HeadbuttTree]. */
+    val headbuttTrees: List<HeadbuttTree> = emptyList(),
+    /** What a smashed rock may leave behind here, or null where the rubble is only rubble. */
+    val rubble: RockSmashRubble? = null,
+    /** Whether Fly may be used from this map, which is the header's own `isFlyAllowed`. */
+    val flyAllowed: Boolean = false,
 ) {
 
   val tiles: List<Tile2D> by lazy { decodeBlockData(blockData, behaviorData) }
+
+  /** Whether this map came out of another cartridge. */
+  val ported: Boolean
+    get() =
+        regionId.toInt() == PORTED_REGION &&
+            (((bankId.toInt() and 0xFF) shl 8) or (mapId.toInt() and 0xFF)) >= PORTED_HEADER_BASE
 
   fun tileAt(x: Int, y: Int): Tile2D? =
       terrain?.tileAt(x, y)

@@ -468,6 +468,7 @@ static void test_fill(void)
     struct openmmo_rect panel, guest, d[2];
     int i, inside = 0, ratio = 0, inset = 0, floor_ = 0, ceil_ = 0;
     int band = 0, want_end = 0, world = 0, pen = 0, chrome = 0, tx, ty;
+    int smaller = 0;
 
     for (i = 0; i < (int)(sizeof over / sizeof over[0]); i++) {
         openmmo_view_fill_panel(over[i].ww, over[i].wh,
@@ -527,6 +528,29 @@ static void test_fill(void)
     CHECK(inset == 0, "fill split: the guest picture is inset 4:3");
     CHECK(floor_ == 0, "fill split: never below 256 columns");
     CHECK(ceil_ == 0, "fill split: never past half the window");
+
+    /* And at the top of the ramp too, which is where it was not. */
+    ceil_ = 0;
+    smaller = 0;
+    for (i = 0; i < (int)(sizeof split / sizeof split[0]); i++) {
+        int sec;
+
+        for (sec = OPENMMO_VIEW_SEC_MIN; sec <= OPENMMO_VIEW_SEC_MAX; sec++) {
+            long top, bottom;
+
+            openmmo_view_fill_split(split[i].ww, split[i].wh, sec, &panel);
+            if (panel.w * 2 > split[i].ww) ceil_++;
+            openmmo_view_screen_rects(&g, 256, 192, sec,
+                                      split[i].ww, split[i].wh, d);
+            top = (long)d[0].w * d[0].h;
+            bottom = (long)d[1].w * d[1].h;
+            if (top <= bottom) smaller++;
+        }
+    }
+    CHECK(ceil_ == 0,
+          "fill split: never past half the window at any point of the ramp");
+    CHECK(smaller == 0,
+          "fill split: the world is the larger screen at every window and step");
 
     openmmo_view_fill_split(1600, 900, OPENMMO_VIEW_SEC_MAX, &panel);
     want_end = 0;

@@ -298,6 +298,64 @@ class CharacterStoreCacheTest :
           store.getCharacter(id).shouldNotBeNull()
         }
       }
+
+      test("withLoaded lets go of a character nobody is playing") {
+        runTest {
+          val repo = FakeCharacterRepository()
+          val store = CharacterStore(repo, EntityIdService(), this)
+          val id = store.createCharacter(1, "Ash", CharacterGender.MALE, Region.HOENN).info.id
+          store.unloadCharacterAsync(id)
+          advanceUntilIdle()
+
+          store.withLoaded(id) { store.addMoney(id, 5) } shouldBe true
+          advanceUntilIdle()
+
+          store.getCharacter(id) shouldBe null
+          repo.saved[id]!!.info.money shouldBe 30005
+        }
+      }
+
+      test("withLoaded keeps a character whose player logged in while it ran") {
+        runTest {
+          val repo = FakeCharacterRepository()
+          val online = mutableSetOf<Long>()
+          val store =
+              CharacterStore(repo, EntityIdService(), this, CharacterPresence { it in online })
+          val id = store.createCharacter(1, "Ash", CharacterGender.MALE, Region.HOENN).info.id
+          store.unloadCharacterAsync(id)
+          advanceUntilIdle()
+          store.getCharacter(id) shouldBe null
+
+          store.withLoaded(id) { online.add(id) }.shouldNotBeNull()
+          advanceUntilIdle()
+
+          store.getCharacter(id).shouldNotBeNull()
+          store.addMoney(id, 5) shouldBe true
+          store.getCharacter(id)!!.info.money shouldBe 30005
+        }
+      }
+
+      test("an unload arriving during withLoaded waits for it to finish") {
+        runTest {
+          val repo = FakeCharacterRepository()
+          val online = mutableSetOf<Long>()
+          val store =
+              CharacterStore(repo, EntityIdService(), this, CharacterPresence { it in online })
+          val id = store.createCharacter(1, "Ash", CharacterGender.MALE, Region.HOENN).info.id
+          online.add(id)
+
+          store.withLoaded(id) {
+            online.remove(id)
+            store.unloadCharacterAsync(id)
+            advanceUntilIdle()
+            store.addMoney(id, 5) shouldBe true
+          }
+          advanceUntilIdle()
+
+          store.getCharacter(id) shouldBe null
+          repo.saved[id]!!.info.money shouldBe 30005
+        }
+      }
     })
 
 /**

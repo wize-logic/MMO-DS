@@ -1,0 +1,41 @@
+--- a/src/overlay006/ov6_02248948.c	2026-09-02 11:19:02.620476743 -0400
++++ b/src/overlay006/ov6_02248948.c	2026-09-02 11:22:52.729337506 -0400
+@@ -23,22 +23,32 @@
+ typedef void (*UnkFuncPtr_ov6_02249834)(UnkStruct_ov5_021D1BEC *);
+ typedef BOOL (*UnkFuncPtr_ov6_0224984C)(UnkStruct_ov5_021D1BEC *);
+ 
+-static const UnkFuncPtr_ov6_02249840 Unk_ov6_02249840[3] = {
++/* The fourth row is HeartGold's headbutted tree, derived onto this scaffolding
++ * (mods/openmmo/src/openmmo_headbutt_effect.c); a ported map's generated
++ * field-move bank starts it as obstacle kind 3. */
++extern UnkStruct_ov5_021D1BEC *openmmo_headbutt_effect_new(FieldSystem *fieldSystem);
++extern void openmmo_headbutt_effect_free(UnkStruct_ov5_021D1BEC *effect);
++extern BOOL openmmo_headbutt_effect_done(UnkStruct_ov5_021D1BEC *effect);
++
++static const UnkFuncPtr_ov6_02249840 Unk_ov6_02249840[4] = {
+     ov6_0224830C,
+     ov6_02248450,
+-    ov6_02248464
++    ov6_02248464,
++    openmmo_headbutt_effect_new
+ };
+ 
+-static const UnkFuncPtr_ov6_02249834 Unk_ov6_02249834[3] = {
++static const UnkFuncPtr_ov6_02249834 Unk_ov6_02249834[4] = {
+     ov6_02248320,
+     ov6_02248478,
+-    ov6_02248478
++    ov6_02248478,
++    openmmo_headbutt_effect_free
+ };
+ 
+-static const UnkFuncPtr_ov6_0224984C Unk_ov6_0224984C[3] = {
++static const UnkFuncPtr_ov6_0224984C Unk_ov6_0224984C[4] = {
+     ov6_02248328,
+     ov6_02248480,
+-    ov6_02248480
++    ov6_02248480,
++    openmmo_headbutt_effect_done
+ };
+ 
+ static void ov6_02248948(SysTask *param0, void *param1)

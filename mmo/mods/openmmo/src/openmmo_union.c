@@ -27,6 +27,7 @@
 #include "trainer_info.h"
 
 #include "../../../include/charcode.h"
+#include "../../../include/endpoint.h"
 #include "../../../include/client.h"
 
 #define UNION_HEAP          HEAP_ID_FIELD2
@@ -52,7 +53,7 @@ typedef struct {
     int demo;
     int count;
     int leader_at;
-    char name[UNION_SLOTS][MMO_CHAR_NAME_MAX + 1];
+    char name[UNION_SLOTS][MMO_TEXT_BYTES(MMO_CHAR_NAME_MAX)];
 } UnionRoom;
 
 static openmmo_client *s_client;
@@ -63,14 +64,14 @@ static int s_pending;
 
 static int want_open(void)
 {
-    const char *env = getenv("OPENMMO_UNION");
+    const char *env = openmmo_dev_env("OPENMMO_UNION");
 
     if (env == NULL || env[0] == '\0' || env[0] == '0')
         return 0;
     return 1;
 }
 
-static String *latin1(enum HeapID heap, const char *s)
+static String *utf8_string(enum HeapID heap, const char *s)
 {
     mmo_charcode buf[64];
     String *out = String_Init(64, heap);
@@ -140,8 +141,8 @@ static void fill_from_link(UnionRoom *u, const openmmo_link *link)
     if (u->count > UNION_SLOTS)
         u->count = UNION_SLOTS;
     for (i = 0; i < u->count; i++) {
-        strncpy(u->name[i], link->member[i].name, MMO_CHAR_NAME_MAX);
-        u->name[i][MMO_CHAR_NAME_MAX] = '\0';
+        strncpy(u->name[i], link->member[i].name, sizeof u->name[i] - 1);
+        u->name[i][sizeof u->name[i] - 1] = '\0';
         if (u->name[i][0] == '\0')
             strncpy(u->name[i], "?", sizeof u->name[i]);
         if (link->member[i].entity_id == link->leader)
@@ -154,10 +155,10 @@ static void fill_demo(UnionRoom *u)
     u->demo = 1;
     u->count = 2;
     u->leader_at = 0;
-    strncpy(u->name[0], "RED", MMO_CHAR_NAME_MAX);
-    strncpy(u->name[1], "BLUE", MMO_CHAR_NAME_MAX);
-    u->name[0][MMO_CHAR_NAME_MAX] = '\0';
-    u->name[1][MMO_CHAR_NAME_MAX] = '\0';
+    strncpy(u->name[0], "RED", sizeof u->name[0] - 1);
+    strncpy(u->name[1], "BLUE", sizeof u->name[1] - 1);
+    u->name[0][sizeof u->name[0] - 1] = '\0';
+    u->name[1][sizeof u->name[1] - 1] = '\0';
 }
 
 static int paint_info(FieldSystem *fs, UnionRoom *u)
@@ -185,7 +186,7 @@ static int paint_info(FieldSystem *fs, UnionRoom *u)
                                 TRAINER_NAME_LEN + 1);
     }
     if (name == NULL)
-        name = latin1(UNION_HEAP, "YOU");
+        name = utf8_string(UNION_HEAP, "YOU");
     if (name != NULL) {
         Text_AddPrinterWithParams(&u->infoWin, FONT_SYSTEM, name,
                                   2, 2, TEXT_SPEED_INSTANT, NULL);
@@ -219,7 +220,7 @@ static int paint_list(FieldSystem *fs, UnionRoom *u)
         } else {
             snprintf(line, sizeof line, "%d. --------", i + 1);
         }
-        u->rowStr[i] = latin1(UNION_HEAP, line);
+        u->rowStr[i] = utf8_string(UNION_HEAP, line);
         if (u->rowStr[i] == NULL)
             return 0;
         StringList_AddFromString(u->choices, u->rowStr[i], (u32)i);
@@ -254,7 +255,7 @@ static int paint_message(FieldSystem *fs, UnionRoom *u)
 {
     const Options *options = SaveData_GetOptions(fs->saveData);
 
-    u->msgStr = latin1(UNION_HEAP, "Choose a friend to join.");
+    u->msgStr = utf8_string(UNION_HEAP, "Choose a friend to join.");
     if (u->msgStr == NULL)
         return 0;
     FieldMessage_AddWindow(fs->bgConfig, &u->msgWin, BG_LAYER_MAIN_3);

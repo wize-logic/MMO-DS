@@ -81,10 +81,23 @@ for dir in "$MODS"/*/; do
         bad "$pkg has a mod.toml"
         continue
     fi
+    # The four directories a package's payload may live in, plus the two
+    # states a ported one is legally in without any of them. Its bytes are the
+    # player's cartridge's and are never committed, so a clean checkout has
+    # only the recipe that says where they come from; and a region port writes
+    # `.cooked/` rather than `narc/`, because a map header table and a
+    # billboard list are cooked artifacts with nothing here to cook them from.
+    # A composed sound package is the third legal state with none of those:
+    # its bytes are written at Play out of the player's own cartridges, so a
+    # clean checkout holds only the mod.toml that names the pair.
+    composed=0
+    case "$pkg" in sound_*_*) composed=1 ;; esac
     if find "$dir" \( -name '*.c' -o -name '*.h' \) | grep -q .; then
         bad "$pkg carries no C"
-    elif [ ! -d "$dir/content" ] && [ ! -d "$dir/records" ] \
-            && [ ! -d "$dir/narc" ] && [ ! -d "$dir/replace" ]; then
+    elif [ "$composed" -eq 0 ] \
+            && [ ! -d "$dir/content" ] && [ ! -d "$dir/records" ] \
+            && [ ! -d "$dir/narc" ] && [ ! -d "$dir/replace" ] \
+            && [ ! -d "$dir/.cooked" ] && [ ! -f "$dir/port.recipe" ]; then
         bad "$pkg follows the engine package layout"
     else
         ok "$pkg is a mod.toml and content, with no C in it"

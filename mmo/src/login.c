@@ -4,6 +4,7 @@
 #include "login.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "crypto.h"
@@ -37,12 +38,27 @@ static u8 login_os(void)
     return MMO_LOGIN_OS_LINUX;
 }
 
+/* The revision of the install this client is part of. */
+int mmo_login_installation_revision(void)
+{
+    const char *text = getenv("OPENMMO_REVISION");
+    char *end;
+    long value;
+
+    if (text == NULL || *text == '\0')
+        return MMO_CLIENT_REVISION;
+    value = strtol(text, &end, 10);
+    if (end == text || value <= 0 || value > 0x7fffffffL)
+        return MMO_CLIENT_REVISION;
+    return (int)value;
+}
+
 /* Everything after the method, which is the same for both of them. */
 static void login_write_tail(mmo_wbuf *body)
 {
     mmo_put_utf16_nt(body, "en");          /* language */
     mmo_put_s32le(body, MMO_CLIENT_REVISION);  /* clientRevision */
-    mmo_put_s32le(body, MMO_CLIENT_REVISION);  /* installationRevision */
+    mmo_put_s32le(body, mmo_login_installation_revision()); /* installationRevision */
     mmo_put_u8(body, login_os());          /* os */
     mmo_put_bytes_u8(body, NULL, 0);       /* hardwareInfoCache (empty) */
 }
@@ -174,6 +190,10 @@ int mmo_login_explain_refusal(int state, char *buf, size_t n)
         break;
     case MMO_LOGIN_INVALID_SAVED_CREDENTIALS:
         why = "saved credentials were not accepted.";
+        break;
+    case MMO_LOGIN_CLIENT_OUT_OF_DATE:
+        why = "this client is out of date. Update it and sign in again; "
+              "playing offline needs no update.";
         break;
     default:
         return snprintf(buf, n, "the login server refused (%d).", state);

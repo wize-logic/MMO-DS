@@ -1,0 +1,276 @@
+--- a/src/pokemon_sprite.c
++++ b/src/pokemon_sprite.c
+@@ -14,6 +14,26 @@
+ #include "res/pokemon/pl_otherpoke.naix"
+ #include "pc_sprite_mirror.h"
+ 
++/* openmmo: the frame a mon sprite is drawn through follows the battle's page
++ * layout (mods/openmmo/src/openmmo_spriteframe.c): the cartridge's 80x80, or
++ * 128x88 for the two sprites of a single battle. Set here, in the translation
++ * unit, because a patched header is only seen by the units that open it first. */
++#undef MON_SPRITE_FRAME_WIDTH
++#undef MON_SPRITE_FRAME_HEIGHT
++int openmmo_mon_frame_w(void);
++int openmmo_mon_frame_h(void);
++#define MON_SPRITE_FRAME_WIDTH  (openmmo_mon_frame_w())
++#define MON_SPRITE_FRAME_HEIGHT (openmmo_mon_frame_h())
++
++/* openmmo: the page layout the manager draws through, which rectangle of the
++ * 256x256 texture each slot's frame is, how large a frame is, and where the
++ * shadow block sits (mods/openmmo/src/openmmo_spriteframe.c). */
++extern void openmmo_spriteframe_uv(const void *man, int slot, int frame, int uv[4]);
++extern void openmmo_spriteframe_shadow_uv(const void *man, int size, int uv[4]);
++extern unsigned openmmo_spriteframe_shadow_offset(const void *man);
++extern int openmmo_spriteframe_buffer(void *man, int slot, const u8 *rawPair);
++extern void openmmo_spriteframe_free(void *man);
++
+ #define MAX_SPINDA_SPOTS       4
+ #define SPINDA_SPOT_COORDS_END 0xFF
+ 
+@@ -39,8 +59,15 @@
+ #define NUM_MON_SPRITE_FRAMES_H 2
+ #define NUM_MON_SPRITE_FRAMES_V 1
+ 
+-#define MON_SPRITE_WIDTH  (MON_SPRITE_FRAME_WIDTH * NUM_MON_SPRITE_FRAMES_H)
+-#define MON_SPRITE_HEIGHT (MON_SPRITE_FRAME_HEIGHT * NUM_MON_SPRITE_FRAMES_V)
++/* openmmo: a SHEET is the cartridge's 160x80 pair whatever frame the page draws
++ * through; these size the copies out of one and must not follow the frame. */
++#define MON_SPRITE_WIDTH  (MON_SPRITE_FRAME_WIDTH_TILES * TILE_WIDTH_PIXELS * NUM_MON_SPRITE_FRAMES_H)
++#define MON_SPRITE_HEIGHT (MON_SPRITE_FRAME_HEIGHT_TILES * TILE_HEIGHT_PIXELS * NUM_MON_SPRITE_FRAMES_V)
++/* openmmo: a frame taller than the cartridge's is drawn with its centre this much
++ * higher, so its bottom edge, where the height byte seats the feet, stays
++ * where the cartridge's was; a scaled draw lifts by the scaled amount, so the
++ * edge stays put at every scale. Zero for the cartridge's own frame. */
++#define MON_SPRITE_FRAME_LIFT ((MON_SPRITE_FRAME_HEIGHT - MON_SPRITE_FRAME_HEIGHT_TILES * TILE_HEIGHT_PIXELS) / 2)
+ 
+ #define MON_SHADOW_BASE_PLTT_SLOT 3
+ 
+@@ -304,92 +331,10 @@
+     sSpindaSpot3Coords,
+ };
+ 
+-static const int sMonSpriteTextureCoords[MAX_MON_SPRITES][NUM_MON_SPRITE_FRAMES_H][4] = {
+-    {
+-        {
+-            0,
+-            0,
+-            MON_SPRITE_FRAME_WIDTH,
+-            MON_SPRITE_FRAME_HEIGHT,
+-        },
+-        {
+-            MON_SPRITE_FRAME_WIDTH,
+-            0,
+-            MON_SPRITE_FRAME_WIDTH * 2,
+-            MON_SPRITE_FRAME_HEIGHT,
+-        },
+-    },
+-    {
+-        {
+-            0,
+-            MON_SPRITE_FRAME_HEIGHT,
+-            MON_SPRITE_FRAME_WIDTH,
+-            MON_SPRITE_FRAME_HEIGHT * 2,
+-        },
+-        {
+-            MON_SPRITE_FRAME_WIDTH,
+-            MON_SPRITE_FRAME_HEIGHT,
+-            MON_SPRITE_FRAME_WIDTH * 2,
+-            MON_SPRITE_FRAME_HEIGHT * 2,
+-        },
+-    },
+-    {
+-        {
+-            0,
+-            MON_SPRITE_FRAME_HEIGHT * 2,
+-            MON_SPRITE_FRAME_WIDTH,
+-            MON_SPRITE_FRAME_HEIGHT * 3,
+-        },
+-        {
+-            MON_SPRITE_FRAME_WIDTH,
+-            MON_SPRITE_FRAME_HEIGHT * 2,
+-            MON_SPRITE_FRAME_WIDTH * 2,
+-            MON_SPRITE_FRAME_HEIGHT * 3,
+-        },
+-    },
+-    {
+-        {
+-            MON_SPRITE_FRAME_WIDTH * 2,
+-            0,
+-            MON_SPRITE_FRAME_WIDTH * 3,
+-            MON_SPRITE_FRAME_HEIGHT,
+-        },
+-        {
+-            MON_SPRITE_FRAME_WIDTH * 2,
+-            MON_SPRITE_FRAME_HEIGHT,
+-            MON_SPRITE_FRAME_WIDTH * 3,
+-            MON_SPRITE_FRAME_HEIGHT * 2,
+-        },
+-    },
+-};
+-
+-static const int sShadowTextureCoords[MAX_SHADOW_SIZES][4] = {
+-    [SHADOW_SIZE_NONE] = {
+-        // these values are essentially meaningless because the shadow is hidden
+-        MON_SPRITE_FRAME_WIDTH * 2,
+-        MON_SPRITE_FRAME_HEIGHT * 2,
+-        MON_SPRITE_FRAME_WIDTH * 2 + SHADOW_SPRITE_FRAME_WIDTH,
+-        MON_SPRITE_FRAME_HEIGHT * 2 + SHADOW_SPRITE_FRAME_HEIGHT,
+-    },
+-    [SHADOW_SIZE_SMALL] = {
+-        MON_SPRITE_FRAME_WIDTH * 2,
+-        MON_SPRITE_FRAME_HEIGHT * 2,
+-        MON_SPRITE_FRAME_WIDTH * 2 + SHADOW_SPRITE_FRAME_WIDTH,
+-        MON_SPRITE_FRAME_HEIGHT * 2 + SHADOW_SPRITE_FRAME_HEIGHT,
+-    },
+-    [SHADOW_SIZE_MEDIUM] = {
+-        MON_SPRITE_FRAME_WIDTH * 2,
+-        MON_SPRITE_FRAME_HEIGHT * 2 + SHADOW_SPRITE_FRAME_HEIGHT,
+-        MON_SPRITE_FRAME_WIDTH * 2 + SHADOW_SPRITE_FRAME_WIDTH,
+-        MON_SPRITE_FRAME_HEIGHT * 2 + SHADOW_SPRITE_FRAME_HEIGHT * 2,
+-    },
+-    [SHADOW_SIZE_LARGE] = {
+-        MON_SPRITE_FRAME_WIDTH * 2,
+-        MON_SPRITE_FRAME_HEIGHT * 2 + SHADOW_SPRITE_FRAME_HEIGHT * 2,
+-        MON_SPRITE_FRAME_WIDTH * 2 + SHADOW_SPRITE_FRAME_WIDTH,
+-        MON_SPRITE_FRAME_HEIGHT * 2 + SHADOW_SPRITE_FRAME_HEIGHT * 3,
+-    },
+-};
++/* openmmo: the texture coordinates of a slot's frame and of a shadow were two
++ * static tables here; they are computed from the page layout now
++ * (mods/openmmo/src/openmmo_spriteframe.c), which checks its 80x80 layout
++ * against the cartridge's numbers on first use. */
+ 
+ static void BufferPokemonSpriteCharData(PokemonSpriteManager *monSpriteMan);
+ static void BufferPokemonSpritePlttData(PokemonSpriteManager *monSpriteMan);
+@@ -439,7 +384,7 @@
+ 
+     for (int i = 0; i < MON_SPRITE_HEIGHT; i++) {
+         for (int j = 0; j < MON_SPRITE_WIDTH / 4; j++) {
+-            monSpriteMan->charRawData[i * MAN_Y_OFFSET + j + MAN_SHADOW_CHAR_OFFSET] = rawCharData[i * NCGR_Y_OFFSET + j];
++            monSpriteMan->charRawData[i * MAN_Y_OFFSET + j + openmmo_spriteframe_shadow_offset(monSpriteMan)] = rawCharData[i * NCGR_Y_OFFSET + j];
+         }
+     }
+ 
+@@ -479,6 +424,22 @@
+             }
+ 
+             PokemonSprite_TickAnim(&monSpriteMan->sprites[i]);
++            /* openmmo: a baked loop steps to its next frame on its own clock. */
++            {
++                extern int openmmo_sprite_strip_tick(int slot, int partial);
++                int step = openmmo_sprite_strip_tick(i, monSpriteMan->sprites[i].transforms.partialDraw);
++
++                if (step) {
++                    monSpriteMan->sprites[i].needReloadChar = TRUE;
++                }
++
++                if (step == 2) {
++                    /* the loop settled for a partial draw: the window's first
++                     * frame must already show the settled pose */
++                    BufferPokemonSpriteCharData(monSpriteMan);
++                    PokemonSpriteManager_UpdateCharAndPltt(monSpriteMan);
++                }
++            }
+ 
+             G3_TexPlttBase(monSpriteMan->plttBaseAddr + PLTT_OFFSET_CAST(i), monSpriteMan->imageProxy.attr.fmt);
+             G3_Translate((monSpriteMan->sprites[i].transforms.xCenter + monSpriteMan->sprites[i].transforms.xPivot) << FX32_SHIFT, (monSpriteMan->sprites[i].transforms.yCenter + monSpriteMan->sprites[i].transforms.yPivot) << FX32_SHIFT, monSpriteMan->sprites[i].transforms.zCenter << FX32_SHIFT);
+@@ -491,14 +452,17 @@
+             G3_PolygonAttr(GX_LIGHTMASK_NONE, GX_POLYGONMODE_MODULATE, GX_CULL_NONE, monSpriteMan->sprites[i].polygonID, monSpriteMan->sprites[i].transforms.alpha, 0);
+ 
+             if (monSpriteMan->sprites[i].transforms.partialDraw) {
+-                u0 = sMonSpriteTextureCoords[i][monSpriteMan->sprites[i].currSpriteFrame][0] + monSpriteMan->sprites[i].transforms.drawXOffset;
+-                u1 = sMonSpriteTextureCoords[i][monSpriteMan->sprites[i].currSpriteFrame][0] + monSpriteMan->sprites[i].transforms.drawXOffset + monSpriteMan->sprites[i].transforms.drawWidth;
+-                v0 = sMonSpriteTextureCoords[i][monSpriteMan->sprites[i].currSpriteFrame][1] + monSpriteMan->sprites[i].transforms.drawYOffset;
+-                v1 = sMonSpriteTextureCoords[i][monSpriteMan->sprites[i].currSpriteFrame][1] + monSpriteMan->sprites[i].transforms.drawYOffset + monSpriteMan->sprites[i].transforms.drawHeight;
++                int uv[4];
++
++                openmmo_spriteframe_uv(monSpriteMan, i, monSpriteMan->sprites[i].currSpriteFrame, uv);
++                u0 = uv[0] + monSpriteMan->sprites[i].transforms.drawXOffset;
++                u1 = uv[0] + monSpriteMan->sprites[i].transforms.drawXOffset + monSpriteMan->sprites[i].transforms.drawWidth;
++                v0 = uv[1] + monSpriteMan->sprites[i].transforms.drawYOffset;
++                v1 = uv[1] + monSpriteMan->sprites[i].transforms.drawYOffset + monSpriteMan->sprites[i].transforms.drawHeight;
+ 
+                 NNS_G2dDrawSpriteFast(
+                     monSpriteMan->sprites[i].transforms.xCenter - MON_SPRITE_FRAME_WIDTH / 2 + monSpriteMan->sprites[i].transforms.drawXOffset + monSpriteMan->sprites[i].transforms.xOffset,
+-                    monSpriteMan->sprites[i].transforms.yCenter - MON_SPRITE_FRAME_HEIGHT / 2 + monSpriteMan->sprites[i].transforms.drawYOffset + monSpriteMan->sprites[i].transforms.yOffset - monSpriteMan->sprites[i].shadow.height,
++                    monSpriteMan->sprites[i].transforms.yCenter - MON_SPRITE_FRAME_HEIGHT / 2 - MON_SPRITE_FRAME_LIFT + monSpriteMan->sprites[i].transforms.drawYOffset + monSpriteMan->sprites[i].transforms.yOffset - monSpriteMan->sprites[i].shadow.height,
+                     monSpriteMan->sprites[i].transforms.zCenter + monSpriteMan->sprites[i].transforms.zOffset,
+                     monSpriteMan->sprites[i].transforms.drawWidth,
+                     monSpriteMan->sprites[i].transforms.drawHeight,
+@@ -509,14 +473,17 @@
+             } else {
+                 width = (MON_SPRITE_FRAME_WIDTH * monSpriteMan->sprites[i].transforms.scaleX) >> MON_AFFINE_SHIFT;
+                 height = (MON_SPRITE_FRAME_HEIGHT * monSpriteMan->sprites[i].transforms.scaleY) >> MON_AFFINE_SHIFT;
+-                u0 = sMonSpriteTextureCoords[i][monSpriteMan->sprites[i].currSpriteFrame][0];
+-                u1 = sMonSpriteTextureCoords[i][monSpriteMan->sprites[i].currSpriteFrame][2];
+-                v0 = sMonSpriteTextureCoords[i][monSpriteMan->sprites[i].currSpriteFrame][1];
+-                v1 = sMonSpriteTextureCoords[i][monSpriteMan->sprites[i].currSpriteFrame][3];
++                int uv[4];
++
++                openmmo_spriteframe_uv(monSpriteMan, i, monSpriteMan->sprites[i].currSpriteFrame, uv);
++                u0 = uv[0];
++                u1 = uv[2];
++                v0 = uv[1];
++                v1 = uv[3];
+ 
+                 NNS_G2dDrawSpriteFast(
+                     monSpriteMan->sprites[i].transforms.xCenter - width / 2 + monSpriteMan->sprites[i].transforms.xOffset,
+-                    monSpriteMan->sprites[i].transforms.yCenter - height / 2 + monSpriteMan->sprites[i].transforms.yOffset - monSpriteMan->sprites[i].shadow.height,
++                    monSpriteMan->sprites[i].transforms.yCenter - height / 2 - ((MON_SPRITE_FRAME_LIFT * monSpriteMan->sprites[i].transforms.scaleY) >> MON_AFFINE_SHIFT) + monSpriteMan->sprites[i].transforms.yOffset - monSpriteMan->sprites[i].shadow.height,
+                     monSpriteMan->sprites[i].transforms.zCenter + monSpriteMan->sprites[i].transforms.zOffset,
+                     width,
+                     height,
+@@ -553,10 +520,13 @@
+                     monSpriteMan->sprites[i].shadow.y = monSpriteMan->sprites[i].transforms.yCenter + monSpriteMan->sprites[i].transforms.yOffset + monSpriteMan->sprites[i].shadow.yOffset;
+                 }
+ 
+-                u0 = sShadowTextureCoords[monSpriteMan->sprites[i].shadow.size][0];
+-                v0 = sShadowTextureCoords[monSpriteMan->sprites[i].shadow.size][1];
+-                u1 = sShadowTextureCoords[monSpriteMan->sprites[i].shadow.size][2];
+-                v1 = sShadowTextureCoords[monSpriteMan->sprites[i].shadow.size][3];
++                int uv[4];
++
++                openmmo_spriteframe_shadow_uv(monSpriteMan, monSpriteMan->sprites[i].shadow.size, uv);
++                u0 = uv[0];
++                v0 = uv[1];
++                u1 = uv[2];
++                v1 = uv[3];
+ 
+                 NNS_G2dDrawSpriteFast(monSpriteMan->sprites[i].shadow.x - width / 2, monSpriteMan->sprites[i].shadow.y - height / 2, -1000, width, height, u0, v0, u1, v1);
+             }
+@@ -572,6 +542,7 @@
+         pc_sprite_mirror_forget(&monSpriteMan->sprites[i]);
+     }
+ 
++    openmmo_spriteframe_free(monSpriteMan);
+     Heap_Free(monSpriteMan->charRawData);
+     Heap_Free(monSpriteMan->plttRawData);
+     Heap_Free(monSpriteMan->plttRawDataUnfaded);
+@@ -1339,10 +1310,25 @@
+ 
+             rawCharData = charData->pRawData;
+ 
+-            PokemonSprite_Decrypt(rawCharData, monSpriteMan->sprites[i].template.narcID);
++            /* openmmo: a sheet with more than two frames is one a fill baked out of
++             * Black's animation (mmo/tools/portsprites.py). The plugin decrypts all of
++             * it and lays the frame it is showing into the first pair, so the copy
++             * below and the texture coordinates see the two-frame sheet they expect;
++             * anything else is decrypted the engine's own way. */
++            {
++                extern int openmmo_sprite_strip_prepare(int slot, int character, void *charData, u8 *rawCharData, void *man);
++
++                if (!openmmo_sprite_strip_prepare(i, monSpriteMan->sprites[i].template.character, charData, rawCharData, monSpriteMan)) {
++                    PokemonSprite_Decrypt(rawCharData, monSpriteMan->sprites[i].template.narcID);
++                }
++            }
+             TryDrawSpindaSpots(&monSpriteMan->sprites[i], rawCharData);
+ 
+-            if (i == 3) {
++            if (openmmo_spriteframe_buffer(monSpriteMan, i, rawCharData)) {
++                /* openmmo: a layout wider than the cartridge's lays the sheet, or the
++                 * plugin's composed picture, into the slot's cell itself; the copies
++                 * below are the cartridge's and run for its own layout. */
++            } else if (i == 3) {
+                 for (y = 0; y < MON_SPRITE_HEIGHT; y++) {
+                     for (x = 0; x < MON_SPRITE_WIDTH / 2; x++) {
+                         if (x < MON_SPRITE_WIDTH / 4) {
