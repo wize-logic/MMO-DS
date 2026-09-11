@@ -120,4 +120,15 @@ constructor(
       withContext(dispatcher) {
         dsl.update(USERS).set(USERS.ROLES, roles.mask).where(USERS.ID.eq(userId)).execute() > 0
       }
+
+  override suspend fun setPassword(userId: Int, password: String): Boolean =
+      withContext(dispatcher) {
+        val written =
+            dsl.update(USERS)
+                .set(USERS.PASSWORD_HASH, PasswordHash.hash(sha1Hex(password)))
+                .where(USERS.ID.eq(userId))
+                .execute()
+        if (written > 0) log.info { "Wrote a new credential for user $userId" }
+        written > 0
+      }
 }

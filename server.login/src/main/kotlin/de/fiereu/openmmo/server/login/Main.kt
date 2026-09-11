@@ -3,6 +3,7 @@ package de.fiereu.openmmo.server.login
 import de.fiereu.openmmo.common.auth.AccountRole
 import de.fiereu.openmmo.common.auth.AccountRoles
 import de.fiereu.openmmo.server.login.auth.CreateAccount
+import de.fiereu.openmmo.server.login.auth.RotatePassword
 import de.fiereu.openmmo.server.login.config.ConfigLoader
 import de.fiereu.openmmo.server.login.di.DaggerLoginServerComponent
 import de.fiereu.openmmo.server.login.di.LoginServerComponent
@@ -30,6 +31,7 @@ fun main(args: Array<String>) {
 }
 
 private const val CREATE_USER = "create-user"
+private const val SET_PASSWORD = "set-password"
 private const val REVOKE_TOKENS = "revoke-tokens"
 private const val SHOW_ROLES = "roles"
 private const val GRANT_ROLE = "grant-role"
@@ -37,10 +39,14 @@ private const val REVOKE_ROLE = "revoke-role"
 private const val RESET_DB = "reset-db"
 private const val CONFIRM = "--yes"
 
+/** Stands in for a password, and means "read it from stdin instead". See [passwordArg]. */
+private const val STDIN_MARKER = "-"
+
 /** How many words each verb takes, itself included. A verb that is not here is not a verb. */
 private val ARG_COUNT =
     mapOf(
         CREATE_USER to 3,
+        SET_PASSWORD to 3,
         REVOKE_TOKENS to 2,
         SHOW_ROLES to 2,
         GRANT_ROLE to 3,
@@ -51,9 +57,11 @@ private val ARG_COUNT =
 private fun runCommand(args: Array<String>) {
   val roles = AccountRole.names()
   val usage =
-      "usage: server.login [$CREATE_USER <name> <password> | $REVOKE_TOKENS <name> |" +
+      "usage: server.login [$CREATE_USER <name> <password> |" +
+          " $SET_PASSWORD <name> <password> | $REVOKE_TOKENS <name> |" +
           " $SHOW_ROLES <name> | $GRANT_ROLE <name> <$roles> | $REVOKE_ROLE <name> <$roles> |" +
-          " $RESET_DB $CONFIRM]"
+          " $RESET_DB $CONFIRM]" +
+          "\n  a password of '$STDIN_MARKER' is read from stdin instead of the command line"
   if (ARG_COUNT[args[0]] != args.size) {
     System.err.println(usage)
     exitProcess(2)
@@ -66,6 +74,7 @@ private fun runCommand(args: Array<String>) {
   }
   component.databaseBootstrap().migrate()
   when (args[0]) {
+    SET_PASSWORD -> setPassword(component, args[1], args[2])
     REVOKE_TOKENS -> revokeTokens(component, args[1])
     SHOW_ROLES -> showRoles(component, args[1])
     GRANT_ROLE -> changeRole(component, args[1], args[2], granting = true)
@@ -74,12 +83,38 @@ private fun runCommand(args: Array<String>) {
   }
 }
 
-private fun createUser(component: LoginServerComponent, username: String, password: String) {
+/**
+ * The password a verb should use: the argument itself, unless it is [STDIN_MARKER], in which case
+ * it is the first line of standard input.
+ */
+private fun passwordArg(value: String): String =
+    if (value == STDIN_MARKER) readlnOrNull().orEmpty() else value
+
+private fun createUser(component: LoginServerComponent, username: String, argument: String) {
+  val password = passwordArg(argument)
   when (val outcome = runBlocking { CreateAccount.create(component.users(), username, password) }) {
     is CreateAccount.Outcome.Created ->
         println("created account '${outcome.username}' as user ${outcome.userId}")
     is CreateAccount.Outcome.Rejected -> {
       System.err.println("$CREATE_USER: ${outcome.reason}")
+      exitProcess(1)
+    }
+  }
+}
+
+/** Give one account a new password, and sign it out everywhere while doing it. */
+private fun setPassword(component: LoginServerComponent, username: String, argument: String) {
+  val password = passwordArg(argument)
+  val outcome = runBlocking {
+    RotatePassword.rotate(component.users(), component.rememberMeTokens(), username, password)
+  }
+  when (outcome) {
+    is RotatePassword.Outcome.Changed ->
+        println(
+            "'${outcome.username}' has a new password." +
+                " Revoked ${outcome.tokensRevoked} remembered login(s).")
+    is RotatePassword.Outcome.Rejected -> {
+      System.err.println("$SET_PASSWORD: ${outcome.reason}")
       exitProcess(1)
     }
   }

@@ -31,6 +31,10 @@ private class EmptyUserStore : UserService {
     return id
   }
 
+  /** Bootstrap only ever creates, so this is here to satisfy the interface. */
+  override suspend fun setPassword(userId: Int, password: String): Boolean =
+      roles.containsKey(userId)
+
   override suspend fun rolesOf(userId: Int): AccountRoles = roles[userId] ?: AccountRoles.NONE
 
   override suspend fun setRoles(userId: Int, roles: AccountRoles): Boolean {

@@ -156,6 +156,73 @@ class JooqUserStoreIT :
         store.authenticate("sabrina", sha1Hex("psychic")).state shouldBe LoginState.AUTHED
       }
 
+      /**
+       * The remediation path. Until this existed a password somebody else knew could only be dealt
+       * with by deleting the account, so an exposed credential outlived every other fix.
+       */
+      test("a rotated password authenticates and the old one stops") {
+        val id = store.addUser("Whitney", "miltank")
+
+        store.setPassword(id, "clefairy") shouldBe true
+
+        store.authenticate("whitney", sha1Hex("clefairy")).state shouldBe LoginState.AUTHED
+        store.authenticate("whitney", sha1Hex("miltank")).state shouldBe LoginState.INVALID_PASSWORD
+      }
+
+      test("a rotated password is stored the way a new account's is") {
+        val id = store.addUser("Morty", "ghosts")
+
+        store.setPassword(id, "gengar")
+
+        val stored = storedHashOf("morty")
+        stored shouldNotBe sha1Hex("gengar")
+        stored.startsWith("pbkdf2-sha256$") shouldBe true
+      }
+
+      /** The case that matters most: the row that is still the wire value is rotated out of it. */
+      test("a row left in the old shape can be rotated straight to a salted one") {
+        val id = store.addUser("Pryce", "ice")
+        setStoredHash("pryce", sha1Hex("ice"))
+
+        store.setPassword(id, "seel") shouldBe true
+
+        storedHashOf("pryce").startsWith("pbkdf2-sha256$") shouldBe true
+        store.authenticate("pryce", sha1Hex("ice")).state shouldBe LoginState.INVALID_PASSWORD
+        store.authenticate("pryce", sha1Hex("seel")).state shouldBe LoginState.AUTHED
+      }
+
+      test("setPassword reports an account it cannot find") {
+        store.setPassword(404, "pw") shouldBe false
+      }
+
+      /**
+       * A remembered login is proof of the password that has just been replaced, so a rotation that
+       * left one alive would leave the account reachable by whoever made the rotation necessary.
+       */
+      test("rotating a password revokes the remembered logins with it") {
+        val tokens = JooqRememberMeTokens(db, config, Dispatchers.IO)
+        val id = store.addUser("Clair", "dragons")
+        val kept = tokens.issue(id)
+
+        val outcome = RotatePassword.rotate(store, tokens, "CLAIR", "kingdra")
+
+        outcome shouldBe RotatePassword.Outcome.Changed(id, "clair", 1)
+        tokens.consume(kept) shouldBe null
+        store.authenticate("clair", sha1Hex("kingdra")).state shouldBe LoginState.AUTHED
+        store.authenticate("clair", sha1Hex("dragons")).state shouldBe LoginState.INVALID_PASSWORD
+      }
+
+      test("rotating refuses a blank password and an account that is not there") {
+        val tokens = JooqRememberMeTokens(db, config, Dispatchers.IO)
+        store.addUser("Lance", "dragonite")
+
+        RotatePassword.rotate(store, tokens, "lance", "  ") shouldBe
+            RotatePassword.Outcome.Rejected("password must not be blank")
+        RotatePassword.rotate(store, tokens, "nobody", "pw") shouldBe
+            RotatePassword.Outcome.Rejected("no account called 'nobody'")
+        store.authenticate("lance", sha1Hex("dragonite")).state shouldBe LoginState.AUTHED
+      }
+
       test("addUser returns the generated id and getUserId finds it") {
         val id = store.addUser("Alice", "pw")
         store.getUserId("alice") shouldBe id

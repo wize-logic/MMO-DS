@@ -85,6 +85,20 @@ class InMemoryUserStoreTest :
         store.rolesOf(id) shouldBe AccountRoles.NONE
       }
 
+      test("a new password replaces the old one, which stops working") {
+        val store = InMemoryUserStore()
+        val id = store.addUser("alice", "old")
+
+        store.setPassword(id, "new") shouldBe true
+
+        store.authenticate("alice", sha1HexOf("new")).state shouldBe LoginState.AUTHED
+        store.authenticate("alice", sha1HexOf("old")).state shouldBe LoginState.INVALID_PASSWORD
+      }
+
+      test("setPassword reports that an account it cannot find was not written") {
+        InMemoryUserStore().setPassword(404, "pw") shouldBe false
+      }
+
       test("setRoles reports that an account it cannot find was not written") {
         InMemoryUserStore().setRoles(404, AccountRoles.of(AccountRole.ADMIN)) shouldBe false
       }

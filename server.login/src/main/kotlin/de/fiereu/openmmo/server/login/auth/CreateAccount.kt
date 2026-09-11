@@ -26,12 +26,20 @@ object CreateAccount {
     return null
   }
 
+  /**
+   * Why this password cannot be used, or null when it can be. Separate from [validate] because
+   * changing a password asks this and nothing about the name.
+   */
+  fun validatePassword(password: String): String? {
+    if (password.isBlank()) return "password must not be blank"
+    return null
+  }
+
   fun validate(username: String, password: String): String? {
     validateUsername(username)?.let {
       return it
     }
-    if (password.isBlank()) return "password must not be blank"
-    return null
+    return validatePassword(password)
   }
 
   suspend fun create(users: UserService, username: String, password: String): Outcome {

@@ -14,14 +14,7 @@ BAND_HI = 0x0208
 COVERED = set(range(0x0121, 0x015F)) | {0x01DE}
 
 HEADER = """\
-/* Generated; do not edit.
- *
- * Every half-width character the ROM font can draw that is not a digit, a
- * letter or the space, as a Unicode code point and the engine charcode that
- * draws it. Generated from the engine's tools/msgenc/charmap.txt by
- * mmo/tools/gen_charmap.py; mmo/tests/charmap_test.sh re-derives it and fails
- * if this file and that one have drifted apart.
- */
+/* Generated; do not edit. */
 """
 
 

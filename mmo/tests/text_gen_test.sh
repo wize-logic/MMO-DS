@@ -59,7 +59,7 @@ decomp, table = sys.argv[1], sys.argv[2]
 sizes = []
 names = []
 for line in open(table):
-    m = re.match(r"\s*(\d+), /\* (\S+)", line)
+    m = re.match(r"\s*(\d+), /\* ([^\s,]+)", line)
     if m:
         sizes.append(int(m.group(1)))
         names.append(m.group(2))

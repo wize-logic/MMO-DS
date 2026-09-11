@@ -66,7 +66,7 @@ boot() {
 # "openmmo: field heap FIELD1, engine 0xc4000, built 0xd8000 (+0x14000)"
 # -> the built size minus the size the engine asked for, in decimal.
 heap_delta() {
-    _line=$(grep -m1 "field heap $1 --" "$2" || true)
+    _line=$(grep -m1 "field heap $1," "$2" || true)
     [ -n "$_line" ] || { echo none; return; }
     _eng=$(echo "$_line" | sed 's/.*engine \(0x[0-9a-f]*\).*/\1/')
     _got=$(echo "$_line" | sed 's/.*built \(0x[0-9a-f]*\).*/\1/')
@@ -107,7 +107,7 @@ else
 fi
 
 # The engine's own accessor over the table it built, not our capacity function.
-pools=$(grep -m1 'openmmo: pools --' "$tmp/base.log" || true)
+pools=$(grep -m1 'openmmo: pools,' "$tmp/base.log" || true)
 built=$(echo "$pools" | sed -n 's/.*map objects \([0-9]*\) built.*/\1/p')
 if [ "$built" = "$MAP_OBJECTS" ]; then
     ok "the map object table the engine built holds $MAP_OBJECTS, not its own 64"

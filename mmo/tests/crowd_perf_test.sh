@@ -140,7 +140,7 @@ elif grep -qE 'engine assertion failed|heap is full|texture pool is full' \
 else
     ok "twelve remotes still stand on Twinleaf Town, all twelve live"
     line=$(grep '^pc-bench: [0-9]' "$tmp/bench.log" || true)
-    fps=$(printf '%s\n' "$line" | sed -n 's/.*-- \([0-9.][0-9.]*\) fps.*/\1/p')
+    fps=$(printf '%s\n' "$line" | sed -n 's/.*[,-] \([0-9.][0-9.]*\) fps.*/\1/p')
     if [ -n "$fps" ] && awk -v f="$fps" 'BEGIN { exit !(f + 0 >= 60) }'; then
         ok "twelve remotes at native still run at ${fps} fps unpaced"
     else

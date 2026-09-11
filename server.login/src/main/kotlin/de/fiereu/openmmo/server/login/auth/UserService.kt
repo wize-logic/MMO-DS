@@ -27,6 +27,12 @@ interface UserService {
   /** Takes the plain password and hashes it the way the client would before sending. */
   suspend fun addUser(username: String, password: String): Int
 
+  /**
+   * Replaces one account's credential, taking the plain password like [addUser]. False when there
+   * is no account with that id.
+   */
+  suspend fun setPassword(userId: Int, password: String): Boolean
+
   /** What this account may do. Empty for one that does not exist, same as for a plain player. */
   suspend fun rolesOf(userId: Int): AccountRoles
 
@@ -72,6 +78,12 @@ class InMemoryUserStore @Inject constructor() : UserService {
   override suspend fun setRoles(userId: Int, roles: AccountRoles): Boolean {
     val entry = users.entries.firstOrNull { it.value.id == userId } ?: return false
     users[entry.key] = entry.value.copy(roles = roles)
+    return true
+  }
+
+  override suspend fun setPassword(userId: Int, password: String): Boolean {
+    val entry = users.entries.firstOrNull { it.value.id == userId } ?: return false
+    users[entry.key] = entry.value.copy(passwordHash = PasswordHash.hash(sha1Hex(password)))
     return true
   }
 

@@ -81,8 +81,8 @@ fi
 # The mechanism. The counters are cumulative, so the last line is the whole run;
 # they must be equal and non-zero, equal-at-zero would mean the delete hook is
 # never reached, which is what the leak looked like before it was fixed.
-last=$(grep 'openmmo: avatars --' "$tmp/run.log" | tail -1)
-deletes=$(echo "$last" | sed 's/.*-- \([0-9]*\) remote deletes.*/\1/')
+last=$(grep 'openmmo: avatars,' "$tmp/run.log" | tail -1)
+deletes=$(echo "$last" | sed 's/.*avatars, \([0-9]*\) remote deletes.*/\1/')
 freed=$(echo "$last" | sed 's/.*deletes, \([0-9]*\) freed.*/\1/')
 if [ -n "$deletes" ] && [ "$deletes" -gt 0 ] && [ "$deletes" = "$freed" ]; then
     ok "every remote map object deleted took its avatar with it ($deletes)"
