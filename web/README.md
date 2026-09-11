@@ -80,7 +80,10 @@ makes a bare address request work.
 - 3 to 32 characters, letters digits underscore hyphen, stored lowercase.
 - 8 to 128 character password, typed twice, and it may not contain the account
   name.
-- Five accounts an hour per address.
+- Five accounts an hour per address, twenty requests an hour per address
+  whether or not they were accounts, and 120 accounts an hour across everybody.
 
-The password is stored as unsalted SHA-1, because that is what the client sends
-and what the server compares. The front page and the form both say so.
+The client hashes the password before sending it, so a SHA-1 is what arrives.
+The database does not keep that: the login server stores PBKDF2 over it with a
+salt per row, so reading the table gives nothing that can be replayed as a
+login.
