@@ -1,6 +1,6 @@
 [Unit]
 Description=OpenMMO databases (login and game postgres containers)
-Documentation=https://github.com/wize-logic/OpenMMO
+Documentation=https://github.com/wize-logic/MMO-DS
 After=docker.service network-online.target
 Requires=docker.service
 PartOf=openmmo.target

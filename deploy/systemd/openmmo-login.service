@@ -1,6 +1,6 @@
 [Unit]
 Description=OpenMMO login server (2106)
-Documentation=https://github.com/wize-logic/OpenMMO
+Documentation=https://github.com/wize-logic/MMO-DS
 After=network-online.target openmmo-db.service
 Wants=network-online.target
 Requires=openmmo-db.service

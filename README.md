@@ -18,8 +18,8 @@ Clone with the engine submodule. It is the tree the client is fused with, and
 it is also where the Sinnoh data comes from, so it carries its weight twice.
 
 ```bash
-git clone --recurse-submodules https://github.com/wize-logic/OpenMMO-DS
-cd OpenMMO-DS
+git clone --recurse-submodules https://github.com/wize-logic/MMO-DS
+cd MMO-DS
 ```
 
 Already cloned without it:

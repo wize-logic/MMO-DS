@@ -1,6 +1,6 @@
 [Unit]
 Description=OpenMMO website (registration and status)
-Documentation=https://github.com/wize-logic/OpenMMO
+Documentation=https://github.com/wize-logic/MMO-DS
 After=network-online.target docker.service openmmo-db.service
 Wants=network-online.target
 # One of the four services openmmo.target starts and stops together. PartOf=

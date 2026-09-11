@@ -1,6 +1,6 @@
 [Unit]
 Description=OpenMMO game server (7777)
-Documentation=https://github.com/wize-logic/OpenMMO
+Documentation=https://github.com/wize-logic/MMO-DS
 After=network-online.target openmmo-db.service
 Wants=network-online.target
 Requires=openmmo-db.service

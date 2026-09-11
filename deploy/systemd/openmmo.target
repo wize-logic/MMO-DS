@@ -1,6 +1,6 @@
 [Unit]
 Description=OpenMMO (databases, login, game and website)
-Documentation=https://github.com/wize-logic/OpenMMO
+Documentation=https://github.com/wize-logic/MMO-DS
 # The one handle for the whole product. Every service below is PartOf= this, so
 # stopping the target stops them all, and starting it starts them in order:
 #   sudo systemctl start openmmo.target
