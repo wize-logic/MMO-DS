@@ -1,6 +1,6 @@
 --- a/src/overlay005/ov5_021ECE40.c
 +++ b/src/overlay005/ov5_021ECE40.c
-@@ -537,6 +537,24 @@
+@@ -538,6 +538,24 @@
          }
      }
  
@@ -25,7 +25,7 @@
      return NULL;
  }
  
-@@ -1313,6 +1331,43 @@
+@@ -1318,6 +1336,43 @@
          v0++;
      } while (v0->unk_00 != 0xffff);
  
@@ -69,7 +69,7 @@
      if (pc_modfs_billboard_nsbtx(param0) >= 0) {
          return ov5_021EDD04(OBJ_EVENT_GFX_YOUNGSTER);
      }
-@@ -1465,11 +1520,36 @@
+@@ -1470,11 +1525,36 @@
      v1.y += 0;
      v1.z += (FX32_ONE * 6);
  

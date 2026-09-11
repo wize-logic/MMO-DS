@@ -15,7 +15,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "view_font.h"   /* the 5x7: OSK key labels with no FreeType */
+#include "view_font.h"   /* the 5x7: the pad's labels with no FreeType */
 
 /* mmo_device.c, the app's own; declared here rather than through its header
  * because the shim's include path is the viewer's, not the app's. */
@@ -129,6 +129,7 @@ static Uint32 g_mouse_mask;
 
 static int g_textinput;                 /* SDL_StartTextInput level */
 static int g_background;                /* app is paused */
+static int g_ime_inset;                 /* device rows the keyboard covers */
 
 static void push_event(const SDL_Event *ev)
 {
@@ -385,6 +386,8 @@ void mmo_sdlshim_set_window(ANativeWindow *win)
     pthread_mutex_lock(&g_lock);
     g_window = win;
     g_window_gen++;
+    if (win == NULL)
+        g_ime_inset = 0;        /* the keyboard went with the window */
     if (win == NULL && g_have_surface) {
         /* Block until the render thread lets the old surface go: the window
          * is invalid the moment the caller's TERM_WINDOW returns. Keyed on
@@ -458,11 +461,21 @@ void SDL_SetWindowSize(SDL_Window *win, int w, int h)
     (void)win; (void)w; (void)h;
 }
 
+/* The rows of glass the viewer may lay itself out on: the surface, less
+ * whatever the keyboard covers ("The keyboard", below). An inset that would
+ * leave under a quarter of the glass is not a keyboard and is ignored. */
+static int out_h(void)
+{
+    int h = g_dev_h - g_ime_inset;
+
+    return h > g_dev_h / 4 ? h : g_dev_h;
+}
+
 void SDL_GetWindowSize(SDL_Window *win, int *w, int *h)
 {
     (void)win;
     if (w != NULL) *w = g_dev_w / g_scale;
-    if (h != NULL) *h = g_dev_h / g_scale;
+    if (h != NULL) *h = out_h() / g_scale;
 }
 
 int SDL_SetWindowFullscreen(SDL_Window *win, Uint32 flags)
@@ -487,7 +500,7 @@ int SDL_GetDisplayUsableBounds(int display, SDL_Rect *rect)
     rect->x = 0;
     rect->y = 0;
     rect->w = g_dev_w > 0 ? g_dev_w / g_scale : 960;
-    rect->h = g_dev_h > 0 ? g_dev_h / g_scale : 540;
+    rect->h = g_dev_h > 0 ? out_h() / g_scale : 540;
     return 0;
 }
 
@@ -614,7 +627,7 @@ int SDL_GetRendererOutputSize(SDL_Renderer *ren, int *w, int *h)
 {
     (void)ren;
     if (w != NULL) *w = g_dev_w / g_scale;
-    if (h != NULL) *h = g_dev_h / g_scale;
+    if (h != NULL) *h = out_h() / g_scale;
     return 0;
 }
 
@@ -951,7 +964,7 @@ int SDL_RenderFillRect(SDL_Renderer *ren, const SDL_Rect *rect)
         r.x = 0;
         r.y = 0;
         r.w = g_dev_w / g_scale;
-        r.h = g_dev_h / g_scale;
+        r.h = out_h() / g_scale;
     } else {
         r = *rect;
     }
@@ -1002,7 +1015,7 @@ int SDL_RenderCopy(SDL_Renderer *ren, SDL_Texture *tex, const SDL_Rect *src,
         d.x = 0;
         d.y = 0;
         d.w = g_dev_w / g_scale;
-        d.h = g_dev_h / g_scale;
+        d.h = out_h() / g_scale;
     }
     glUseProgram(g_prog);
     glUniform2f(g_u_screen, (float)g_dev_w, (float)g_dev_h);
@@ -1038,7 +1051,7 @@ void SDL_RenderGetClipRect(SDL_Renderer *ren, SDL_Rect *rect)
 int SDL_RenderReadPixels(SDL_Renderer *ren, const SDL_Rect *rect,
                          Uint32 format, void *pixels, int pitch)
 {
-    int lw = g_dev_w / g_scale, lh = g_dev_h / g_scale;
+    int lw = g_dev_w / g_scale, lh = out_h() / g_scale;
     unsigned char *dev;
     int x, y;
 
@@ -1073,190 +1086,34 @@ int SDL_RenderReadPixels(SDL_Renderer *ren, const SDL_Rect *rect,
 }
 
 /* ------------------------------------------------------------------ */
-/* The OSK                                                             */
+/* The keyboard                                                        */
 /* ------------------------------------------------------------------ */
-/*
- * Drawn inside RenderPresent, over everything, while a text field is open. The image is
- * rastered on the CPU with the 5x7 face and uploaded once per shift state; a tap flashes the
- * key with a translucent fill.
- */
+/* The system'S, not a drawn one. */
 
-#define OSK_ROWS 5
-#define OSK_COLS 10
+/* The frontend's, declared here rather than through a header for the
+ * reason mmo_device_note_gl is: the shim's include path is the viewer's. */
+void mmo_android_ime_show(int on);
 
-/* One key: what it types lowercase/shifted, or a control code. */
-#define OSK_SHIFT  1
-#define OSK_BS     2
-#define OSK_ENTER  3
-#define OSK_CLOSE  4
-#define OSK_SPACE  5
+#define IME_BS     0x08
+#define IME_DEL    0x7F
+#define IME_SEND   0x0A
+#define IME_LEFT   0x11
+#define IME_RIGHT  0x12
+#define IME_HOME   0x01
+#define IME_END    0x05
+#define IME_INSET  0x0E
 
-static const char *const kRows[OSK_ROWS] = {
-    "1234567890",
-    "qwertyuiop",
-    "asdfghjkl'",
-    "\001zxcvbnm-\002",
-    "\005,.!?\003\004"
-};
-static const char *const kRowsUp[OSK_ROWS] = {
-    "1234567890",
-    "QWERTYUIOP",
-    "ASDFGHJKL\"",
-    "\001ZXCVBNM_\002",
-    "\005,.!?\003\004"
-};
-
-/* The space row spreads: the seven keys cover the ten columns exactly,
- * space two wide, the send and hide pair two each. */
-static const signed char kWidth4[OSK_COLS] = { 2, 1, 1, 1, 1, 2, 2, 0, 0, 0 };
-
-struct osk_state {
-    int shift;
-    int built_shift;             /* what the image was built with; -1 never */
-    int built_w, built_h;        /* the surface the image was cut for */
-    GLuint tex;
-    GLuint tab_tex;              /* the one key that is left when it is away */
-    int img_w, img_h;            /* image pixels (= device pixels) */
-    int x, y;                    /* on the glass, device px */
-    int cell;                    /* one key cell, device px */
-    int flash_row, flash_col;    /* last tap, for the flash */
-    uint64_t flash_until_ms;
-    /*
-     * Put away by the player, which is not the same as the field closing. HIDE is the pad
-     * toggle's kind of button: the panel goes, the half-typed line stays, and the key stays on
-     * the glass reading KEYS so there is a way back.
-     */
-    int user_hidden;
-};
-
-static struct osk_state g_osk = { .built_shift = -1, .flash_row = -1,
-                                  .flash_col = -1 };
-
-static const char *osk_row(int r)
-{
-    return (g_osk.shift ? kRowsUp : kRows)[r];
-}
-
-static void osk_geometry(void)
-{
-    /* Right side, above the bottom edge: the chat box composes bottom-left
-     * and must stay visible under a keyboard. */
-    g_osk.cell = g_dev_h / 10;                  /* 108 px on this panel */
-    g_osk.img_w = g_osk.cell * OSK_COLS;
-    g_osk.img_h = g_osk.cell * OSK_ROWS;
-    g_osk.x = g_dev_w - g_osk.img_w - g_dev_h / 36;
-    g_osk.y = g_dev_h - g_osk.img_h - g_dev_h / 36;
-}
-
-/* The corner HIDE sits in, which is where KEYS sits once it has been pressed:
- * the toggle does not move when it is used. */
-static void osk_tab_rect(int *x, int *y, int *w, int *h)
-{
-    *w = g_osk.cell * 2;
-    *h = g_osk.cell;
-    *x = g_osk.x + g_osk.img_w - *w;
-    *y = g_osk.y + g_osk.img_h - *h;
-}
-
-static const char *osk_label(char c, char *buf)
-{
-    switch (c) {
-    case OSK_SHIFT: return "SHIFT";
-    case OSK_BS:    return "DEL";
-    case OSK_ENTER: return "SEND";
-    case OSK_CLOSE: return "HIDE";
-    case OSK_SPACE: return "SPACE";
-    default:
-        buf[0] = c;
-        buf[1] = '\0';
-        return buf;
-    }
-}
-
-static void osk_build(void)
-{
-    uint32_t *px;
-    int r;
-
-    osk_geometry();
-    px = malloc((size_t)g_osk.img_w * (size_t)g_osk.img_h * 4);
-    if (px == NULL)
-        return;
-    for (r = 0; r < g_osk.img_w * g_osk.img_h; r++)
-        px[r] = 0x14181E;
-    for (r = 0; r < OSK_ROWS; r++) {
-        const char *row = osk_row(r);
-        int col = 0, i;
-
-        for (i = 0; row[i] != '\0'; i++) {
-            int span = r == OSK_ROWS - 1 ? kWidth4[i] : 1;
-            int x0 = col * g_osk.cell, y0 = r * g_osk.cell;
-            int w = span * g_osk.cell, h = g_osk.cell;
-            char one[2];
-            const char *label = osk_label(row[i], one);
-            int scale = label[1] == '\0' ? 5 : 2;
-            int y, x;
-
-            if (span < 1)
-                break;
-            /* Key face and a one-pixel seam. */
-            for (y = y0 + 2; y < y0 + h - 2; y++)
-                for (x = x0 + 2; x < x0 + w - 2; x++)
-                    px[(size_t)y * g_osk.img_w + x] =
-                        row[i] == OSK_SHIFT && g_osk.shift ? 0x35507A
-                                                           : 0x232A33;
-            openmmo_font_draw_centred(px, g_osk.img_w, g_osk.img_h,
-                                      x0 + w / 2,
-                                      y0 + (h - 7 * scale) / 2, label, scale,
-                                      0xE8ECF0);
-            col += span;
-        }
-    }
-    if (g_osk.tex == 0)
-        glGenTextures(1, &g_osk.tex);
-    glBindTexture(GL_TEXTURE_2D, g_osk.tex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, g_osk.img_w, g_osk.img_h, 0,
-                 GL_RGBA, GL_UNSIGNED_BYTE, px);
-    free(px);
-
-    /* The KEYS tab, in an image of its own so the panel's ten-by-five grid
-     * stays exactly a grid of keys. */
-    {
-        int w = g_osk.cell * 2, h = g_osk.cell, x, y;
-
-        px = malloc((size_t)w * (size_t)h * 4);
-        if (px != NULL) {
-            for (y = 0; y < w * h; y++)
-                px[y] = 0x14181E;
-            for (y = 2; y < h - 2; y++)
-                for (x = 2; x < w - 2; x++)
-                    px[(size_t)y * w + x] = 0x232A33;
-            openmmo_font_draw_centred(px, w, h, w / 2, (h - 7 * 2) / 2,
-                                      "KEYS", 2, 0xE8ECF0);
-            if (g_osk.tab_tex == 0)
-                glGenTextures(1, &g_osk.tab_tex);
-            glBindTexture(GL_TEXTURE_2D, g_osk.tab_tex);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA,
-                         GL_UNSIGNED_BYTE, px);
-            free(px);
-        }
-    }
-    g_osk.built_shift = g_osk.shift;
-    g_osk.built_w = g_dev_w;
-    g_osk.built_h = g_dev_h;
-}
+/* One text event under construction. A code point split across two reads
+ * of the pipe must not be split across two events, so an unfinished tail
+ * waits here for its continuation bytes. */
+static char g_ime_chunk[SDL_TEXTINPUTEVENT_TEXT_SIZE];
+static int g_ime_chunk_len;
+static int g_ime_rec_left;          /* inset record bytes still to come */
+static uint32_t g_ime_rec;
 
 /* PC_ANDROID_KEYLOG=1, the frontend's own knob for "name every key and pen
- * event", says here which of the two overlapping controls took a finger.
- * A tap that reaches neither prints nothing and is the pen's. */
+ * event", says here what the keyboard sent and which control took a
+ * finger. A tap that reaches neither prints nothing and is the pen's. */
 static int touch_log(void)
 {
     static int v = -1;
@@ -1269,185 +1126,127 @@ static int touch_log(void)
     return v;
 }
 
-/* OPENMMO_OSK_TEST=1 pins the keyboard up with no text field open: the only
- * way to look at its layout on a screen that has no chat yet. */
-static int osk_forced(void)
+static int utf8_need(unsigned c)
 {
-    static int v = -1;
-
-    if (v < 0) {
-        const char *e = getenv("OPENMMO_OSK_TEST");
-
-        v = (e != NULL && e[0] != '\0' && e[0] != '0') ? 1 : 0;
-    }
-    return v;
+    if (c < 0x80) return 1;
+    if ((c & 0xE0) == 0xC0) return 2;
+    if ((c & 0xF0) == 0xE0) return 3;
+    return 4;
 }
 
-/* Is the keyboard on the glass, panel, or the tab it leaves behind? Asked
- * with the lock held, and it answers no until the geometry has been cut, so a
- * hit test never runs against a rectangle of zeroes. */
-static int osk_on_locked(void)
+/* Push the chunk as one text event. With `all` clear, a trailing sequence
+ * still short of its length stays behind for the next read. Lock held. */
+static void ime_flush_locked(int all)
 {
-    return (g_textinput || osk_forced()) && g_osk.cell > 0;
+    int n = g_ime_chunk_len, keep = 0;
+    SDL_Event ev;
+
+    if (!all) {
+        int i = n - 1;
+
+        while (i >= 0 && ((unsigned char)g_ime_chunk[i] & 0xC0) == 0x80)
+            i--;
+        if (i >= 0 && n - i < utf8_need((unsigned char)g_ime_chunk[i]))
+            keep = n - i;
+    }
+    n -= keep;
+    if (n <= 0)
+        return;
+    memset(&ev, 0, sizeof ev);
+    ev.type = SDL_TEXTINPUT;
+    memcpy(ev.text.text, g_ime_chunk, (size_t)n);
+    push_event(&ev);
+    memmove(g_ime_chunk, g_ime_chunk + n, (size_t)keep);
+    g_ime_chunk_len = keep;
+    if (touch_log())
+        LOGI("ime: text \"%s\"", ev.text.text);
 }
 
-static void osk_draw(void)
-{
-    int tx, ty, tw, th;
-
-    if ((!g_textinput && !osk_forced()) || !gl_ready())
-        return;
-    /* A rotation or a resize moves every key: the pad rebuilds on the same
-     * test and the keyboard used to rebuild on neither. */
-    if (g_osk.built_shift != g_osk.shift || g_osk.tex == 0
-        || g_osk.built_w != g_dev_w || g_osk.built_h != g_dev_h)
-        osk_build();
-    if (g_osk.tex == 0)
-        return;
-    glUseProgram(g_prog);
-    glUniform2f(g_u_screen, (float)g_dev_w, (float)g_dev_h);
-    glDisable(GL_SCISSOR_TEST);
-    glUniform1i(g_u_mode, 2);
-    glUniform4f(g_u_color, 1, 1, 1, 1);
-    want_blend(0);
-    if (g_osk.user_hidden) {
-        osk_tab_rect(&tx, &ty, &tw, &th);
-        if (g_osk.tab_tex != 0) {
-            glBindTexture(GL_TEXTURE_2D, g_osk.tab_tex);
-            quad((float)tx, (float)ty, (float)tw, (float)th, 0, 0, 1, 1);
-        }
-        return;
-    }
-    glBindTexture(GL_TEXTURE_2D, g_osk.tex);
-    quad((float)g_osk.x, (float)g_osk.y, (float)g_osk.img_w,
-         (float)g_osk.img_h, 0, 0, 1, 1);
-    if (g_osk.flash_row >= 0 && SDL_GetTicks64() < g_osk.flash_until_ms) {
-        glUniform1i(g_u_mode, 3);
-        glUniform4f(g_u_color, 1, 1, 1, 0.35f);
-        want_blend(1);
-        quad((float)(g_osk.x + g_osk.flash_col * g_osk.cell),
-             (float)(g_osk.y + g_osk.flash_row * g_osk.cell),
-             (float)g_osk.cell, (float)g_osk.cell, 0, 0, 1, 1);
-    }
-}
-
-/* Push the events one key answers. Called with g_lock held. */
-static void osk_key_locked(char c)
+static void ime_key_locked(int scancode, int sym)
 {
     SDL_Event ev;
 
+    ime_flush_locked(1);
     memset(&ev, 0, sizeof ev);
-    switch (c) {
-    case OSK_SHIFT:
-        g_osk.shift = !g_osk.shift;
-        return;
-    case OSK_BS:
-        ev.type = SDL_KEYDOWN;
-        ev.key.keysym.sym = SDLK_BACKSPACE;
-        ev.key.keysym.scancode = SDL_SCANCODE_BACKSPACE;
-        push_event(&ev);
-        return;
-    case OSK_ENTER:
-        ev.type = SDL_KEYDOWN;
-        ev.key.keysym.sym = SDLK_RETURN;
-        ev.key.keysym.scancode = SDL_SCANCODE_RETURN;
-        push_event(&ev);
-        return;
-    case OSK_CLOSE:
-        /* HIDE is A HIDE, not an ESCAPE. */
-        g_osk.user_hidden = 1;
-        return;
-    case OSK_SPACE:
-        c = ' ';
-        /* fall through */
-    default:
-        ev.type = SDL_TEXTINPUT;
-        ev.text.text[0] = c;
-        push_event(&ev);
-        if (g_osk.shift) {
-            g_osk.shift = 0;    /* one-shot, the phone convention */
-        }
-        return;
-    }
+    ev.type = SDL_KEYDOWN;
+    ev.key.keysym.scancode = (SDL_Scancode)scancode;
+    ev.key.keysym.sym = sym;
+    push_event(&ev);
+    if (touch_log())
+        LOGI("ime: key scancode %d", scancode);
 }
 
-/* The key under a finger that has just landed. Lock held. */
-static void osk_press_locked(float fx, float fy)
+/* The pipe's bytes, as the frontend read them. */
+void mmo_sdlshim_ime_bytes(const unsigned char *b, size_t n)
 {
-    int col = ((int)fx - g_osk.x) / g_osk.cell;
-    int row = ((int)fy - g_osk.y) / g_osk.cell;
-    int i, span_col;
-    const char *rowstr;
+    size_t i;
 
-    if (row < 0 || row >= OSK_ROWS || col < 0 || col >= OSK_COLS)
+    if (b == NULL)
         return;
-    rowstr = osk_row(row);
-    if (row == OSK_ROWS - 1) {
-        span_col = 0;
-        for (i = 0; rowstr[i] != '\0'; i++) {
-            if (col < span_col + kWidth4[i])
-                break;
-            span_col += kWidth4[i];
-        }
-        if (rowstr[i] == '\0')
-            return;
-    } else {
-        i = col;
-        if (i >= (int)strlen(rowstr))
-            return;
-    }
-    g_osk.flash_row = row;
-    g_osk.flash_col = row == OSK_ROWS - 1 ? span_col : col;
-    g_osk.flash_until_ms = SDL_GetTicks64() + 150;
-    if (touch_log()) {
-        char one[2];
-
-        LOGI("osk: %.0f,%.0f -> row %d col %d key %s", fx, fy, row, col,
-             osk_label(rowstr[i], one));
-    }
-    osk_key_locked(rowstr[i]);
-}
-
-/*
- * Which pointers are the keyboard'S. Every one inside the panel, claimed whatever it is doing:
- * a finger resting on the keys is not a pen press either.
- */
-static uint32_t osk_take_locked(int action, const struct mmo_sdlshim_pt *pts,
-                                int n, int act_index)
-{
-    uint32_t taken = 0;
-    int i, x, y, w, h;
-
-    if (!osk_on_locked())
-        return 0;
-    if (g_osk.user_hidden) {
-        osk_tab_rect(&x, &y, &w, &h);
-        for (i = 0; i < n; i++) {
-            if (pts[i].x < (float)x || pts[i].x >= (float)(x + w)
-                || pts[i].y < (float)y || pts[i].y >= (float)(y + h))
-                continue;
-            taken |= 1u << i;
-            if (action == 0 && i == act_index)
-                g_osk.user_hidden = 0;
-        }
-        return taken;
-    }
+    pthread_mutex_lock(&g_lock);
     for (i = 0; i < n; i++) {
-        if (pts[i].x < (float)g_osk.x
-            || pts[i].x >= (float)(g_osk.x + g_osk.img_w)
-            || pts[i].y < (float)g_osk.y
-            || pts[i].y >= (float)(g_osk.y + g_osk.img_h))
-            continue;
-        taken |= 1u << i;
-        if (action == 0 && i == act_index)
-            osk_press_locked(pts[i].x, pts[i].y);
-    }
-    return taken;
-}
+        unsigned c = b[i];
 
-/* ------------------------------------------------------------------ */
-/* Present                                                             */
-/* ------------------------------------------------------------------ */
+        if (g_ime_rec_left > 0) {
+            g_ime_rec = (g_ime_rec << 8) | c;
+            if (--g_ime_rec_left == 0) {
+                int px = g_ime_rec > 0x7FFFFFFFu ? 0 : (int)g_ime_rec;
+
+                if (px != g_ime_inset) {
+                    g_ime_inset = px;
+                    LOGI("ime: keyboard covers %d rows of %d", px, g_dev_h);
+                }
+            }
+            continue;
+        }
+        if (c >= 0x20 && c != IME_DEL) {
+            if ((c & 0xC0) != 0x80) {
+                /* A lead byte ends the sequence before it; make room for
+                 * the whole of this one. */
+                if (g_ime_chunk_len + utf8_need(c)
+                        > SDL_TEXTINPUTEVENT_TEXT_SIZE - 1)
+                    ime_flush_locked(1);
+            } else if (g_ime_chunk_len == 0) {
+                continue;               /* a stray continuation byte */
+            }
+            if (g_ime_chunk_len < SDL_TEXTINPUTEVENT_TEXT_SIZE - 1)
+                g_ime_chunk[g_ime_chunk_len++] = (char)c;
+            continue;
+        }
+        switch (c) {
+        case IME_BS:
+            ime_key_locked(SDL_SCANCODE_BACKSPACE, SDLK_BACKSPACE);
+            break;
+        case IME_DEL:
+            ime_key_locked(SDL_SCANCODE_DELETE, SDLK_DELETE);
+            break;
+        case IME_SEND:
+            ime_key_locked(SDL_SCANCODE_RETURN, SDLK_RETURN);
+            break;
+        case IME_LEFT:
+            ime_key_locked(SDL_SCANCODE_LEFT, SDLK_LEFT);
+            break;
+        case IME_RIGHT:
+            ime_key_locked(SDL_SCANCODE_RIGHT, SDLK_RIGHT);
+            break;
+        case IME_HOME:
+            ime_key_locked(SDL_SCANCODE_HOME, SDLK_HOME);
+            break;
+        case IME_END:
+            ime_key_locked(SDL_SCANCODE_END, SDLK_END);
+            break;
+        case IME_INSET:
+            ime_flush_locked(1);
+            g_ime_rec_left = 4;
+            g_ime_rec = 0;
+            break;
+        default:
+            break;                      /* an unknown control: nothing */
+        }
+    }
+    ime_flush_locked(0);
+    pthread_mutex_unlock(&g_lock);
+}
 
 /* ------------------------------------------------------------------ */
 /* The on-screen pad                                                   */
@@ -1568,11 +1367,11 @@ static int pad_on(void)
     if (!g_pad.enabled)
         return 0;
     /*
-     * Not while the keyboard is UP. The OSK covers the bottom right of the glass, ten
-     * columns of it, which is exactly where the face buttons and Start/Select are, and the
-     * pad claims its pointers BEFORE the OSK is offered them.
+     * Not while a field is open. The keyboard takes the bottom of the glass, which is exactly
+     * where the face buttons and Start/Select sit, and a d-pad does nothing while a text field
+     * is open anyway, the same reason view_input.c releases the pad on entering one.
      */
-    if (g_textinput || osk_forced())
+    if (g_textinput)
         return 0;
     if (m == 0) return 0;
     if (m == 1) return 1;
@@ -2048,7 +1847,6 @@ void SDL_RenderPresent(SDL_Renderer *ren)
     pthread_mutex_unlock(&g_lock);
 
     pad_draw();
-    osk_draw();
     if (!eglSwapBuffers(g_dpy, g_surf)) {
         EGLint e = eglGetError();
 
@@ -2088,23 +1886,24 @@ void SDL_RenderPresent(SDL_Renderer *ren)
 /* Text input                                                          */
 /* ------------------------------------------------------------------ */
 
+/* Both ask the activity outside the lock: the ask crosses into Java and is
+ * posted to the UI thread, and nothing here needs the lock for it. */
 void SDL_StartTextInput(void)
 {
     pthread_mutex_lock(&g_lock);
     g_textinput = 1;
-    g_osk.user_hidden = 0;
-    /* Cut the geometry NOW, not at the first present. */
-    if (g_dev_w > 0 && g_dev_h > 0)
-        osk_geometry();
+    g_ime_chunk_len = 0;
     pthread_mutex_unlock(&g_lock);
+    mmo_android_ime_show(1);
 }
 
 void SDL_StopTextInput(void)
 {
     pthread_mutex_lock(&g_lock);
     g_textinput = 0;
-    g_osk.user_hidden = 0;
+    g_ime_chunk_len = 0;
     pthread_mutex_unlock(&g_lock);
+    mmo_android_ime_show(0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2216,18 +2015,21 @@ void mmo_sdlshim_touch(int action, float x, float y, int fingers, float y2)
 {
     struct mmo_sdlshim_pt p;
 
+    int raise;
+
     p.x = x;
     p.y = y;
     pthread_mutex_lock(&g_lock);
-    /* One pointer, so the acting one is the only one there is. */
-    if (osk_take_locked(action, &p, 1, action == 0 ? 0 : -1) == 0)
-        touch_locked(action, x, y, fingers, y2);
+    raise = action == 0 && g_textinput && g_ime_inset == 0;
+    touch_locked(action, x, y, fingers, y2);
     pthread_mutex_unlock(&g_lock);
+    if (raise)
+        mmo_android_ime_show(1);
 }
 
 /*
- * The order is keyboard, then PAD, then pen, which is the order they are drawn in, back to
- * front, read backwards. A finger belongs to the topmost thing under it and to nothing else.
+ * The order is PAD, then pen, which is the order they are drawn in, back to front, read
+ * backwards. A finger belongs to the topmost thing under it and to nothing else.
  */
 void mmo_sdlshim_pointers(int action, const struct mmo_sdlshim_pt *pts, int n,
                           int act_index)
@@ -2235,7 +2037,7 @@ void mmo_sdlshim_pointers(int action, const struct mmo_sdlshim_pt *pts, int n,
     struct mmo_sdlshim_pt rest[MMO_SDLSHIM_PT_MAX];
     struct mmo_sdlshim_pt left[MMO_SDLSHIM_PT_MAX];
     uint32_t taken;
-    int i, nrest = 0, rest_act = -1, nleft = 0, act_left = 1, lact;
+    int i, nrest = 0, rest_act = -1, nleft = 0, act_left = 1, lact, raise;
 
     if (pts == NULL || n < 0)
         return;
@@ -2243,13 +2045,10 @@ void mmo_sdlshim_pointers(int action, const struct mmo_sdlshim_pt *pts, int n,
         n = MMO_SDLSHIM_PT_MAX;
 
     pthread_mutex_lock(&g_lock);
-    taken = osk_take_locked(action, pts, n, act_index);
+    /* A finger while a field is open and the keyboard is away: ask for it
+     * back, after the lock, and let the finger go on to whatever it hit. */
+    raise = action == 0 && g_textinput && g_ime_inset == 0;
     for (i = 0; i < n; i++) {
-        if ((taken & (1u << i)) != 0) {
-            if (i == act_index)
-                act_left = 0;
-            continue;
-        }
         if (i == act_index)
             rest_act = nrest;
         rest[nrest++] = pts[i];
@@ -2266,12 +2065,14 @@ void mmo_sdlshim_pointers(int action, const struct mmo_sdlshim_pt *pts, int n,
     }
 
     if (nleft == 0) {
-        /* Nothing but the keyboard and the pad is on the glass. Release the
-         * pen if it was down; a gesture that never reached it is not a tap on
-         * the touch screen. */
+        /* Nothing but the pad is on the glass. Release the pen if it was
+         * down; a gesture that never reached it is not a tap on the touch
+         * screen. */
         if (g_mouse_mask != 0)
             touch_locked(2, 0, 0, 0, 0);
         pthread_mutex_unlock(&g_lock);
+        if (raise)
+            mmo_android_ime_show(1);
         return;
     }
 
@@ -2281,6 +2082,8 @@ void mmo_sdlshim_pointers(int action, const struct mmo_sdlshim_pt *pts, int n,
     touch_locked(lact, left[0].x, left[0].y, nleft,
                  nleft > 1 ? left[1].y : 0.0f);
     pthread_mutex_unlock(&g_lock);
+    if (raise)
+        mmo_android_ime_show(1);
 }
 
 void mmo_sdlshim_button(int button, int down)

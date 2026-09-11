@@ -4,6 +4,7 @@
 #define OPENMMO_SDLSHIM_ANDROID_H
 
 #include <android/native_window.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -52,6 +53,14 @@ void mmo_sdlshim_axis(float lx, float ly);
 
 /* A keyboard key by SDL scancode (adb / a developer's keyboard). */
 void mmo_sdlshim_scancode(int scancode, int down);
+
+/*
+ * What the system keyboard typed, as the bytes the activity wrote down its pipe and the
+ * frontend read off its looper: UTF-8 text with a few control bytes for the edits and one
+ * record for the rows the keyboard covers (the values are in OpenMMOActivity.java and
+ * sdlshim.c, "The keyboard").
+ */
+void mmo_sdlshim_ime_bytes(const unsigned char *bytes, size_t n);
 
 /* App went to / came back from the background: silence and resume AAudio. */
 void mmo_sdlshim_background(int paused);

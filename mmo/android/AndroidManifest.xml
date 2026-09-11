@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The Java side of this app is one class of three small jobs: OpenMMOActivity
+  The Java side of this app is one class of four small jobs: OpenMMOActivity
   extends NativeActivity to hear the document picker's answer (which the
   framework delivers to onActivityResult and NativeActivity swallows), to
-  hide the system bars, and to hand a downloaded update to the package
-  installer and hear its verdict. Everything else still arrives in C (the
-  surface, the input queue, the lifecycle) because NativeActivity still loads
-  the library named below and calls ANativeActivity_onCreate in it.
+  hide the system bars, to hand a downloaded update to the package
+  installer and hear its verdict, and to give the system keyboard the
+  InputConnection it types into, which no C entry point can supply.
+  Everything else still arrives in C (the surface, the input queue, the
+  lifecycle) because NativeActivity still loads the library named below and
+  calls ANativeActivity_onCreate in it.
 
   targetSdkVersion is 35, set in Makefile.android where the reasoning is
   written out. It was 28, held one level below scoped storage while the
@@ -85,7 +87,11 @@
          showWhenLocked + turnScreenOn: a handheld's power button is how a
          player pauses, and coming back must not strand the game behind a
          swipe keyguard with its window revoked. The idle doze also swallowed
-         every adb-driven session before these two. -->
+         every adb-driven session before these two.
+
+         No windowSoftInputMode here, on purpose: NativeActivity.onCreate
+         sets the window's mode itself, over the manifest, so the one that
+         holds is set in OpenMMOActivity.onCreate after super. -->
     <activity android:name="org.openmmo.handheld.OpenMMOActivity"
               android:label="OpenMMO"
               android:launchMode="singleTask"

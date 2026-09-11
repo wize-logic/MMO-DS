@@ -7,12 +7,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "pc_field_tex.h" /* the field's texture pool, the engine's knobs */
+
 #include "../../../include/endpoint.h"
 #include "../../../include/platform.h"
 
 /* What this build uses. The engine's own numbers are 64, 32 and 80. */
 #define OPENMMO_MAP_OBJECTS_DEFAULT 80
-#define OPENMMO_TEXTURE_SLOTS_DEFAULT 32
+/* The texture pool is the engine's now (pc_field_tex.h): PC_FIELD_TEX_SLOTS,
+ * which openmmo_field_tex_apply sets to 64 unless a run says otherwise. */
 #define OPENMMO_OVERWORLD_ANIMS_DEFAULT 88
 
 /*
@@ -72,13 +75,17 @@ int openmmo_map_object_capacity(void)
  */
 int openmmo_texture_slot_capacity(void)
 {
-    static int cached;
+    return pc_field_tex_slots();
+}
 
-    if (cached == 0) {
-        cached = env_int("OPENMMO_TEXTURE_SLOTS", OPENMMO_TEXTURE_SLOTS_DEFAULT, 4, 256);
-    }
-
-    return cached;
+/*
+ * What this client asks the engine's field for, before the first map: 64 texture slots and
+ * three VRAM banks.
+ */
+void openmmo_field_tex_apply(void)
+{
+    mmo_plat_setenv("PC_FIELD_TEX_SLOTS", "64", 0);
+    mmo_plat_setenv("PC_FIELD_TEX_BANKS", "3", 0);
 }
 
 /*
@@ -150,9 +157,9 @@ void openmmo_texture_pool_full(int id)
     fprintf(stderr,
             "openmmo: the overworld texture pool is full, %d slots, all taken,"
             " and graphics id %d wanted one more.\n"
-            "openmmo: raise OPENMMO_TEXTURE_SLOTS (or the default in"
-            " mods/openmmo/src/openmmo_crowd.c) or draw fewer distinct"
-            " appearances at once.\n",
+            "openmmo: raise PC_FIELD_TEX_SLOTS (up to 128; this client asks for 64"
+            " in openmmo_field_tex_apply) or draw fewer distinct appearances at"
+            " once.\n",
             openmmo_texture_slot_capacity(), id);
     fflush(stderr);
     stop();

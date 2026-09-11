@@ -1,6 +1,6 @@
 --- a/src/resource_collection.c
 +++ b/src/resource_collection.c
-@@ -212,6 +212,11 @@
+@@ -214,6 +214,11 @@
      GF_ASSERT(texMgr);
  
      texResource = TextureResourceManager_AllocTexture(texMgr);

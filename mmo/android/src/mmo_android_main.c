@@ -12,6 +12,7 @@
 #include <android/native_window.h>
 #include <android/window.h>   /* AWINDOW_FLAG_FULLSCREEN */
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <math.h>
 #include <stdarg.h>
@@ -2158,6 +2159,78 @@ int mmo_android_install_result(char *out, size_t cap)
     return 1;
 }
 
+/* ================================================================= keyboard */
+#define LOOPER_ID_IME (LOOPER_ID_USER + 1)
+
+static int g_ime_rd = -1;
+
+static void ime_open(struct android_app *app)
+{
+    int fds[2];
+    jvalue arg;
+
+    if (pipe(fds) != 0) {
+        LOGE("ime: no pipe: %s", strerror(errno));
+        return;
+    }
+    fcntl(fds[0], F_SETFD, FD_CLOEXEC);
+    fcntl(fds[1], F_SETFD, FD_CLOEXEC);
+    fcntl(fds[0], F_SETFL, fcntl(fds[0], F_GETFL) | O_NONBLOCK);
+    if (ALooper_addFd(app->looper, fds[0], LOOPER_ID_IME, ALOOPER_EVENT_INPUT,
+                      NULL, NULL) != 1) {
+        LOGE("ime: the looper would not take the pipe");
+        close(fds[0]);
+        close(fds[1]);
+        return;
+    }
+    arg.i = fds[1];
+    if (pick_call("imeAttach", "(I)V", &arg, NULL, 'v') != 0) {
+        /* An activity without the keyboard's half: nothing is ever typed on
+         * the glass, and a field is still usable from a real keyboard. */
+        LOGE("ime: the activity has no imeAttach; no system keyboard");
+        ALooper_removeFd(app->looper, fds[0]);
+        close(fds[0]);
+        close(fds[1]);
+        return;
+    }
+    /* Java adopted the write end; it is Java's to close. */
+    g_ime_rd = fds[0];
+    LOGI("ime: pipe up");
+}
+
+/* The looper said the pipe is readable: everything in it goes to the shim.
+ * Before the viewer owns the screen there is no field to type into. */
+static void ime_drain(void)
+{
+    unsigned char buf[4096];
+    ssize_t n;
+
+    if (g_ime_rd < 0) {
+        return;
+    }
+    while ((n = read(g_ime_rd, buf, sizeof buf)) > 0) {
+        if (viewer_on()) {
+            mmo_sdlshim_ime_bytes(buf, (size_t)n);
+        }
+    }
+}
+
+/* Raise (1) or put away (0) the keyboard. The shim's; any thread. */
+void mmo_android_ime_show(int on)
+{
+    jvalue arg;
+
+    if (g_ime_rd < 0) {
+        return;
+    }
+    arg.z = on ? JNI_TRUE : JNI_FALSE;
+    if (pick_call("imeShow", "(Z)V", &arg, NULL, 'v') != 0) {
+        LOGE("ime: imeShow did not reach the activity");
+    } else if (key_log()) {
+        LOGI("ime: %s", on ? "raise" : "put away");
+    }
+}
+
 void android_main(struct android_app *app)
 {
     g_app = app;
@@ -2189,9 +2262,10 @@ void android_main(struct android_app *app)
             LOGI("android_main: up, pid %d", getpid());
         }
     }
+    ime_open(app);
 
     for (;;) {
-        int events = 0;
+        int events = 0, id;
         struct android_poll_source *src = NULL;
         /*
          * Block only when there is nothing to draw. With a surface up this polls with no
@@ -2201,8 +2275,11 @@ void android_main(struct android_app *app)
         int timeout = viewer_on() ? 10000
                       : (g_egl.dpy == EGL_NO_DISPLAY) ? -1 : 0;
 
-        while (ALooper_pollOnce(timeout, NULL, &events, (void **)&src) >= 0) {
-            if (src != NULL) {
+        while ((id = ALooper_pollOnce(timeout, NULL, &events,
+                                      (void **)&src)) >= 0) {
+            if (id == LOOPER_ID_IME) {
+                ime_drain();
+            } else if (src != NULL) {
                 src->process(app, src);
             }
             if (app->destroyRequested != 0) {

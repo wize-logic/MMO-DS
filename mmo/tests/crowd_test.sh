@@ -115,7 +115,7 @@ fi
 # the pool's users runs out first and that is the map's business, so this asserts
 # only what is ours: the run says something. Before the traps this map load ran
 # short in complete silence.
-rc=$(boot 0 "$tmp/tex.log" OPENMMO_TEXTURE_SLOTS=4)
+rc=$(boot 0 "$tmp/tex.log" PC_FIELD_TEX_SLOTS=4)
 if grep -qE '^openmmo: (engine assertion failed|a heap is full|the overworld texture pool is full)' "$tmp/tex.log"; then
     ok "a starved texture pool is reported rather than passing unremarked"
 else

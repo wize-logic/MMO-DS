@@ -1526,7 +1526,8 @@ static void fd_layout(struct frontdoor *d, int sw, int sh, int saved,
         ww = sw - 40;
     col_w = (ww - pad * 2 - gap) / 2;
     if (d->focus != FOCUS_NONE) {
-        /* The keyboard owns the bottom-right; the frame yields to it. */
+        /* The keyboard owns the bottom of the glass; the frame yields to
+         * it, and the window is already laid out in the rows above it. */
         wx = 16;
         wy = 30;
     } else {

@@ -659,6 +659,9 @@ LAUNCHART := $(NROOT)/res/launcher/bg.png $(NROOT)/res/launcher/wordmark.png
 # the C side polls; the java/ directory holds it and may never hold more.
 # The package installer is the same shape (a session object, a verdict that
 # arrives as an Intent) and rings the same bell: installApk in that class.
+# So is the system keyboard, which types into an InputConnection nothing in
+# the NDK can supply: the class holds the view that answers for one and
+# writes what is typed down a pipe the C side reads.
 #
 # -parameters is LOAD-BEARING, not style: javac 21 without it emits the
 # anonymous Runnable with a nameless parameter entry and this d8 dies on it

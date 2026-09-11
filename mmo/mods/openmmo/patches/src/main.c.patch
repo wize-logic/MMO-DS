@@ -1,16 +1,17 @@
 --- a/src/main.c
 +++ b/src/main.c
-@@ -55,6 +55,9 @@
+@@ -55,6 +55,10 @@
  static void CheckHeapCanary(void);
  
  int pc_lab_boot(void *saveData); /* pc/src/pc_lab.c */
 +void openmmo_mod_frame(void);           /* mmo/mods/openmmo/src/openmmo_boot.c */
 +int openmmo_boot_kind(void *saveData);  /* 0 vanilla, 1 field, 2 session title */
 +void openmmo_mixer_apply(void);         /* mmo/mods/openmmo/src/openmmo_mixer.c */
++void openmmo_field_tex_apply(void);     /* mmo/mods/openmmo/src/openmmo_crowd.c */
  
  static Application sApplication;
  // This variable doesn't really makes sense. If it's set to off, the game will
-@@ -62,10 +65,12 @@
+@@ -62,10 +66,12 @@
  static PMBackLightSwitch sSavedBacklightState;
  BOOL gIgnoreCartridgeForWake;
  extern const ApplicationManagerTemplate gOpeningCutsceneAppTemplate;
@@ -23,15 +24,16 @@
  
      InitSystem();
      InitVRAM();
-@@ -86,6 +91,7 @@
+@@ -86,6 +92,8 @@
      sApplication.args.saveData = SaveData_Init();
  
      SoundSystem_Init(SaveData_GetChatotCry(sApplication.args.saveData), SaveData_GetOptions(sApplication.args.saveData));
 +    openmmo_mixer_apply();
++    openmmo_field_tex_apply();
      Timer_Start();
  
      if (sub_02038FFC(HEAP_ID_APPLICATION) == DWC_INIT_RESULT_DESTROY_OTHER_SETTING) {
-@@ -106,6 +112,16 @@
+@@ -106,6 +114,16 @@
          EnqueueApplication(FS_OVERLAY_ID(game_start),
                             labMode == 2 ? &gGameStartLoadSaveAppTemplate
                                          : &gGameStartNewSaveAppTemplate);
@@ -48,7 +50,7 @@
      } else {
          switch (OS_GetResetParameter()) {
          case RESET_CLEAN:
-@@ -125,7 +141,7 @@
+@@ -125,7 +143,7 @@
          }
      }
  
@@ -57,7 +59,7 @@
      gSystem.frameCounter = 0;
  
      InitRNG();
-@@ -143,6 +159,8 @@
+@@ -143,6 +161,8 @@
              SoftReset(RESET_CLEAN);
          }
  
