@@ -9,7 +9,7 @@
 # hashed as its bytes. Do not edit by hand: a hash nobody computed is
 # worse than no hash, because it reads as verified.
 #
-# pin: 277a05f77e39ba69fbcf33a2e07e0ebd2b2b1b4d
+# pin: 277a05f77b591fdd869a1a0bbc576fe840f541d1
 
 1cee4dedf6b02380fcdf86c3126cdee027e442159f4545fd7eee2507ef8934b0  include/applications/mail.h
 de0a824e69fe1724fe22dc4616aed019560f210d8b87d7e282db25c113bdd244  include/applications/naming_screen.h
