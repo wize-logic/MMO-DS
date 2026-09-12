@@ -79,6 +79,14 @@ NOOPS = {
     "ScrCmd_582",   # a special spawn point
     "ScrCmd_804",   # Pokegear_SetMapUnlockLevel
     "SetObjectMovementType", "SetObjectFacing", "MakeObjectVisible",
+    # MoveWarp is Field_SetWarpXYPos: it moves a WARP EVENT's coordinates,
+    # not the player and not a person (HeartGold's own ScrCmd_MoveWarp, and
+    # the opcode sits between SetObjectFacing and MoveBGEvent, which is the
+    # same idea for a background event). Nothing it does can hide or show
+    # anybody, so this page's question is unaffected by it. NOTE, separately:
+    # a map whose arrival script moves a warp keeps the ported warp where the
+    # event data put it, which is its own divergence and not this file's.
+    "MoveWarp",
 }
 
 
@@ -219,6 +227,17 @@ def run(bank: Bank, start: int, world: World, std) -> None:
             dests = [a for a in args if a.startswith("VAR_")]
             if dests:
                 world.vars[dests[-1]] = 1
+        elif name == "SetTrainerHouseSprite":
+            # HeartGold's own ScrCmd_SetTrainerHouseSprite asks
+            # TrainerHouseSet_CheckHasData whether slot <arg0> holds a trainer
+            # somebody recorded, and on this page's premise, a save that was
+            # never played, no slot does. So it writes 0 to the "is there a
+            # trainer here" variable and 0 to VAR_OBJ_<n>, which is the sprite
+            # the SPRITE_VAR_<n> body would have worn. Both are determinate,
+            # not a guess: there is nothing in the save to read.
+            if len(args) != 2 or not args[1].startswith("VAR_"):
+                raise Unsupported(name)
+            world.vars[args[1]] = 0
         elif name in NOOPS:
             pass
         else:

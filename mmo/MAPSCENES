@@ -22,7 +22,7 @@
 # in the design notes, so a port of such a map carries only the
 # people no flag hides at all, and says so.
 #
-# 535 maps evaluated, 5 written down as unevaluated.
+# 537 maps evaluated, 3 written down as unevaluated.
 #
 # Rows: hg <name> <NAME=value ... hide=N show=N, or - or ? and why>
 
@@ -415,7 +415,7 @@ hg  route_43_mahogany_gatehouse            -
 hg  route_44                               -
 hg  route_45                               FLAG_HIDE_CAMERON=0x27E
 hg  route_46                               -
-hg  route_47                               ?  # MoveWarp
+hg  route_47                               FLAG_HIDE_ROUTE_47_CHUCK=0x304 FLAG_HIDE_ROUTE_47_EMBEDDED_TOWER_HIKER=0x2CF
 hg  route_48                               FLAG_UNK_0AE=0xAE
 hg  route_5                                FLAG_UNK_258=0x258
 hg  route_5_house                          -
@@ -432,7 +432,7 @@ hg  route_8                                -
 hg  route_8_saffron_gatehouse              -
 hg  route_9                                -
 hg  route_9_unused                         -
-hg  ruins_of_alph                          ?  # MoveWarp
+hg  ruins_of_alph                          FLAG_HIDE_ALPH_OUTSIDE_ARCEUS_EVENT_SUIT=0x2E6
 hg  ruins_of_alph_hall_entrance            FLAG_HIDE_CAMERON=0x27E
 hg  ruins_of_alph_hall_entrance_sinjoh_event FLAG_HIDE_CAMERON=0x27E
 hg  ruins_of_alph_northeast_entrance_first_room FLAG_OPENED_ALPH_ESCAPE_ROPE_SECRET_ROOM=0x21B FLAG_UNK_21C=0x21C
@@ -557,7 +557,7 @@ hg  viridian_pokecenter_b1f                -
 hg  viridian_pokemart                      FLAG_HIDE_MOM_GIFT_DELIVERYMAN=0x2A8 FLAG_HIDE_MYSTERY_GIFT_DELIVERYMAN=0x2A7
 hg  viridian_route_1_gatehouse             -
 hg  viridian_trainer_house_1f              -
-hg  viridian_trainer_house_b1f             ?  # SetTrainerHouseSprite
+hg  viridian_trainer_house_b1f             ?  # SetFlagVar
 hg  whirl_islands_1f                       -
 hg  whirl_islands_b1f                      -
 hg  whirl_islands_b2f                      -
