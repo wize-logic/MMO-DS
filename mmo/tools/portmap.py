@@ -576,9 +576,21 @@ def load_walls(path: Path) -> dict[str, tuple[set[int], set[int]]]:
     return out
 
 
+# A member's TEX0 carries the character's name as the artist spelt it, and
+# three spell it too tersely for the rules in palette_agrees to see: `lug01`
+# for Lugia's object, `pip_n`, and `rbanzaiheroine` contracted to RBANZAIINE.
+HAND_PALETTES = {
+    "lug_obj01": "lug01",
+    "mono_pip": "pip_n",
+    "rbanzaiine": "rbanzaiheroine",
+}
+
+
 def palette_agrees(name: str, pal: str) -> bool:
     """Whether an mmodel member's own palette name is the sprite mmo/SPRITES says."""
     a, b = pal.lower(), name.lower()
+    if HAND_PALETTES.get(b) == a:
+        return True
     # A static follower's member is the species' follower sheet, and every
     # follower sheet calls its palette tsure_poke0 (mmo/SPRITES says why).
     if b.startswith("follower_mon_") and a in ("tsure_poke0", "tsure_poke1"):
