@@ -628,15 +628,40 @@ apk: $(APK)
 # a release, and read from dist.sh so the address never lives in two files.
 # A plain `apk` keeps dialing this WSL's own servers, which no device can
 # reach from outside, so the playable build is this one.
+#
+# And pinned to the update channel, for the same reason the server is. This
+# target pinned the server and not the feed from the day it was written, so
+# every APK that has ever gone on a handheld carried an empty
+# OPENMMO_PIN_FEED_URL: that build cannot check for updates and does not say
+# so, the rail draws no button at all and the ask at start returns on "no
+# channel is compiled into this build". Releases were fine, because dist.sh
+# does pin the channel.
+#
+# No key file, no pin. FEED_KEY naming a path that does not exist is compiled
+# in as though the path were the key, and the app then fails at runtime with
+# "This build's channel key is unusable" rather than at the build that caused
+# it. Saying so here and building without the channel is the legible answer.
 apk-live:
-	@host=$$(sh -c '. /dev/null; grep -o "RELEASE_HOST=.*" $(NROOT)/dist.sh | head -1 | sed "s/.*:-\([^}]*\)}.*/\1/"'); \
-	 key=$$(grep -o 'RELEASE_ROOT_KEY=.*' $(NROOT)/dist.sh | head -1 | sed 's/.*:-\([^}]*\)}.*/\1/'); \
+	@host=$$(sh -c '. /dev/null; grep -o "^RELEASE_HOST=.*" $(NROOT)/dist.sh | head -1 | sed "s/.*{[A-Za-z_]*:\{0,1\}-\([^}]*\)}.*/\1/"'); \
+	 key=$$(grep -o '^RELEASE_ROOT_KEY=.*' $(NROOT)/dist.sh | head -1 | sed 's/.*{[A-Za-z_]*:\{0,1\}-\([^}]*\)}.*/\1/'); \
 	 if [ -z "$$host" ] || [ -z "$$key" ]; then \
 	   echo "apk-live: cannot read RELEASE_HOST / RELEASE_ROOT_KEY from dist.sh"; exit 1; fi; \
+	 feed=$$(grep -o '^RELEASE_FEED_URL=.*' $(NROOT)/dist.sh | head -1 | sed 's/.*{[A-Za-z_]*:\{0,1\}-\([^}]*\)}.*/\1/'); \
+	 feedkey=$(NROOT)/feed-key.pem; \
+	 if [ -z "$$feed" ]; then \
+	   echo "apk-live: dist.sh names no RELEASE_FEED_URL, so this build cannot check for updates"; \
+	 elif [ ! -f "$$feedkey" ]; then \
+	   echo "apk-live: no $$feedkey, so this build cannot check for updates"; \
+	   feed=; \
+	 else \
+	   feed=$$feed/android; \
+	   echo "apk-live: channel $$feed"; \
+	 fi; \
 	 echo "apk-live: pinning $$host"; \
 	 $(MAKE) -f $(firstword $(MAKEFILE_LIST)) \
 	   SERVER_HOST=$$host SERVER_LOGIN_PORT=2106 SERVER_GAME_PORT=7777 \
-	   SERVER_ROOT_KEY=$$key apk
+	   SERVER_ROOT_KEY=$$key \
+	   FEED_URL="$$feed" FEED_KEY="$${feed:+$$feedkey}" apk
 
 # The fused library is the payload and it is stripped on the way in. The
 # unstripped one is 48 MB of which 44 are debug info no phone can use and
