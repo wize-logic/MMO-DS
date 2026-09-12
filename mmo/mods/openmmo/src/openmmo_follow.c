@@ -439,6 +439,19 @@ static void set_object_params(MapObject *obj, int gfx, int species, int shiny)
     MapObject_SetDataAt(obj, species, FOLLOW_PARAM_SPECIES);
 }
 
+/* The picture, changed on A MAP that is already drawing one. */
+static void set_gfx(MapObject *obj, int gfx)
+{
+    if ((int)MapObject_GetGraphicsID(obj) == gfx) {
+        return;
+    }
+    if (sub_02062DFC(obj)) {
+        sub_02061AD4(obj, gfx);
+    } else {
+        MapObject_SetGraphicsID(obj, (u32)gfx);
+    }
+}
+
 /* FieldSystem_SetFollowerPokeParam. */
 static void remember(int species, int form, int shiny, int gender, u32 personality)
 {
@@ -597,7 +610,15 @@ void openmmo_follow_change_mon(FieldSystem *fs)
     header = fs->location->mapHeaderID;
     gfx = gfx_for(mon, &species, &form, &gender, &shiny);
     obj = openmmo_follow_object(fs);
-    if (gfx >= 0 && openmmo_follow_permission_for(species, header)) {
+    /* A lead nothing can draw puts the follower away. */
+    if (gfx < 0) {
+        if (obj != NULL) {
+            MapObject_Delete(obj);
+        }
+        g_follow.active = 0;
+        return;
+    }
+    if (openmmo_follow_permission_for(species, header)) {
         if (obj == NULL) {
             g_follow.refuse_pending = 1;
             return;
@@ -605,9 +626,7 @@ void openmmo_follow_change_mon(FieldSystem *fs)
         g_follow.active = 1;
         remember(species, form, shiny, gender, Pokemon_GetValue(mon, MON_DATA_PERSONALITY, NULL));
         set_object_params(obj, gfx, species, shiny);
-        if ((int)MapObject_GetGraphicsID(obj) != gfx) {
-            MapObject_SetGraphicsID(obj, (u32)gfx);
-        }
+        set_gfx(obj, gfx);
         /* The restore rebinds every object's movement from the engine's own
          * table; this puts the source's follow back on it. */
         openmmo_follow_move_bind(obj, openmmo_follow_type());
@@ -627,13 +646,9 @@ void openmmo_follow_change_mon(FieldSystem *fs)
         }
         sub_02062D80(obj, 0);
     } else if (obj != NULL) {
-        if (gfx >= 0) {
-            remember(species, form, shiny, gender, Pokemon_GetValue(mon, MON_DATA_PERSONALITY, NULL));
-            set_object_params(obj, gfx, species, shiny);
-            if ((int)MapObject_GetGraphicsID(obj) != gfx) {
-                MapObject_SetGraphicsID(obj, (u32)gfx);
-            }
-        }
+        remember(species, form, shiny, gender, Pokemon_GetValue(mon, MON_DATA_PERSONALITY, NULL));
+        set_object_params(obj, gfx, species, shiny);
+        set_gfx(obj, gfx);
         openmmo_follow_move_bind(obj, openmmo_follow_type());
         g_follow.active = 1;
         g_follow.refuse_pending = 1;
