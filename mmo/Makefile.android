@@ -572,7 +572,7 @@ TARGET_SDK ?= 35
 # installs BESIDE the old one and can never receive an update meant for it.
 # That is a distribution decision, not a branding one; aapt2's
 # --rename-manifest-package is the flag for anyone taking it deliberately.
-APK_LABEL   ?= Platinum Online
+APK_LABEL   ?= MMO-DS
 APK_ICON    ?= $(NROOT)/../web/public/icon-512.png
 APK_ICON_BG ?= FFFFFF
 
