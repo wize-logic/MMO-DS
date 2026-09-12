@@ -5,6 +5,7 @@
 #include <dirent.h>
 #include <setjmp.h>
 #include <sys/stat.h>
+#include <unistd.h>     /* rmdir: remove() does not drop a directory on Windows */
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -671,7 +672,15 @@ static void rm_dir_r(const char *path)
             rm_dir_r(child);        /* a directory, or a file we cannot drop */
     }
     closedir(d);
-    remove(path);
+    /* remove() does not drop a directory on Windows: the C library sends it to
+     * DeleteFile, which refuses one, so this walk emptied the tree and left
+     * the skeleton of directories standing. The rename that publishes the
+     * package then failed against a destination that still existed, and the
+     * player got a package with no files in it and a game that exits before it
+     * draws. Only a second fill can hit it; the first has no .cooked to
+     * replace. lookcompose's copy of this walk has always ended in rmdir. */
+    if (remove(path) != 0)
+        rmdir(path);
 }
 
 static void rm_tree(const char *path)
