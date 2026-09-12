@@ -91,7 +91,7 @@ sums="${sum_win:-}${sum_lin:-}${sum_dro:-}${sum_oth:-}"
 # Two update promises, each the truth of its host: the desktop launcher
 # rewrites its install every Play; the app fetches the new APK out of the same
 # signed channel and asks the phone's package installer to put it in place,
-# which is a confirmation the player taps.
+# which is a confirmation the player taps (mmo/FEED.md, "the android channel").
 note=''
 [ "$desktop" = 1 ] && note='Unzip it anywhere and run it. Nothing to set up, and it
 updates itself every time you press Play.'
@@ -106,13 +106,13 @@ cat > "$DEST/download.html" <<HTML
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Download</title>
 <link rel="canonical" href="https://mmods.net/download.html">
-<link rel="icon" href="/favicon.svg?v=3" type="image/svg+xml">
-<link rel="icon" href="/favicon-32.png?v=3" sizes="32x32" type="image/png">
-<link rel="icon" href="/favicon-64.png?v=3" sizes="64x64" type="image/png">
-<link rel="icon" href="/favicon.ico?v=2" sizes="48x48">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3">
+<link rel="icon" href="/favicon.svg?v=4" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png?v=4" sizes="32x32" type="image/png">
+<link rel="icon" href="/favicon-64.png?v=4" sizes="64x64" type="image/png">
+<link rel="icon" href="/favicon.ico?v=3" sizes="48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=4">
 <meta name="theme-color" content="#73ace2">
-<link rel="stylesheet" href="/style.css?v=9">
+<link rel="stylesheet" href="/style.css?v=10">
 </head>
 <body>
 <div class="sky" aria-hidden="true"><div></div><div></div><div></div></div>

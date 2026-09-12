@@ -141,7 +141,7 @@ body {
 }
 
 .sky div:nth-child(1)::before {
-  background-image: url("/clouds-back.svg?v=2");
+  background-image: url("/clouds-back.svg?v=3");
 }
 
 .sky div:nth-child(2) {
@@ -153,7 +153,7 @@ body {
 }
 
 .sky div:nth-child(2)::before {
-  background-image: url("/clouds-mid.svg?v=2");
+  background-image: url("/clouds-mid.svg?v=3");
 }
 
 .sky div:nth-child(3) {
@@ -165,7 +165,7 @@ body {
 }
 
 .sky div:nth-child(3)::before {
-  background-image: url("/clouds-front.svg?v=2");
+  background-image: url("/clouds-front.svg?v=3");
 }
 
 @keyframes cloud-drift {
@@ -211,9 +211,9 @@ body {
    so the page from any release after this one takes the rules above instead. */
 body:not(:has(.sky)) {
   background:
-    url("/clouds-back.svg?v=2") repeat-x 0 4px,
-    url("/clouds-mid.svg?v=2") repeat-x 0 48px,
-    url("/clouds-front.svg?v=2") repeat-x 0 96px,
+    url("/clouds-back.svg?v=3") repeat-x 0 4px,
+    url("/clouds-mid.svg?v=3") repeat-x 0 48px,
+    url("/clouds-front.svg?v=3") repeat-x 0 96px,
     linear-gradient(180deg, var(--sky-top), var(--sky) 420px);
 }
 
@@ -260,7 +260,7 @@ h4 {
   width: 32px;
   height: 32px;
   flex: none;
-  background: url("/icon-128.png") center / contain no-repeat;
+  background: url("/icon-128.png?v=2") center / contain no-repeat;
 }
 
 .bar nav {
