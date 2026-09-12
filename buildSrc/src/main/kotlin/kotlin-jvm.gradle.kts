@@ -19,10 +19,13 @@ dependencies {
 tasks.withType<Test>().configureEach {
   useJUnitPlatform()
 
-  // Testcontainers' docker-java asks for API 1.32 and modern daemons refuse anything under 1.40,
-  // so the Docker-gated specs skipped silently on a machine that has Docker. 1.41 is Docker 20.10
-  // and above; an environment that pins its own version keeps it.
-  systemProperty("api.version", System.getenv("DOCKER_API_VERSION") ?: "1.41")
+  // Testcontainers' docker-java asks for API 1.32 and a daemon refuses anything below its own
+  // minimum, so the Docker-gated specs skip silently on a machine that has Docker. This pin is the
+  // floor we hand it, and it has gone stale once already: 1.41 was chosen against a daemon whose
+  // minimum was 1.40, and a later one raised that to 1.44. Raise it when that happens again; an
+  // environment that pins its own version keeps it. The symptom is a green build with no XML under
+  // build/test-results for the IT specs.
+  systemProperty("api.version", System.getenv("DOCKER_API_VERSION") ?: "1.44")
 
   testLogging {
     events(
