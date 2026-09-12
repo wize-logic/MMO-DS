@@ -127,6 +127,48 @@ class AntiCheatTest :
           pace.allow(1) shouldBe false
           pace.allow(2) shouldBe true
         }
+
+        /*
+         * The step ceiling is the one limit set against how the game itself moves, so it is
+         * the one that can refuse somebody playing normally.
+         */
+        test("the fastest ride the game has is never refused, however long it lasts") {
+          var now = 0L
+          val pace =
+              PaceLimit(
+                  burst = MovementService.STEP_BURST,
+                  perSecond = MovementService.STEPS_PER_SECOND,
+                  clock = { now },
+              )
+          val frame = 1_000_000_000L / 60
+          // Ten minutes of Cycling Road, a tile every second frame.
+          repeat(30 * 600) {
+            pace.allow(1) shouldBe true
+            now += 2 * frame
+          }
+        }
+
+        test("a client reporting a step a frame is not refused either, and two are") {
+          var now = 0L
+          val pace =
+              PaceLimit(
+                  burst = MovementService.STEP_BURST,
+                  perSecond = MovementService.STEPS_PER_SECOND,
+                  clock = { now },
+              )
+          val frame = 1_000_000_000L / 60
+          repeat(60 * 60) {
+            pace.allow(1) shouldBe true
+            now += frame
+          }
+          // Twice a frame spends the burst and is then refused, which no paced client reaches.
+          var refused = 0
+          repeat(60 * 10) {
+            if (!pace.allow(1)) refused++
+            now += frame / 2
+          }
+          refused shouldBeGreaterThan 0
+        }
       }
 
       context("a ball has to hold") {

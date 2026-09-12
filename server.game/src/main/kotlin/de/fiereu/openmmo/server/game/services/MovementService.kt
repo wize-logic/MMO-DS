@@ -42,7 +42,7 @@ constructor(
 ) {
 
   /** How fast a player may take tiles. */
-  private val pace = PaceLimit(burst = 40.0, perSecond = 32.0)
+  private val pace = PaceLimit(burst = STEP_BURST, perSecond = STEPS_PER_SECOND)
 
   /** One step. The client sends the tile it left and the direction, the server derives the rest. */
   fun onMovement(event: PacketEvent<MovementPacket>) {
@@ -62,15 +62,14 @@ constructor(
     val fromX = stored.info.positionX.toInt()
     val fromY = stored.info.positionY.toInt()
 
-    // A step the game could not have taken this soon. Refused rather than delayed, and counted:
-    // one is a connection catching up, a stream of them is a client walking at a speed no
-    // animation runs at.
+    // A step the game could not have taken this soon: more than one in a console frame, which is
+    // more often than the engine can commit an action. Refused rather than delayed, and counted.
     if (!pace.allow(charId)) {
       violations.record(
           charId,
           ViolationLog.Kind.IMPOSSIBLE_PACE,
-          "is taking tiles faster than the game walks; the step was dropped")
-      sendPositionReset(ctx, charId, currentMap, fromX, fromY, state.facingDirection)
+          "is taking tiles faster than the engine can commit them; the step was dropped")
+      correct(Reason.PACE, ctx, charId, Seat(currentMap, fromX, fromY, state.facingDirection))
       return
     }
 
@@ -82,14 +81,17 @@ constructor(
       state.justWarped -> return
       // A script owns the player, like the decomp's lockall.
       state.inDialog -> {
-        sendPositionReset(ctx, charId, currentMap, fromX, fromY, state.facingDirection)
+        correct(Reason.DIALOG, ctx, charId, Seat(currentMap, fromX, fromY, state.facingDirection))
         return
       }
       !atServerTile -> {
-        log.debug {
-          "DESYNC: char=$charId claims (${msg.x}, ${msg.y}), server has ($fromX, $fromY), resetting"
-        }
-        sendPositionReset(ctx, charId, currentMap, fromX, fromY, msg.direction)
+        correct(
+            Reason.DESYNC,
+            ctx,
+            charId,
+            Seat(currentMap, fromX, fromY, msg.direction),
+            "the client stepped from (${msg.x}, ${msg.y})",
+        )
         return
       }
     }
@@ -124,7 +126,13 @@ constructor(
             mapManager.getMap(currentMap.regionId, it.targetBank.toByte(), it.targetMap.toByte())
           }
       if (connection == null || targetMap == null) {
-        sendPositionReset(ctx, charId, currentMap, fromX, fromY, msg.direction)
+        correct(
+            Reason.EDGE,
+            ctx,
+            charId,
+            Seat(currentMap, fromX, fromY, msg.direction),
+            "no connection carries a step to ($toX, $toY)",
+        )
         return
       }
       val entryX =
@@ -144,8 +152,13 @@ constructor(
       if (entryX !in 0 until targetMap.width ||
           entryY !in 0 until targetMap.height ||
           !isWalkable(targetMap, entryX, entryY, state, msg.direction)) {
-        log.debug { "EDGE: char=$charId refused at ($entryX, $entryY) on the far map" }
-        sendPositionReset(ctx, charId, currentMap, fromX, fromY, msg.direction)
+        correct(
+            Reason.EDGE,
+            ctx,
+            charId,
+            Seat(currentMap, fromX, fromY, msg.direction),
+            "($entryX, $entryY) on the far map is not somewhere to land",
+        )
         return
       }
       edgeTransition(ctx, charId, currentMap.regionId, connection, entryX.toByte(), entryY.toByte())
@@ -168,7 +181,7 @@ constructor(
     }
 
     if (fieldMoveService.tryPushBoulder(ctx, state, currentMap, toX, toY, msg.direction)) {
-      sendPositionReset(ctx, charId, currentMap, fromX, fromY, msg.direction)
+      correct(Reason.BOULDER, ctx, charId, Seat(currentMap, fromX, fromY, msg.direction))
       return
     }
 
@@ -180,8 +193,13 @@ constructor(
     if (clientOwned) {
       log.debug { "UNMODELLED SURFACE: char=$charId stepping to ($toX, $toY) on its own word" }
     } else if (!isWalkable(currentMap, toX, toY, state, msg.direction)) {
-      log.debug { "WALL: char=$charId blocked at ($toX, $toY)" }
-      sendPositionReset(ctx, charId, currentMap, fromX, fromY, msg.direction)
+      correct(
+          Reason.WALL,
+          ctx,
+          charId,
+          Seat(currentMap, fromX, fromY, msg.direction),
+          "($toX, $toY) is not a tile this server can be stood on",
+      )
       return
     }
 
@@ -253,6 +271,34 @@ constructor(
     return target
   }
 
+  /** Why a step was put back, for anyone reading a live server's log. */
+  private enum class Reason {
+    PACE,
+    DIALOG,
+    DESYNC,
+    EDGE,
+    BOULDER,
+    WALL,
+  }
+
+  /** Where a correction puts the client back, which is always the position the server holds. */
+  private data class Seat(val map: MapDef, val x: Int, val y: Int, val direction: Direction)
+
+  /** Refuse a step and put the client back on the tile the server has. */
+  private fun correct(
+      reason: Reason,
+      ctx: SessionContext,
+      charId: Long,
+      seat: Seat,
+      detail: String? = null,
+  ) {
+    log.info {
+      "$reason: char=$charId put back on (${seat.x}, ${seat.y}) facing ${seat.direction}" +
+          if (detail == null) "" else "; $detail"
+    }
+    sendPositionReset(ctx, charId, seat.map, seat.x, seat.y, seat.direction)
+  }
+
   /** Snap the client back to the position the server considers authoritative. */
   private fun sendPositionReset(
       ctx: SessionContext,
@@ -301,13 +347,17 @@ constructor(
               stored.info.positionBankId,
               stored.info.positionMapId,
           ) ?: return
-      sendPositionReset(
+      correct(
+          Reason.DIALOG,
           ctx,
           charId,
-          map,
-          stored.info.positionX.toInt(),
-          stored.info.positionY.toInt(),
-          state.facingDirection,
+          Seat(
+              map,
+              stored.info.positionX.toInt(),
+              stored.info.positionY.toInt(),
+              state.facingDirection,
+          ),
+          "a face turn arrived while a script held the player",
       )
       return
     }
@@ -387,5 +437,13 @@ constructor(
     if (state != null) mapScriptService.onMapEnter(ctx, state, map)
 
     log.info { "Player $charId edge-transitioned to bank=$targetBank map=$targetMap" }
+  }
+
+  internal companion object {
+    /** Steps a second nothing honest can beat. */
+    const val STEPS_PER_SECOND = 60.0
+
+    /** Two seconds of [STEPS_PER_SECOND], for a connection that goes quiet and then catches up. */
+    const val STEP_BURST = 120.0
   }
 }
