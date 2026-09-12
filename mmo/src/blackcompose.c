@@ -574,6 +574,23 @@ void mmo_black_box(struct face *f, const u32 *ticks, u32 nticks)
     f->boxed = 1;
 }
 
+/*
+ * Rounding is the tool's, ties included. tools/portsprites.py is this fill's
+ * oracle and the import gate diffs the two byte for byte, so every number here
+ * has to break a tie to even, the way Python's round() does, not away from
+ * zero. One 0.5 is one pixel: a back picture 58.5 columns wide came out
+ * centred a column apart, which is 9,001 pixels of difference in a picture
+ * that is otherwise identical.
+ */
+static double bc_round(double v)
+{
+    double r = floor(v + 0.5);
+
+    if (r - v == 0.5 && fmod(r, 2.0) != 0.0)
+        r -= 1.0;
+    return r;
+}
+
 /* The whole loop fits, and the byte is the room below the feet. */
 void mmo_black_fit(struct face *f, int fw, int fh)
 {
@@ -591,7 +608,7 @@ void mmo_black_fit(struct face *f, int fw, int fh)
     f->factor = 1.0;
     if (f->w * f->factor > fw)
         f->factor = (double)fw / f->w;
-    byte = f->hasByte ? f->byte : (int)floor(dip * f->factor + 0.5);
+    byte = f->hasByte ? f->byte : (int)bc_round(dip * f->factor);
     if (byte < 0) byte = 0;
     if (byte > fh - 1) byte = fh - 1;
     if (above > 0.0 && above * f->factor > fh - byte)
@@ -599,9 +616,9 @@ void mmo_black_fit(struct face *f, int fw, int fh)
     if (byte > 0 && dip > 0 && dip * f->factor > byte + 0.5)
         f->factor = (double)byte / dip;
     if (!f->hasByte)
-        byte = (int)floor(dip * f->factor + 0.5);
-    rbot = (int)floor((refbot - f->y0) * f->factor + 0.5);
-    fw2 = (int)floor(f->w * f->factor + 0.5);
+        byte = (int)bc_round(dip * f->factor);
+    rbot = (int)bc_round((refbot - f->y0) * f->factor);
+    fw2 = (int)bc_round(f->w * f->factor);
     if (fw2 < 1) fw2 = 1;
     f->top = (fh - byte) - rbot;
     f->left = (fw - fw2) / 2;
@@ -609,21 +626,54 @@ void mmo_black_fit(struct face *f, int fw, int fh)
     f->byte = byte;
 }
 
-/* The height byte for a loop already boxed: the resting pose's dip, at the
- * scale the wide frame earns it. The fill writes this into height.narc and
- * every later fit, this file's live one included, is seated by it. */
+/*
+ * The height byte is where the pose sits in the cartridge's own frame, and it
+ * has to be, because only half this game's screens seat by it.
+ *
+ * A battle adds the byte to the sprite's y, so the feet land at y + 40 however
+ * big it is. The summary, the box and the party do not: they draw the 80x80
+ * frame at a fixed y and whatever the sheet holds lands where the sheet holds
+ * it. The cartridge's art is small and centred in its cell with the byte
+ * counting the blank rows beneath, so both readings agree there.
+ *
+ * Seating a loop by its dip instead broke that. The dip is 0 for most faces,
+ * the loop laid on the floor of the cell, which is right in a battle and
+ * twenty pixels low everywhere else: one face drew at y 101..143 against the
+ * cartridge's 85..123, its feet hanging out of the frame the page draws round
+ * it. So the byte is the blank rows under a centred resting pose, at the scale
+ * the cartridge's frame gives the loop, and never less than the dip, so a
+ * keyframe that swoops below the pose still has its room and nothing is
+ * cropped. A battle pays nothing for it in practice: a short pose takes a big
+ * byte and does not want the height, a tall one takes a small byte and keeps
+ * the whole frame.
+ */
 int mmo_black_height_byte(const struct face *f)
 {
     int dip = (f->y0 + f->h) - (f->refy + f->refh);
-    double wide = 1.0;
+    double small = 1.0;
+    int posed, centred, sunk;
 
-    if (f->w > BC_FRAME_MAX_W)
-        wide = (double)BC_FRAME_MAX_W / f->w;
-    if (f->h > BC_FRAME_MAX_H && (double)BC_FRAME_MAX_H / f->h < wide)
-        wide = (double)BC_FRAME_MAX_H / f->h;
+    if (f->w > BC_FRAME)
+        small = (double)BC_FRAME / f->w;
+    if (f->h > BC_FRAME && (double)BC_FRAME / f->h < small)
+        small = (double)BC_FRAME / f->h;
+
+    posed = (int)bc_round(f->refh * small);
+    if (posed > BC_FRAME)
+        posed = BC_FRAME;
+    if (posed < 0)
+        posed = 0;
+    centred = (BC_FRAME - posed + 1) / 2;
+
     if (dip < 0)
         dip = 0;
-    return (int)floor(dip * wide + 0.5);
+    sunk = (int)bc_round(dip * small);
+
+    if (sunk > centred)
+        centred = sunk;
+    if (centred > BC_FRAME - 1)
+        centred = BC_FRAME - 1;
+    return centred;
 }
 
 void mmo_black_place(struct face *f, int fw, int fh)
@@ -670,7 +720,7 @@ void mmo_black_frame(const struct face *f, u8 *out)
             }
         }
     } else if (f->factor > 1.0) {
-        int fw = (int)floor(f->w * f->factor + 0.5), fh = (int)floor(f->h * f->factor + 0.5), X, Y;
+        int fw = (int)bc_round(f->w * f->factor), fh = (int)bc_round(f->h * f->factor), X, Y;
 
         for (Y = 0; Y < fh; Y++) {
             int sy = (int)(Y / f->factor);
@@ -693,7 +743,7 @@ void mmo_black_frame(const struct face *f, u8 *out)
             }
         }
     } else {
-        int nw = (int)floor(f->w * f->factor + 0.5), nh = (int)floor(f->h * f->factor + 0.5), X, Y;
+        int nw = (int)bc_round(f->w * f->factor), nh = (int)bc_round(f->h * f->factor), X, Y;
         double inv = 1.0 / f->factor;
 
         if (nw < 1) nw = 1;

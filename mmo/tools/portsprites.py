@@ -564,18 +564,28 @@ def fit(frames, colours, magnify=1.0):
     # window ends exactly at the feet. Fitting only the resting pose and
     # cropping the travel drew Pidgeotto's flap cut flat at both edges.
     #
-    # So: scale the loop's whole extent to fit the wide frame a single battle
-    # draws through, bottom-aligned, and the byte is the resting pose's blank
-    # rows below in that placement, its dip. Nothing is cropped there, and
-    # the feet stay on the platform. This sheet's own 80x80 frame is the
-    # cartridge's layout (doubles, the summary, the box): the same loop and
-    # the same byte, scaled to fit above that seat, which is smaller than the
-    # wide frame allows and is the price the small frame was always charging.
+    # But the byte is not free, because only half the screens seat by it. A
+    # battle adds it to the sprite's y and the feet land at y + 40 however big
+    # it is; the summary, the box and the party draw the 80x80 frame at a fixed
+    # y and take the sheet as it lies. The cartridge's art is small and centred
+    # in its cell with the byte counting the blank rows beneath, so there both
+    # readings agree, and seating a loop by its dip (0 for most faces, the loop
+    # on the floor of the cell) put every one of those screens twenty pixels
+    # low: one face at y 101..143 against the cartridge's 85..123, feet hanging
+    # out of the frame.
+    #
+    # So the byte is the blank rows under a centred resting pose, at the scale
+    # the cartridge's frame gives the loop, and never less than the dip, so a
+    # keyframe that swoops below the pose keeps its room and nothing is
+    # cropped. blackcompose.c's mmo_black_height_byte is this same arithmetic;
+    # the import gate diffs the two.
     ref = boxes[0]
     rw, rh = ref[2] - ref[0], ref[3] - ref[1]
     dip, rise = y1 - ref[3], ref[1] - y0
-    s_wide = min(1.0, WIDE_W / w, WIDE_H / h)
-    byte = int(round(dip * s_wide))
+    s_small = min(1.0, FRAME / w, FRAME / h)
+    posed = min(FRAME, max(0, int(round(rh * s_small))))
+    byte = max((FRAME - posed + 1) // 2, int(round(max(0, dip) * s_small)))
+    byte = min(byte, FRAME - 1)
     factor = min(1.0, FRAME / w, (FRAME - byte) / (rh + rise)) if rh + rise else 1.0
     if byte and dip * factor > byte + 0.5:
         factor = byte / dip

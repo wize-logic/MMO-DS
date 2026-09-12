@@ -2557,7 +2557,11 @@ int mmo_speciescompose_tables(const char *bw_rom, const char *pt_rom,
 
 /* -------------------------------------------------------------- the seam */
 /* The play-time half. */
-#define SPECIESCOMPOSE_STAMP "v1 508 3828 92 41"
+/* v2: the height byte is the blank rows under a centred resting pose again
+ * (blackcompose.c's mmo_black_height_byte), so a package filled by an older
+ * build, whose bytes seat every menu sprite twenty pixels low, is refilled
+ * rather than trusted. */
+#define SPECIESCOMPOSE_STAMP "v2 508 3828 92 41"
 
 static int sc_pkg_dir(const char *path)
 {
