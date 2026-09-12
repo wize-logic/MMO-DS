@@ -511,6 +511,39 @@ MIN_SDK    ?= 26
 # buys just as well.
 TARGET_SDK ?= 35
 
+# ------------------------------------------------------- name and icon
+#
+# The two things a rebranded build has to change, and until these knobs they
+# were a literal in the manifest and fifteen tracked PNGs:
+#
+#   make -f Makefile.android APK_LABEL='Kanto Online' APK_ICON=~/kanto.png apk
+#
+# Neither writes a tracked file. tools/apkbrand.py stages a copy of
+# android/res under $(BUILD)/gen/res, writes the label into it as a string
+# resource and regenerates the icon at every density, and aapt2 compiles the
+# staged tree. With neither variable set the staged tree is the committed one,
+# so the default build packages exactly what it packaged before.
+#
+# APK_ICON is one square image and the script cuts it three ways, because an
+# adaptive icon is a background layer and a foreground layer and only the
+# middle two thirds of either survives a launcher's mask. The reasoning is at
+# the top of the script.
+#
+# No leading # on the colour: a `#` starts a comment in a makefile, so
+# `APK_ICON_BG ?= #191F28` would silently set it empty and every icon would
+# come out on a transparent ground. The script takes it either way. 191F28 is
+# the ground the committed icon already uses; a path to an image works too.
+#
+# The application id is not here, on purpose: org.openmmo.handheld is the
+# identity Android files the save directory under and the one the installer
+# and the update channel match against, so renaming it makes a build that
+# installs beside the old one and can never receive an update meant for it.
+# That is a distribution decision, not a branding one; aapt2's
+# --rename-manifest-package is the flag for anyone taking it deliberately.
+APK_LABEL   ?= OpenMMO
+APK_ICON    ?=
+APK_ICON_BG ?= 191F28
+
 APK      := $(BUILD)/openmmo.apk
 APKSTAGE := $(BUILD)/apk
 KEYSTORE := $(BUILD)/debug.keystore
@@ -732,7 +765,15 @@ $(APK): $(APPOBJS) $(VIEWOBJS) $(FEEDOBJS) $(MBEDTLS_LIB) $(PLANOBJS) \
 	@# pointing link at the directory does not work, link takes compiled
 	@# input only, and the error it gives for a raw png names the file and
 	@# not the reason.
-	@$(AAPT2) compile --dir $(APPDIR)/res -o $(BUILD)/res.zip
+	@# The name and the icon, staged first. aapt2 never sees android/res
+	@# directly any more: it sees a copy under the build tree that carries
+	@# APK_LABEL as a string resource and, if APK_ICON was given, a
+	@# regenerated icon at every density. Unset, both leave the copy equal to
+	@# the committed tree.
+	@python3 $(NROOT)/tools/apkbrand.py --res $(APPDIR)/res \
+	    --out $(BUILD)/gen/res --label '$(APK_LABEL)' \
+	    --icon '$(APK_ICON)' --icon-bg '$(APK_ICON_BG)'
+	@$(AAPT2) compile --dir $(BUILD)/gen/res -o $(BUILD)/res.zip
 	@rm -rf $(BUILD)/assets && mkdir -p $(BUILD)/assets/launcher
 	@cp $(LAUNCHART) $(BUILD)/assets/launcher/
 	@# THE VERSION A STORE ORDERS UPDATES BY. The manifest carries 1, and a

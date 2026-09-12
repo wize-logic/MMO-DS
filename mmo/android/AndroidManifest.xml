@@ -67,7 +67,16 @@
     map it out of the package instead of unpacking a second copy. The two
     belong together, and a reader who changes one needs to see the other.
   -->
-  <application android:label="OpenMMO"
+  <!--
+    The name and the icon are both resources, not literals, and that is the
+    whole of what makes a rebranded build possible. aapt2 compiles a staged
+    copy of res/ (mmo/tools/apkbrand.py writes it under the build tree), so
+    APK_LABEL rewrites the string this points at and APK_ICON rewrites the art
+    @mipmap/ic_launcher resolves to, without either one touching a tracked
+    file. The defaults are res/values/strings.xml and res/mipmap*, and a build
+    that sets neither knob packages exactly those.
+  -->
+  <application android:label="@string/app_name"
                android:icon="@mipmap/ic_launcher"
                android:roundIcon="@mipmap/ic_launcher"
                android:extractNativeLibs="false"
@@ -93,7 +102,7 @@
          sets the window's mode itself, over the manifest, so the one that
          holds is set in OpenMMOActivity.onCreate after super. -->
     <activity android:name="org.openmmo.handheld.OpenMMOActivity"
-              android:label="OpenMMO"
+              android:label="@string/app_name"
               android:launchMode="singleTask"
               android:exported="true"
               android:screenOrientation="sensorLandscape"

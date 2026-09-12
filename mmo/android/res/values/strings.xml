@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The name a launcher shows under the icon, and the default for it. The
+  manifest points at app_name rather than carrying a literal so that a build
+  can rename itself without editing a tracked file:
+
+      make -f Makefile.android APK_LABEL='Kanto Online' apk
+
+  That knob does not edit this file. mmo/tools/apkbrand.py stages a copy of
+  this whole res tree under the build directory and writes the label into the
+  copy, which is what aapt2 then compiles. Edit this one to move the default.
+
+  Note for anyone editing these comments: a double hyphen cannot appear inside
+  an XML comment. aapt2 rejects the file as "not well-formed (invalid token)"
+  and names only the line the comment starts on.
+-->
+<resources>
+  <string name="app_name">OpenMMO</string>
+</resources>
