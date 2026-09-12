@@ -153,7 +153,7 @@ static void strip_decrypt(u8 *data, u32 bytes)
  * first pair; 0 for a plain sheet, which the engine then decrypts itself. */
 extern int openmmo_contest_scene_up(void);   /* openmmo_contest.c */
 
-int openmmo_sprite_strip_prepare(int slot, int character, void *charDataV, u8 *raw, void *man)
+int openmmo_sprite_strip_prepare(int slot, int narcID, int character, void *charDataV, u8 *raw, void *man)
 {
     NNSG2dCharacterData *cd = charDataV;
     struct strip_state *st;
@@ -166,6 +166,12 @@ int openmmo_sprite_strip_prepare(int slot, int character, void *charDataV, u8 *r
     if (slot < 0 || slot >= MAX_MON_SPRITES || cd == NULL || raw == NULL)
         return 0;
     st = &s_strip[slot];
+    /* Both readers below number a member pl_pokegra's way, six to the species. */
+    if (narcID != NARC_INDEX_POKETOOL__POKEGRA__PL_POKEGRA) {
+        openmmo_spriteframe_composed_set(slot, NULL, 0, 0);
+        st->frames = 0;
+        return 0;
+    }
     /* A contest draws the cartridge's own sheets (openmmo_contest.c): the bytes
      * in `raw` are the ROM's, and the compositor, which never looks at them
      * and would lay Black's loop regardless, has to stay out. */
@@ -306,7 +312,7 @@ int openmmo_sprite_undrawable(unsigned species)
 /*
  * The same question as an answer, for the two sprite-template builders. Species 494 computes
  * member 2964 of an archive with 2964, and the read after it is guarded by one assertion this
- * port used to discard.
+ * port used to discard (mmo/ASSETS.md).
  */
 u16 openmmo_sprite_drawable_species(u16 species)
 {

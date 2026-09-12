@@ -257,9 +257,9 @@
 +             * below and the texture coordinates see the two-frame sheet they expect;
 +             * anything else is decrypted the engine's own way. */
 +            {
-+                extern int openmmo_sprite_strip_prepare(int slot, int character, void *charData, u8 *rawCharData, void *man);
++                extern int openmmo_sprite_strip_prepare(int slot, int narcID, int character, void *charData, u8 *rawCharData, void *man);
 +
-+                if (!openmmo_sprite_strip_prepare(i, monSpriteMan->sprites[i].template.character, charData, rawCharData, monSpriteMan)) {
++                if (!openmmo_sprite_strip_prepare(i, monSpriteMan->sprites[i].template.narcID, monSpriteMan->sprites[i].template.character, charData, rawCharData, monSpriteMan)) {
 +                    PokemonSprite_Decrypt(rawCharData, monSpriteMan->sprites[i].template.narcID);
 +                }
 +            }

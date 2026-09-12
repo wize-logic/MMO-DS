@@ -626,18 +626,21 @@ else
                 "wanted '659 201', got '$got'"
         fi
 
-        # A looks package already filled at 1038..1067, so the two checks below
-        # are about a row that is really there: an absent directory claims
-        # nothing and would pass either way.
+        # A looks package that has already been filled at 1038..1067, so the
+        # two assertions below are about a row that is really there: an absent
+        # directory claims nothing and would pass either way.
         mkdir -p "$tmp/sib/looks/.cooked/narc/data/mmodel/mmodel.narc"
         : > "$tmp/sib/looks/.cooked/narc/data/mmodel/mmodel.narc/1067"
 
-        # The two composed packages are allocated in an order and the looks
-        # fill comes second, so it has to count the follower fill's claims.
-        # Skipping a `looks` row for both callers handed it the follower fill's
-        # own base; both then claimed the same members, the later load won them,
+        # The two composed packages are allocated in an order, and the looks
+        # fill is the one that comes second: it has to count the follower
+        # fill's claims. Skipping a `looks` row for both callers, right for
+        # the follower fill, which must not chase a base that moves when it
+        # moves, handed the looks fill the follower fill's own base. Both
+        # then claimed mmodel 470..499, the later load won every one of them,
         # and the field died on the first billboard whose sequence asked the
-        # substituted body for a texture it does not carry.
+        # substituted body for a texture it does not carry, for every player
+        # who had given us a Heart Gold.
         got=$("$BUILD/openmmo-launch" --follower-base "$tmp/sib" "other,followers,looks" looks)
         if [ "$got" = "1038 201" ]; then
             ok "the looks fill allocates past the follower fill, not onto it"
@@ -1764,7 +1767,7 @@ else
             elif [ "$(fields "$van")" = "$(fields "$tr_file")" ] \
                     && [ "$(wc -c < "$van")" != "$(wc -c < "$tr_file")" ]; then
                 ok "same NCGR magic, section and 4bpp dims as the trainer it covers"
-                ok " and a different sheet size, $(wc -c < "$van" | tr -d ' ') bytes covered by $(wc -c < "$tr_file" | tr -d ' ')"
+                ok "  and a different sheet size, $(wc -c < "$van" | tr -d ' ') bytes covered by $(wc -c < "$tr_file" | tr -d ' ')"
             else
                 bad "same NCGR magic, section and 4bpp dims as the trainer it covers"
                 xxd -l 32 "$van"; xxd -l 32 "$tr_file"
@@ -1832,7 +1835,7 @@ else
     n5=$(sed -n "s/.*has \([0-9][0-9]*\) members;.*/\1/p" "$tmp/g5count.log")
     if [ "${n5:-0}" -gt 0 ] && [ $((n5 % 6)) -ne 0 ]; then
         ok "$GEN5_NARC holds $n5 members, which is not a whole number of the"
-        ok " six a species occupies here, species*6+face addresses nothing"
+        ok "  six a species occupies here, species*6+face addresses nothing"
     else
         bad "the Gen 5 archive's count is read, and is not a multiple of six"
         cat "$tmp/g5count.log"
@@ -1898,6 +1901,35 @@ elif python3 "$ROOT/tools/blackanim_diff.py" --rom "$SRC5" --engine "$ENGINE" \
 else
     bad "the plugin's live compositor draws what the tool's compose() draws"
     tail -4 "$tmp/animdiff.log"
+fi
+
+# Which archive a member number belongs to.
+OTHERPOKE_SPECIES=201,351,386,412,413,421,422,423,479,487,492,493,494,495
+if [ ! -x "$FUSED" ] || [ ! -f "$ROM" ]; then
+    echo "  SKIP (no fused build or no ROM to draw pl_otherpoke through)"
+elif [ ! -s "$ANIM_NARC/2340" ]; then
+    # Without the fill there is nothing to be confused by: the two runs would
+    # agree because neither mounted anything, which is a pass that proves
+    # nothing. Say so rather than bank it.
+    echo "  SKIP (no fill to mount: python3 mmo/tools/portspecies.py --rom <black>)"
+else
+    for _w in on off; do
+        [ "$_w" = on ] && _m="PC_MODS_DIR=$ROOT/mods PC_MODS=imports" || _m=""
+        # shellcheck disable=SC2086
+        env $_m PC_ROM="$ROM" PC_SAVE="$tmp/other-$_w.sav" PC_FRAMES=4 PC_PACE=0 \
+            PC_LAB_SPRITE="$OTHERPOKE_SPECIES" PC_LAB_SPRITE_AT=1 \
+            "$FUSED" > "$tmp/other-$_w.log" 2>&1 || true
+        grep -E "^pc_lab: sprite species=" "$tmp/other-$_w.log" > "$tmp/other-$_w.txt" || true
+    done
+    if [ ! -s "$tmp/other-on.txt" ]; then
+        bad "the sprite lab drew pl_otherpoke"
+        tail -3 "$tmp/other-on.log"
+    elif cmp -s "$tmp/other-on.txt" "$tmp/other-off.txt"; then
+        ok "every pl_otherpoke page is the cartridge's own, fill mounted or not"
+    else
+        bad "every pl_otherpoke page is the cartridge's own, fill mounted or not"
+        diff "$tmp/other-off.txt" "$tmp/other-on.txt" | head -6
+    fi
 fi
 
 if [ "$fail" -ne 0 ]; then
