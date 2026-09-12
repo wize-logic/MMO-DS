@@ -32,6 +32,7 @@
 #include "generated/map_headers.h"      /* MAP_HEADER_UNDERGROUND */
 #include "generated/movement_actions.h" /* enum MovementAction */
 #include "generated/movement_types.h"   /* MOVEMENT_TYPE_NONE */
+#include "constants/field/map.h"        /* MAP_OBJECT_TILE_SIZE */
 #include "constants/map_object.h"       /* DIR_* */
 #include "constants/player_avatar.h"    /* PLAYER_AVATAR_WALKING/SURFING */
 #include "generated/object_events_gfx.h" /* OBJ_EVENT_GFX_* for the appearance probe */
@@ -1892,6 +1893,82 @@ int openmmo_remap_movement(void *playerAvatar, int movementAction)
     return movementAction;
 }
 
+/* Why a step was refused, when "there is a wall there" is not the answer. */
+static void report_blocked_step(PlayerAvatar *av, int dir, int always)
+{
+    static int last_x = -1, last_z = -1, last_refused = -1;
+    const MapObjectManager *man;
+    MapObject *obj;
+    FieldSystem *fs;
+    VecFx32 pos;
+    int x, z, d, surfing, refused = 0, explained = 0;
+
+    obj = av != NULL ? PlayerAvatar_GetMapObject(av) : NULL;
+    fs = obj != NULL ? MapObject_FieldSystem(obj) : NULL;
+    if (fs == NULL)
+        return;
+
+    x = PlayerAvatar_GetXPos(av);
+    z = PlayerAvatar_GetZPos(av);
+
+    surfing = PlayerAvatar_GetPlayerState(av) == PLAYER_AVATAR_SURFING;
+    for (d = DIR_NORTH; d <= DIR_EAST; d++) {
+        int tx = x + MapObject_GetDxFromDir(d);
+        int tz = z + MapObject_GetDzFromDir(d);
+        u32 c = PlayerAvatar_CheckCollision(av, obj, d);
+
+        /* A ledge and a distortion gap are steps, not refusals, and the
+         * water under a surfer is the surface they are on. */
+        if (c & (PLAYER_COLLISION_JUMP | PLAYER_COLLISION_JUMP_TWICE))
+            continue;
+        if (surfing && (c & ~(u32)PLAYER_COLLISION_WATER) == 0)
+            continue;
+        if (c == PLAYER_COLLISION_NONE)
+            continue;
+
+        refused |= 1 << d;
+        /* Refused for something the player can see: a wall, a shoreline, or
+         * a door the server is about to take them through. */
+        if (TerrainCollisionManager_CheckCollision(fs, tx, tz) == TRUE
+            || (c & (PLAYER_COLLISION_WATER | PLAYER_COLLISION_WARP)))
+            explained |= 1 << d;
+    }
+
+    /* Every refusal has something behind it the player can see, and there is
+     * a way off the tile: this is the game working. */
+    if (!always && refused == explained && refused != 0x0f)
+        return;
+    if (!always && x == last_x && z == last_z && refused == last_refused)
+        return;
+    last_x = x;
+    last_z = z;
+    last_refused = refused;
+
+    man = MapObject_MapObjectManager(obj);
+    MapObject_GetPosPtr(obj, &pos);
+    printf("openmmo: refused on header %d at (%d,%d) dir %d: refused %x, of"
+           " which %x is in plain sight; standing at height %d (elevation"
+           " %d)\n",
+           fs->location != NULL ? (int)fs->location->mapHeaderID : -1,
+           x, z, dir, refused, explained, (int)(pos.y / FX32_ONE),
+           MapObject_GetY(obj));
+    for (d = DIR_NORTH; d <= DIR_EAST; d++) {
+        int tx = x + MapObject_GetDxFromDir(d);
+        int tz = z + MapObject_GetDzFromDir(d);
+        MapObject *on = man != NULL ? sub_0206326C(man, tx, tz, 1) : NULL;
+        u8 src = CALCULATED_HEIGHT_SOURCE_NONE;
+        fx32 ground = TerrainCollisionManager_GetHeight(
+            fs, pos.y, tx * MAP_OBJECT_TILE_SIZE + MAP_OBJECT_TILE_SIZE / 2,
+            tz * MAP_OBJECT_TILE_SIZE + MAP_OBJECT_TILE_SIZE / 2, &src);
+
+        printf("openmmo:   dir %d (%d,%d) behaviour 0x%02x ground %d from %d%s\n",
+               d, tx, tz, TerrainCollisionManager_GetTileBehavior(fs, tx, tz),
+               (int)(ground / FX32_ONE), src,
+               (on != NULL && on != obj) ? ", an object stands there" : "");
+    }
+    fflush(stdout);
+}
+
 void openmmo_player_set_movement(void *playerAvatar, void *mapObj, int movementAction,
                                  int speed)
 {
@@ -1973,6 +2050,13 @@ void openmmo_player_set_movement(void *playerAvatar, void *mapObj, int movementA
             return;
         }
         printf("openmmo: face dir %d at (%d,%d)\n", dir, x, z);
+        /* A refusal the geometry does not explain, or a tile with no way off
+         * it: say so once, with the three things only the engine knows. The
+         * SLOW variant on this range is the wall bump; FASTER is a turn. */
+        if (movementAction >= MOVEMENT_ACTION_WALK_ON_SPOT_SLOW_NORTH
+            && movementAction <= MOVEMENT_ACTION_WALK_ON_SPOT_SLOW_EAST)
+            report_blocked_step(av, dir,
+                                getenv("OPENMMO_INTERACT_REPORT") != NULL);
         /* OPENMMO_INTERACT_REPORT=1: what the tile underfoot and the one
          * faced are, for a warp that did not fire (a stair the engine's
          * transition table does not know is one that reads as a wall). */
@@ -3482,12 +3566,19 @@ static void snap_avatar(FieldSystem *fs, int x, int z, int dir)
         PlayerAvatar_SetPosDirFromCoords(fs->playerAvatar, x, z, dir);
         if (have) {
             VecFx32 pos;
+            int settled;
 
             MapObject_GetPosPtr(obj, &pos);
             pos.y = kept.y;
             MapObject_SetPos(obj, &pos);
             MapObject_SetY(obj, ((kept.y) >> 3) / FX32_ONE);
-            MapObject_RecalculateObjectHeight(obj);
+            settled = MapObject_RecalculateObjectHeight(obj);
+            /* What the terrain made of the height we carried over. */
+            MapObject_GetPosPtr(obj, &pos);
+            printf("openmmo: the correction carried height %d, the terrain %s"
+                   " %d\n", (int)(kept.y / FX32_ONE),
+                   settled ? "put it at" : "could not answer so it stands at",
+                   (int)(pos.y / FX32_ONE));
         }
     }
     if (fs->location != NULL) {
