@@ -186,6 +186,28 @@ windows_pin_host() {
     fi
 }
 
+# Whether the BUILD that just ran left the working BUILD'S screens in, read
+# out of the pin header it generated rather than assumed from this run's
+# RELEASE.
+check_dev_features() {  # check_dev_features <host>
+    local pin dev
+    pin="$(build_dir "$1")/gen/endpoint_pin.h"
+    if [[ ! -f "$pin" ]]; then
+        bad "the $1 build left no $pin, so what it compiled cannot be checked"
+        return 1
+    fi
+    dev="$(sed -n 's/^#define OPENMMO_PIN_DEV_FEATURES  *\([0-9]*\)$/\1/p' \
+           "$pin" | head -1)"
+    if [[ "$dev" != 0 ]]; then
+        bad "the $1 build compiled DEV_FEATURES=${dev:-<unset>}: this release"
+        bad "would carry the working build's screens, the Pokegear button,"
+        bad "the Johto & Kanto trainer card and the PC menu's TRAVEL row."
+        bad "Its make was not given RELEASE=1 (mmo/dist.sh, build_host)."
+        return 1
+    fi
+    return 0
+}
+
 # The address on the interface that carries the default route, the one a
 # machine off this host reaches, and under WSL the one Windows reaches. A hint
 # for the message below, not a decision: a real release wants a name.
@@ -202,13 +224,14 @@ reachable_hint() {
 # default is the working tree.
 build_dir() {  # build_dir <host>
     local d="$ROOT/build"
-    # Android has one build tree, not a release/debug pair. Makefile.android
-    # sets its own BUILD and every APK it makes is stripped on the way into
-    # the package anyway (the unstripped library is 48 MB of debug info no
-    # phone can use), so the -release suffix would name a directory that does
-    # not exist.
+    # Android names its own tree rather than taking the suffix below, because
+    # Makefile.android's BUILD is build/android with the suffix after the host
+    # and not before it. It is a release/debug pair like the other two: this
+    # said it was not for a while, and the android make was then left without
+    # RELEASE to match, which is how a release APK came to carry the working
+    # build's Pokegear button (see build_host).
     if [[ "$1" == android ]]; then
-        printf '%s' "$d/android"
+        printf '%s' "$d/android$([[ "$RELEASE" -eq 1 ]] && printf -- -release)"
         return
     fi
     [[ "$1" == windows ]] && d="$d/win"
@@ -243,10 +266,19 @@ build_host() {  # build_host <host>
         # any other), compare it with the revision this APK was built at, and
         # if it is behind fetch the one .apk the channel lists, prove it
         # against the signed inventory, and hand it to the installer
-        #. The update must be signed by
+        # (mmo/FEED.md, "the android channel"). The update must be signed by
         # the same key as the installed app: the release key, never the
         # debug one (Makefile.android, "the release key").
-        android) make -C "$ROOT" -f Makefile.android -j"$JOBS" "${pin[@]}" \
+        #
+        # RELEASE, for the same reason the other two get it, and it was
+        # missing here. Without it Makefile.android falls back to RELEASE=0
+        # and so to DEV_FEATURES=1, and every published APK carried the
+        # screens a release is supposed to have none of, the Pokegear
+        # button on the HUD bar, the Johto & Kanto trainer card, and the
+        # TRAVEL row on the PC menu (mmo/Makefile, DEV_FEATURES). It also
+        # compiled the client at the working build's -O1 -g.
+        android) make -C "$ROOT" -f Makefile.android -j"$JOBS" \
+                      RELEASE=$RELEASE "${pin[@]}" \
                       FEED_URL="$feed_url" FEED_KEY="$feed_key" apk;;
     esac
 }
@@ -540,7 +572,7 @@ if [[ "$BUILD" -eq 1 ]]; then
     elif [[ -n "$SERVER_HOST" ]]; then
         say "  server $SERVER_HOST (compiled in, no setting for it)"
     else
-        say " server: mmo/Makefile's SERVER_HOST, set it here for a release"
+        say "  server: mmo/Makefile's SERVER_HOST, set it here for a release"
     fi
 
     # The other half of the same fact, and the one with no symptom until a
@@ -663,6 +695,14 @@ for host in "${HOSTS[@]}"; do
             fails=$((fails + 1))
             continue
         fi
+    fi
+
+    # Outside the build guard on purpose: --no-build zips a tree this run did
+    # not compile, which is the quieter half of the same hand-off the windows
+    # address guard exists for.
+    if [[ "$RELEASE" -eq 1 ]] && ! check_dev_features "$host"; then
+        fails=$((fails + 1))
+        continue
     fi
 
     # The APK is already the package. package.sh's whole job is to gather
