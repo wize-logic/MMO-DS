@@ -783,28 +783,45 @@ static int narc_high(const char *pkg, const char *archive)
     return high;
 }
 
+/* Whether this row of the list is that package, whole row only. */
+static int row_is(const char *at, size_t len, const char *name)
+{
+    return len == strlen(name) && strncmp(at, name, len) == 0;
+}
+
 /*
  * The base for one archive, over a comma-separated list of sibling packages. `floor` is what
  * the built image itself holds, which is where an append starts when nothing else has claimed
- * anything.
+ * anything. `self` is the package being allocated, and it decides which rows are skipped.
  */
 int mmo_followcompose_base(const char *root, const char *others,
-                           const char *archive, int floor_count)
+                           const char *archive, int floor_count,
+                           const char *self)
 {
     const char *at = others;
     int base = floor_count;
+
+    if (self == NULL)
+        self = "followers";
 
     while (at != NULL && *at != '\0') {
         const char *end = strchr(at, ',');
         size_t len = end != NULL ? (size_t)(end - at) : strlen(at);
         char pkg[1024];
         int high;
+        int skip;
 
-        /* Two rows are skipped: this package's own, and `looks`, which is
-         * allocated after this one against its claims, reading it here
-         * would have the two chase each other's bases on every Play. */
-        if (len > 0 && !(len == 9 && strncmp(at, "followers", 9) == 0)
-            && !(len == 5 && strncmp(at, "looks", 5) == 0)) {
+        /* This package's own row always, and `looks` when the follower fill is
+         * asking, because that one is allocated after it and against its
+         * claims. Skipping `looks` for both callers handed the looks fill the
+         * follower fill's own base: the two then claimed the same members, the
+         * later load won them, and the field died on the first billboard whose
+         * sequence asked the substituted body for a texture it does not carry.
+         * The looks fill counts `followers` precisely because it comes second. */
+        skip = row_is(at, len, self)
+               || (row_is(at, len, "looks") && strcmp(self, "followers") == 0);
+
+        if (len > 0 && !skip) {
             snprintf(pkg, sizeof pkg, "%s%s%.*s", root, mmo_plat_sep(),
                      (int)len, at);
             high = narc_high(pkg, archive);
@@ -1160,9 +1177,11 @@ int mmo_followcompose_ensure(const mmo_launch_settings *s,
      */
     mmo_launch_mods_list(s, root, others, sizeof others);
     mmodel_first = mmo_followcompose_base(root, others,
-                                          "data/mmodel/mmodel.narc", 470);
+                                          "data/mmodel/mmodel.narc", 470,
+                                          "followers");
     emote_at = mmo_followcompose_base(root, others,
-                                      "data/mmodel/fldeff.narc", 201);
+                                      "data/mmodel/fldeff.narc", 201,
+                                      "followers");
 
     /* The BASE is in the STAMP, so a player who adds a package that appends
      * to the same archive gets the follower package refilled around it rather

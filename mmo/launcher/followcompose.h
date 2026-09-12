@@ -12,10 +12,17 @@ int mmo_followcompose(const char *rom, const char *pkg,
 
 /* One archive's base over a comma-separated package list: one past the
  * highest member any of them claims, or `floor_count` when none does. `root`
- * is the folder those packages live in; a `followers` row is skipped, since
- * this package cannot allocate around itself. */
+ * is the folder those packages live in, and `self` is the package being
+ * allocated: its own row is skipped, since nothing allocates around itself.
+ *
+ * Both composed packages ask here, and which rows are skipped depends on who
+ * is asking. The two fills are ordered: `followers` allocates first and does
+ * not see `looks`, `looks` allocates second and counts `followers`. That keeps
+ * them off each other's members without the two chasing each other's base on
+ * every Play. */
 int mmo_followcompose_base(const char *root, const char *others,
-                           const char *archive, int floor_count);
+                           const char *archive, int floor_count,
+                           const char *self);
 
 /*
  * The Play-time half: the follower package exists under the install's mods folder with the

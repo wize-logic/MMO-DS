@@ -1389,7 +1389,8 @@ static int lc_dir_exists(const char *path)
  * rounded up to the next whole class. */
 static int class_base_of(const char *root, const char *others, const char *archive, int floor_count)
 {
-    int member = mmo_followcompose_base(root, others, archive, floor_count * CLASS_FILES);
+    int member = mmo_followcompose_base(root, others, archive,
+                                        floor_count * CLASS_FILES, "looks");
 
     return (member + CLASS_FILES - 1) / CLASS_FILES;
 }
@@ -1420,7 +1421,8 @@ int mmo_lookcompose_ensure(const mmo_launch_settings *s, const char *port_exe,
      * fill has allocated its own (the launcher asks in that order, and
      * followcompose skips a `looks` row so the two never chase each other). */
     mmo_launch_mods_list(s, root, others, sizeof others);
-    mmodel_first = mmo_followcompose_base(root, others, "data/mmodel/mmodel.narc", PT_MMODEL_COUNT);
+    mmodel_first = mmo_followcompose_base(root, others, "data/mmodel/mmodel.narc",
+                                          PT_MMODEL_COUNT, "looks");
     class_first = class_base_of(root, others, "poketool/trgra/trfgra.narc", PT_CLASS_COUNT);
     back_first = class_base_of(root, others, "poketool/trgra/trbgra.narc", PT_BACK_COUNT);
 

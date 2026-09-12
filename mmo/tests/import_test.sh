@@ -625,6 +625,35 @@ else
             bad "and a refill does not allocate around its own last fill" \
                 "wanted '659 201', got '$got'"
         fi
+
+        # A looks package already filled at 1038..1067, so the two checks below
+        # are about a row that is really there: an absent directory claims
+        # nothing and would pass either way.
+        mkdir -p "$tmp/sib/looks/.cooked/narc/data/mmodel/mmodel.narc"
+        : > "$tmp/sib/looks/.cooked/narc/data/mmodel/mmodel.narc/1067"
+
+        # The two composed packages are allocated in an order and the looks
+        # fill comes second, so it has to count the follower fill's claims.
+        # Skipping a `looks` row for both callers handed it the follower fill's
+        # own base; both then claimed the same members, the later load won them,
+        # and the field died on the first billboard whose sequence asked the
+        # substituted body for a texture it does not carry.
+        got=$("$BUILD/openmmo-launch" --follower-base "$tmp/sib" "other,followers,looks" looks)
+        if [ "$got" = "1038 201" ]; then
+            ok "the looks fill allocates past the follower fill, not onto it"
+        else
+            bad "the looks fill allocates past the follower fill, not onto it" \
+                "wanted '1038 201', got '$got'"
+        fi
+        # And the order holds from the other side: the follower fill's answer
+        # does not move when a looks package is sitting there.
+        got=$("$BUILD/openmmo-launch" --follower-base "$tmp/sib" "other,followers,looks" followers)
+        if [ "$got" = "659 201" ]; then
+            ok "and the follower fill still does not chase the looks fill"
+        else
+            bad "and the follower fill still does not chase the looks fill" \
+                "wanted '659 201', got '$got'"
+        fi
     fi
 
     # A REFILL AT A new BASE leaves nothing of the old one. This is the bug the

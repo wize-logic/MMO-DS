@@ -1537,12 +1537,18 @@ int main(int argc, char **argv)
         } else if (strcmp(a, "--follower-base") == 0 && i + 2 < argc) {
             /* the allocator alone: mods-root package,list -> the two bases it
              * would fill at. What the test asserts, and what makes the number
-             * in composed.txt checkable without a cartridge. */
+             * in composed.txt checkable without a cartridge. A third argument
+             * asks as that package rather than as the follower fill, which is
+             * how the test holds the two fills apart: they are allocated in an
+             * order and `looks` is the one that has to count `followers`. */
+            const char *self = (i + 3 < argc && argv[i + 3][0] != '-')
+                               ? argv[i + 3] : "followers";
+
             printf("%d %d\n",
                    mmo_followcompose_base(argv[i + 1], argv[i + 2],
-                                          "data/mmodel/mmodel.narc", 470),
+                                          "data/mmodel/mmodel.narc", 470, self),
                    mmo_followcompose_base(argv[i + 1], argv[i + 2],
-                                          "data/mmodel/fldeff.narc", 201));
+                                          "data/mmodel/fldeff.narc", 201, self));
             return 0;
         } else if (strcmp(a, "--check-species") == 0 && i + 2 < argc) {
             /* The shared-range oracle alone, for the test that holds this
