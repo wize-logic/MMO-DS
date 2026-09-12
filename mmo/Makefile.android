@@ -276,7 +276,13 @@ APPOBJS  := $(APPOBJ)/mmo_android_main.o $(APPOBJ)/android_native_app_glue.o \
 # broker or the mailbox read a garbage rectangle and a garbage row count and
 # took the game down on the spot. The desktop build never saw it, because
 # mmo/Makefile has had these two flags all along.
-APPCFLAGS := $(ABI) $(OPT) -std=gnu99 -Wall -MMD -MP -I$(APPGLUE) \
+# VIEWOPT AND NOT `OPT`, which is the engine's knob name (pc/Makefile) and is
+# defined nowhere on this side: every object built with these flags and with
+# VIEWCFLAGS below, the app glue, the shim, the front door and the whole
+# window, was compiled with no -O at all, on the device with the least to
+# spare. VIEWOPT is what mmo/Makefile picks per build and what Makefile.win
+# uses for the same objects.
+APPCFLAGS := $(ABI) $(VIEWOPT) -std=gnu99 -Wall -MMD -MP -I$(APPGLUE) \
              -I$(NROOT)/include -I$(NROOT)/android/sdlshim
 
 # ---------------------------------------------------- the desktop viewer
@@ -309,7 +315,7 @@ VIEWOBJS := $(VIEWSRCS:%.c=$(VIEWOBJ)/%.o) $(VIEWOBJ)/view_font_noto.o \
 # The endpoint pin is on the viewer's path since the bar started reading
 # DEV_FEATURES out of it (view_ui_game.h); this build's gen/ holds one pin
 # of each kind and nothing else, so the directory is safe to name here.
-VIEWCFLAGS := $(ABI) $(OPT) -std=gnu99 -Wall -MMD -MP \
+VIEWCFLAGS := $(ABI) $(VIEWOPT) -std=gnu99 -Wall -MMD -MP \
               -I$(NROOT)/android/sdlshim -I$(NROOT)/include \
               -I$(NROOT)/viewer -I$(FT_ANDROID)/include/freetype2 \
               -I$(dir $(PIN))
