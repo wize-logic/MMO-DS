@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The name a launcher shows under the icon, and the default for it. The
+  THE NAME A LAUNCHER SHOWS UNDER THE ICON, and the default for it. The
   manifest points at app_name rather than carrying a literal so that a build
   can rename itself without editing a tracked file:
 
@@ -8,12 +8,18 @@
 
   That knob does not edit this file. mmo/tools/apkbrand.py stages a copy of
   this whole res tree under the build directory and writes the label into the
-  copy, which is what aapt2 then compiles. Edit this one to move the default.
+  copy, which is what aapt2 then compiles.
 
-  Note for anyone editing these comments: a double hyphen cannot appear inside
+  SO THIS VALUE IS NEVER THE ONE THAT SHIPS. Makefile.android always passes
+  a label, and its APK_LABEL default is the shipped name, so the string below
+  is only what this tree would say if it were compiled on its own. It is kept
+  equal to that default on purpose: two spellings of the app's name in one
+  repository is how a build comes out named something nobody chose.
+
+  NOTE FOR ANYONE EDITING THESE COMMENTS: a double hyphen cannot appear inside
   an XML comment. aapt2 rejects the file as "not well-formed (invalid token)"
   and names only the line the comment starts on.
 -->
 <resources>
-  <string name="app_name">OpenMMO</string>
+  <string name="app_name">Platinum Online</string>
 </resources>

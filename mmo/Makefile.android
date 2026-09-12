@@ -519,36 +519,62 @@ TARGET_SDK ?= 35
 
 # ------------------------------------------------------- name and icon
 #
-# The two things a rebranded build has to change, and until these knobs they
+# THE TWO THINGS A REBRANDED BUILD HAS TO CHANGE, and until these knobs they
 # were a literal in the manifest and fifteen tracked PNGs:
 #
 #   make -f Makefile.android APK_LABEL='Kanto Online' APK_ICON=~/kanto.png apk
 #
-# Neither writes a tracked file. tools/apkbrand.py stages a copy of
-# android/res under $(BUILD)/gen/res, writes the label into it as a string
-# resource and regenerates the icon at every density, and aapt2 compiles the
-# staged tree. With neither variable set the staged tree is the committed one,
-# so the default build packages exactly what it packaged before.
+# tools/apkbrand.py stages a copy of android/res under $(BUILD)/gen/res,
+# writes the label into it as a string resource and regenerates the icon at
+# every density, and aapt2 compiles the staged tree. Nothing here writes a
+# tracked file, so building with a knob set either way leaves the tree clean.
 #
-# APK_ICON is one square image and the script cuts it three ways, because an
+# APK_ICON IS ONE SQUARE IMAGE and the script cuts it three ways, because an
 # adaptive icon is a background layer and a foreground layer and only the
-# middle two thirds of either survives a launcher's mask. The reasoning is at
-# the top of the script.
+# middle two thirds of either survives a launcher's mask. The reasoning is
+# written out at the top of the script; the short version is that handing over
+# one logo should not get its corners bitten off by a round mask.
 #
-# No leading # on the colour: a `#` starts a comment in a makefile, so
-# `APK_ICON_BG ?= #191F28` would silently set it empty and every icon would
-# come out on a transparent ground. The script takes it either way. 191F28 is
-# the ground the committed icon already uses; a path to an image works too.
+# NO LEADING # ON THE COLOUR. A `#` starts a comment in a makefile, so
+# `APK_ICON_BG ?= #FFFFFF` would silently set it EMPTY and every icon would
+# come out on a transparent ground. The script takes it with or without. A
+# path to an image works here too.
 #
-# The application id is not here, on purpose: org.openmmo.handheld is the
+# THE DEFAULTS ARE THE SHIPPED BRAND, not the bare engine's, and that is
+# deliberate. dist.sh builds the published APK through this makefile without
+# passing either knob, so a default of OpenMMO plus the committed art would
+# mean the only way to ship the real name and the real icon was for one
+# script to remember to say so, and a hand build, an emulator run and the
+# published app would then be three different-looking apps. The name and the
+# mark live here instead, once, and the knobs above still override them for
+# anybody cutting a differently branded build.
+#
+# THE ICON IS THE SITE'S FAVICON, by path rather than by a copy under
+# android/res. web/public/icon-512.png is the same bytes the site serves
+# inside favicon.svg (which is that PNG wrapped in an <image> element), so
+# pointing at it is what keeps the app's icon and the site's tab icon the
+# same mark: redrawing the favicon redraws the app. A copy would go stale the
+# first time the site's did not. The committed android/res/mipmap art stays
+# as the tree's own fallback, apkbrand overwrites it in the staged copy and
+# never touches the tracked files, and if the path here ever goes missing
+# the script stops the build and names it rather than quietly shipping the
+# old mark under the new name.
+#
+# WHITE, NOT THE MARK'S OWN GROUND. The favicon is a dark rounded square with
+# the band cut out of it, drawn to sit on a page; an adaptive icon puts the
+# foreground inside the middle two thirds and the launcher masks the rest, so
+# the ground is what fills the corners a mask keeps. White is the ask and it
+# is also the one that leaves the dark mark readable on any wallpaper.
+#
+# THE APPLICATION ID IS NOT HERE, on purpose: org.openmmo.handheld is the
 # identity Android files the save directory under and the one the installer
 # and the update channel match against, so renaming it makes a build that
-# installs beside the old one and can never receive an update meant for it.
+# installs BESIDE the old one and can never receive an update meant for it.
 # That is a distribution decision, not a branding one; aapt2's
 # --rename-manifest-package is the flag for anyone taking it deliberately.
-APK_LABEL   ?= OpenMMO
-APK_ICON    ?=
-APK_ICON_BG ?= 191F28
+APK_LABEL   ?= Platinum Online
+APK_ICON    ?= $(NROOT)/../web/public/icon-512.png
+APK_ICON_BG ?= FFFFFF
 
 APK      := $(BUILD)/openmmo.apk
 APKSTAGE := $(BUILD)/apk
